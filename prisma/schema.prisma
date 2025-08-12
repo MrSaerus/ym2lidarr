@@ -1,0 +1,163 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL") // e.g. file:./data/app.db
+}
+
+model Setting {
+  id Int @id @default(1)
+
+  // планировщик синков
+  yandexCron      String?
+  lidarrCron      String?
+
+  // backup
+  backupEnabled   Boolean @default(false)
+  backupCron      String? // например "0 3 * * *"
+  backupRetention Int?    @default(14) // хранить N последних файлов
+  backupDir       String? // по умолчанию /app/data/backups
+
+  // notifications
+  notifyType      String? // 'none' | 'telegram' | 'webhook'
+  telegramBot     String?
+  telegramChatId  String?
+  webhookUrl      String?
+  webhookSecret   String?
+
+  // yandex driver
+  yandexDriver    String? @default("pyproxy") // 'pyproxy' | 'native'
+  pyproxyUrl      String? // если нужно отличать от env
+
+  // tokens & endpoints
+  yandexToken  String?
+  lidarrUrl    String?
+  lidarrApiKey String?
+
+  // behaviour (enums → strings)
+  mode         String  @default("artists") // "artists" | "albums"
+  pushTarget   String  @default("artists") // "artists" | "albums"
+  enableExport Boolean @default(true)
+  enablePush   Boolean @default(false)
+  exportPath   String?
+
+  // Lidarr defaults
+  rootFolderPath    String?
+  qualityProfileId  Int?
+  metadataProfileId Int?
+  monitor           String?
+
+  // schedules (CRON)
+  cronYandex String @default("0 */6 * * *")
+  cronLidarr String @default("0 3 * * *")
+
+  // timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Artist {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique
+  name        String
+  mbid        String?
+  matched     Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // NEW:
+  mbCheckedAt DateTime?
+  mbAttempts  Int       @default(0)
+
+  candidates  ArtistCandidate[]
+}
+
+model ArtistCandidate {
+  id        Int     @id @default(autoincrement())
+  artistId  Int
+  mbid      String
+  name      String
+  score     Int?
+  type      String? // Group/Person
+  country   String?
+  url       String?
+  highlight Boolean @default(false)
+
+  Artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+
+  @@index([artistId])
+}
+
+model Album {
+  id              Int       @id @default(autoincrement())
+  key             String    @unique
+  artist          String
+  title           String
+  year            Int?
+  rgMbid          String?
+  matched         Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // NEW:
+  mbCheckedAt     DateTime?
+  mbAttempts      Int       @default(0)
+
+  candidates      AlbumCandidate[]
+}
+
+model AlbumCandidate {
+  id               Int     @id @default(autoincrement())
+  albumId          Int
+  rgMbid           String
+  title            String
+  primaryType      String?
+  firstReleaseDate String?
+  primaryArtist    String?
+  score            Int?
+  url              String?
+  highlight        Boolean @default(false)
+
+  Album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@index([albumId])
+}
+
+model CacheEntry {
+  id        Int      @id @default(autoincrement())
+  scope     String // 'artist' | 'album'
+  key       String   @unique // normalized cache key (e.g. "artist:<norm>" / "album:<norm>")
+  payload   String // JSON string (was Json)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SyncRun {
+  id         Int       @id @default(autoincrement())
+  kind       String // 'yandex' | 'lidarr' | 'export'
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String // 'running' | 'ok' | 'error'
+  stats      String? // JSON string
+  message    String?
+
+  // <-- добавили обратную связь
+  logs SyncLog[]
+}
+
+model SyncLog {
+  id      Int      @id @default(autoincrement())
+  runId   Int
+  ts      DateTime @default(now())
+  level   String // 'info' | 'warn' | 'error' | 'debug'
+  message String
+  data    String? // JSON string (optional)
+
+  run SyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, ts])
+}

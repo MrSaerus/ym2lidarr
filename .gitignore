@@ -1,0 +1,31 @@
+# node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+*.tsbuildinfo
+
+# build artifacts
+apps/**/dist/
+apps/web/.next/
+apps/web/out/
+apps/pyproxy/.venv
+apps/pyproxy/__pycache__
+
+# env
+.env
+.env.*.local
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# sqlite runtime files
+data/
+prisma/data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+backups/
