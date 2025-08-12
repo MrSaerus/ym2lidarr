@@ -1,28 +1,35 @@
 import { Router } from 'express';
-import fs from 'fs';
+import path from 'path';
 
 import { prisma } from '../prisma';
-import { runBackup } from '../scheduler';
+import { runBackupNow, listBackups } from '../scheduler';
 
 const r = Router();
 
-r.post('/run', async (_req, res) => {
-  runBackup().catch(() => {});
-  res.json({ started: true });
+/** GET /api/backup/list — список бэкапов */
+r.get('/list', async (_req, res) => {
+  const s = await prisma.setting.findFirst();
+  const dir = s?.backupDir || '/app/data/backups';
+  const files = listBackups(dir);
+  res.json({ ok: true, dir, files });
 });
 
-r.get('/list', async (_req, res) => {
-  const s = await prisma.setting.findFirst({ where: { id: 1 } });
-  const dir = s?.backupDir || '/app/data/backups';
-  try {
-    const files = (await fs.promises.readdir(dir))
-      .filter((f) => f.startsWith('app-') && f.endsWith('.db'))
-      .sort()
-      .reverse();
-    res.json({ dir, files });
-  } catch {
-    res.json({ dir, files: [] });
+/** POST /api/backup/run — выполнить бэкап сейчас */
+r.post('/run', async (_req, res) => {
+  const result = await runBackupNow();
+
+  if (!result.ok) {
+    // Подберём статус: disabled → 400; всё остальное → 500
+    const status =
+        result.error && /disabled/i.test(result.error) ? 400 : 500;
+    return res.status(status).json(result);
   }
+
+  const s = await prisma.setting.findFirst();
+  const dir = s?.backupDir || '/app/data/backups';
+  const abs = result.file ? path.join(dir, result.file) : undefined;
+
+  res.json({ ...result, path: abs });
 });
 
 export default r;

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
+import { useRouter } from 'next/router';
 
 type Settings = {
   // Yandex
@@ -40,6 +41,7 @@ type YandexTestResp = {
 type LidarrTestResp = { ok: boolean; status?: number; data?: any; error?: string };
 type BackupList = { dir: string; files: string[] };
 
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
 const emptySettings: Settings = {
   // Yandex
   yandexToken: '',
@@ -73,6 +75,27 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [, setBackup] = useState<BackupList | null>(null);
   const [busyBackup, setBusyBackup] = useState(false);
+  const router = useRouter();
+  const [runningBackup, setRunningBackup] = useState(false);
+
+  const runBackup = useCallback(async () => {
+    setRunningBackup(true);
+    try {
+      const r = await api<{ ok: boolean; file?: string; path?: string; error?: string }>(
+          '/api/backup/run',
+          { method: 'POST' }
+      );
+      if (!r.ok) {
+        throw new Error(r.error || 'Backup failed');
+      }
+      // покажем простой тост/алерт; при желании замени на свой UI
+      alert(`Backup created: ${r.path || r.file}`);
+    } catch (e: any) {
+      alert(`Backup error: ${e?.message || String(e)}`);
+    } finally {
+      setRunningBackup(false);
+    }
+  }, []);
 
   function upd<K extends keyof Settings>(k: K, v: Settings[K]) {
     setS((p) => ({ ...p, [k]: v }));
@@ -304,61 +327,64 @@ export default function SettingsPage() {
             <section style={{ marginBottom: 24 }}>
               <h2>Backups (SQLite)</h2>
               <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '220px 1fr',
-                  rowGap: 10,
-                  columnGap: 12,
-                }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '220px 1fr',
+                    rowGap: 10,
+                    columnGap: 12,
+                  }}
               >
                 <label>Enabled</label>
                 <input
-                  type="checkbox"
-                  checked={!!s.backupEnabled}
-                  onChange={(e) => upd('backupEnabled', e.target.checked)}
+                    type="checkbox"
+                    checked={!!s.backupEnabled}
+                    onChange={(e) => upd('backupEnabled', e.target.checked)}
                 />
 
                 <label>Cron</label>
                 <input
-                  type="text"
-                  placeholder="e.g. 0 3 * * *"
-                  value={s.backupCron || ''}
-                  onChange={(e) => upd('backupCron', e.target.value)}
+                    type="text"
+                    placeholder="e.g. 0 3 * * *"
+                    value={s.backupCron || ''}
+                    onChange={(e) => upd('backupCron', e.target.value)}
                 />
 
                 <label>Retention (files)</label>
                 <input
-                  type="number"
-                  min={1}
-                  value={Number(s.backupRetention ?? 14)}
-                  onChange={(e) => upd('backupRetention', parseInt(e.target.value || '0', 10))}
+                    type="number"
+                    min={1}
+                    value={Number(s.backupRetention ?? 14)}
+                    onChange={(e) => upd('backupRetention', parseInt(e.target.value || '0', 10))}
                 />
 
                 <label>Directory</label>
                 <input
-                  type="text"
-                  placeholder="/app/data/backups"
-                  value={s.backupDir || ''}
-                  onChange={(e) => upd('backupDir', e.target.value)}
+                    type="text"
+                    placeholder="/app/data/backups"
+                    value={s.backupDir || ''}
+                    onChange={(e) => upd('backupDir', e.target.value)}
                 />
 
-                <div />
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <button onClick={runBackupNow} disabled={busyBackup}>
-                    {busyBackup ? 'Running…' : 'Run backup now'}
-                  </button>
-                  <a
-                    href="/api/backup/list"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ fontSize: 13 }}
+                <div/>
+                <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8}}>
+                  <button
+                      onClick={() => router.push('/backups')}
+                      style={{padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6}}
                   >
-                    List backups (JSON)
-                  </a>
+                    Open backups list
+                  </button>
+
+                  <button
+                      onClick={runBackup}
+                      disabled={runningBackup}
+                      style={{padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6}}
+                  >
+                    {runningBackup ? 'Running…' : 'Run backup now'}
+                  </button>
                 </div>
               </div>
 
-              <div style={{ marginTop: 12 }}>
+              <div style={{marginTop: 12}}>
                 <b>Exports:</b>{' '}
                 <a href={`/api/export/artists.json`} target="_blank" rel="noreferrer">
                   Artists JSON

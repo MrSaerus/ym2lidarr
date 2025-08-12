@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { request } from 'undici';
 
 import { prisma } from '../prisma';
-import { rescheduleAll } from '../scheduler';
+import { reloadJobs } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 
 const r = Router();
@@ -93,7 +93,7 @@ r.post('/', async (req, res) => {
 
   // сразу обновим pyproxy URL в сервисе и пересоздадим cron-задачи
   setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
-  await rescheduleAll();
+  await reloadJobs();
 
   res.json({ ok: true });
 });

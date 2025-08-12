@@ -1,145 +1,171 @@
+import cron from 'node-cron';
 import fs from 'fs';
-import * as cron from 'node-cron';
 import path from 'path';
 
-import { log as dblog } from './log';
 import { prisma } from './prisma';
 import { runYandexSync, runLidarrPush } from './workers';
 
-let yandexTask: cron.ScheduledTask | null = null;
-let lidarrTask: cron.ScheduledTask | null = null;
-let backupTask: cron.ScheduledTask | null = null;
+let jobs: {
+  yandex?: cron.ScheduledTask;
+  lidarr?: cron.ScheduledTask;
+  backup?: cron.ScheduledTask;
+} = {};
 
-function safeSchedule(cronExpr: string, job: () => void, label: string) {
+function ts() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+      d.getFullYear() +
+      pad(d.getMonth() + 1) +
+      pad(d.getDate()) +
+      '_' +
+      pad(d.getHours()) +
+      pad(d.getMinutes()) +
+      pad(d.getSeconds())
+  );
+}
+
+function ensureDir(dir: string) {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+/** Выполнить бэкап сейчас (VACUUM INTO + ротация) */
+export async function runBackupNow(): Promise<{
+  ok: boolean;
+  file?: string;
+  deleted?: string[];
+  error?: string;
+}> {
   try {
-    const task = cron.schedule(cronExpr, job, { timezone: 'UTC' });
-    console.log(`[scheduler] ${label} scheduled: ${cronExpr}`);
-    return task;
-  } catch (e: any) {
-    console.warn(`[scheduler] invalid cron for ${label}: "${cronExpr}" — ${e?.message || e}`);
-    return null;
+    const s = await prisma.setting.findFirst();
+    if (!s || !s.backupEnabled) {
+      return { ok: false, error: 'Backups are disabled in settings.' };
+    }
+    const backupDir = s.backupDir || '/app/data/backups';
+    const retention = s.backupRetention ?? 0;
+
+    // создаём каталог и проверяем, что он доступен на запись
+    fs.mkdirSync(backupDir, { recursive: true });
+    try {
+      // проверим право на запись (создадим и удалим temp-файл)
+      const probe = path.join(backupDir, '.write-test');
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
+    } catch (e) {
+      const msg = (e as Error).message || String(e);
+      return { ok: false, error: `Backup dir not writable: ${backupDir}. ${msg}` };
+    }
+
+    // сбрасываем WAL → через queryRawUnsafe, т.к. возвращает строки
+    try {
+      await prisma.$queryRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE);`);
+    } catch (e) {
+      console.warn('[backup] wal_checkpoint failed:', (e as Error).message);
+    }
+
+    const fname = `backup_${ts()}.db`;
+    const full = path.resolve(backupDir, fname);
+    const escaped = full.replace(/'/g, "''");
+
+    console.log('[backup] start →', full);
+    await prisma.$executeRawUnsafe(`VACUUM INTO '${escaped}';`);
+    console.log('[backup] done:', full);
+
+    // ротация по retention (как было)
+    const deleted: string[] = [];
+    if (retention && retention > 0) {
+      const entries = fs
+          .readdirSync(backupDir)
+          .filter((f) => /^backup_\d{8}_\d{6}\.db$/i.test(f))
+          .map((f) => ({ f, m: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+          .sort((a, b) => b.m - a.m);
+      for (const x of entries.slice(retention)) {
+        try {
+          fs.unlinkSync(path.join(backupDir, x.f));
+          deleted.push(x.f);
+        } catch (e) {
+          console.warn('[backup] delete failed', x.f, (e as Error).message);
+        }
+      }
+      if (deleted.length) console.log('[backup] rotated: deleted', deleted.length, 'files');
+    }
+
+    return { ok: true, file: fname, deleted };
+  } catch (e) {
+    const msg = (e as Error).message || String(e);
+    console.error('[backup] failed:', msg);
+    return { ok: false, error: msg };
   }
 }
 
-/**
- * Перечитать настройки и пересоздать задания cron.
- * Вызывается на старте и после сохранения настроек.
- */
-export async function rescheduleAll() {
-  const s = await prisma.setting.findFirst({ where: { id: 1 } });
 
-  // Yandex likes sync
-  if (yandexTask) {
-    yandexTask.stop();
-    yandexTask = null;
+/** Список файлов бэкапа в каталоге */
+export function listBackups(dir: string): { file: string; size: number; mtime: number }[] {
+  try {
+    if (!fs.existsSync(dir)) return [];
+    const out: { file: string; size: number; mtime: number }[] = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!/^backup_\d{8}_\d{6}\.db$/i.test(f)) continue;
+      const full = path.join(dir, f);
+      const st = fs.statSync(full);
+      out.push({ file: f, size: st.size, mtime: st.mtimeMs });
+    }
+    out.sort((a, b) => b.mtime - a.mtime);
+    return out;
+  } catch {
+    return [];
   }
-  if (s?.yandexCron && s.yandexCron.trim()) {
-    yandexTask = safeSchedule(
-      s.yandexCron.trim(),
-      () => {
-        // без force; токен берётся из БД
-        runYandexSync(undefined, undefined, { force: false }).catch(() => {});
-      },
-      'yandex',
-    );
-  } else {
-    console.log('[scheduler] yandex disabled');
+}
+
+export async function initScheduler() {
+  await reloadJobs();
+}
+
+export async function reloadJobs() {
+  // стоп старые
+  for (const k of Object.keys(jobs) as (keyof typeof jobs)[]) {
+    jobs[k]?.stop();
+    jobs[k] = undefined;
   }
 
-  // Lidarr push
-  if (lidarrTask) {
-    lidarrTask.stop();
-    lidarrTask = null;
+  const s = await prisma.setting.findFirst(); // NOTE: singular model
+  if (!s) return;
+
+  // Яндекс
+  if (s.yandexCron && cron.validate(s.yandexCron)) {
+    jobs.yandex = cron.schedule(s.yandexCron, async () => {
+      try {
+        console.log('[cron] yandex sync');
+        await runYandexSync(); // без аргументов — совместимо по типам
+      } catch (e) {
+        console.error('[cron] yandex failed:', (e as Error).message);
+      }
+    });
   }
-  if (s?.lidarrCron && s.lidarrCron.trim()) {
-    lidarrTask = safeSchedule(
-      s.lidarrCron.trim(),
-      () => {
-        runLidarrPush().catch(() => {});
-      },
-      'lidarr',
-    );
-  } else {
-    console.log('[scheduler] lidarr disabled');
+
+  // Lidarr
+  if (s.lidarrCron && cron.validate(s.lidarrCron)) {
+    jobs.lidarr = cron.schedule(s.lidarrCron, async () => {
+      try {
+        console.log('[cron] lidarr push');
+        await runLidarrPush();
+      } catch (e) {
+        console.error('[cron] lidarr failed:', (e as Error).message);
+      }
+    });
   }
 
   // Backups
-  if (backupTask) {
-    backupTask.stop();
-    backupTask = null;
-  }
-  if (s?.backupEnabled && s.backupCron && s.backupCron.trim()) {
-    backupTask = safeSchedule(
-      s.backupCron.trim(),
-      () => {
-        runBackup().catch(() => {});
-      },
-      'backup',
-    );
-  } else {
-    console.log('[scheduler] backup disabled');
-  }
-}
-
-/**
- * Безопасный бэкап SQLite:
- *  - пропускает, если есть активный run
- *  - использует VACUUM INTO для атомного снапшота
- *  - ротация по количеству файлов
- */
-export async function runBackup() {
-  // не делаем бэкап, если есть активные RUN'ы
-  const active = await prisma.syncRun.findFirst({ where: { status: 'running' } });
-  if (active) {
-    console.log('[backup] skipped: active run', active.id);
-    return;
+  if (s.backupEnabled && s.backupCron && cron.validate(s.backupCron)) {
+    jobs.backup = cron.schedule(s.backupCron, async () => {
+      try {
+        console.log('[cron] backup run');
+        await runBackupNow();
+      } catch (e) {
+        console.error('[cron] backup failed:', (e as Error).message);
+      }
+    });
   }
 
-  const s = await prisma.setting.findFirst({ where: { id: 1 } });
-  const dir = s?.backupDir || '/app/data/backups';
-  await fs.promises.mkdir(dir, { recursive: true });
-
-  const ts = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-  const dst = path.join(dir, `app-${ts}.db`);
-  const sqlPath = dst.replace(/'/g, "''"); // экранируем кавычки в SQL строке
-
-  try {
-    // поведение БД под бэкап
-    await prisma.$executeRawUnsafe('PRAGMA busy_timeout=30000');
-
-    // атомный снапшот в dst
-    await prisma.$executeRawUnsafe(`VACUUM INTO '${sqlPath}'`);
-
-    console.log('[backup] written', dst);
-    const runId = await ensureRunId();
-    await dblog(runId, 'info', 'Backup created', { file: dst });
-
-    // ротация
-    const keep = Math.max(1, s?.backupRetention ?? 14);
-    const files = (await fs.promises.readdir(dir))
-      .filter((f) => f.startsWith('app-') && f.endsWith('.db'))
-      .sort()
-      .reverse();
-    const toDelete = files.slice(keep);
-    for (const f of toDelete) {
-      await fs.promises.unlink(path.join(dir, f)).catch(() => {});
-    }
-  } catch (e: any) {
-    console.warn('[backup] failed:', e?.message || e);
-  }
-}
-
-/** Вспомогательный runId для логов бэкапа */
-async function ensureRunId(): Promise<number> {
-  const last = await prisma.syncRun.findFirst({ orderBy: { startedAt: 'desc' } });
-  if (last) return last.id;
-  const r = await prisma.syncRun.create({
-    data: { kind: 'export', status: 'ok', message: 'system' },
-  });
-  return r.id;
-}
-
-/** Вызывать на старте сервера */
-export async function initScheduler() {
-  await rescheduleAll();
+  console.log('[scheduler] jobs reloaded');
 }
