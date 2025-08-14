@@ -29,7 +29,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/found', foundRouter);
 app.use('/api/unmatched', unmatchedRouter);
 app.use('/api/stats', statsRouter);
-app.use('/api/runs', runsRouter);
+app.use(runsRouter);
 app.use('/api/backup', backupRouter);
 
 app.listen(PORT, async () => {

@@ -1,201 +1,279 @@
-import { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
 
-type RunInfo = {
-  id: number;
-  kind: 'yandex' | 'lidarr';
-  status: 'running' | 'ok' | 'error';
-  message?: string | null;
-  startedAt: string;
-  finishedAt?: string | null;
-  durationSec?: number | null;
-  stats?: any;
+type LegacyOverview = {
+  artists?: { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
+  albums?:  { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
+  lastRun?: { id: number; status?: string; startedAt?: string | null } | null;
 };
 
-type Summary = {
-  artists: { total: number; found: number; unmatched: number };
-  albums: { total: number; found: number; unmatched: number };
-  runs: {
-    yandex: { active?: RunInfo | null; last?: RunInfo | null };
-    lidarr: { active?: RunInfo | null; last?: RunInfo | null };
-  };
+type Stats = {
+  totalArtists?: number | string;
+  matchedArtists?: number | string;
+  unmatchedArtists?: number | string;
+  totalAlbums?: number | string;
+  matchedAlbums?: number | string;
+  unmatchedAlbums?: number | string;
+  lastRun?: { id: number; status?: string; startedAt?: string | null } | null;
 };
+
+type SyncResp = { ok?: boolean; runId?: number; error?: string };
+
+// new: короткая модель ран-записи
+type RunShort = {
+  id: number;
+  status: 'running' | 'ok' | 'error' | string;
+  startedAt: string;
+  finishedAt: string | null;
+  message?: string | null;
+  kind?: 'yandex' | 'lidarr' | string | null;
+};
+
+const toNum = (v: any) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const coalesceNum = (...vals: any[]) => {
+  for (const v of vals) {
+    if (v !== undefined && v !== null) {
+      const n = toNum(v);
+      if (!Number.isNaN(n)) return n;
+    }
+  }
+  return 0;
+};
+
+function normalize(raw: any): Required<Stats> {
+  if (raw && (raw.artists || raw.albums)) {
+    const d = raw as LegacyOverview;
+
+    const aMatched = coalesceNum(d.artists?.matched, d.artists?.found);
+    const aUnmatched = coalesceNum(d.artists?.unmatched);
+    let aTotal = coalesceNum(d.artists?.total);
+    if (aTotal === 0 && (aMatched || aUnmatched)) aTotal = aMatched + aUnmatched;
+
+    const rgMatched = coalesceNum(d.albums?.matched, d.albums?.found);
+    const rgUnmatched = coalesceNum(d.albums?.unmatched);
+    let rgTotal = coalesceNum(d.albums?.total);
+    if (rgTotal === 0 && (rgMatched || rgUnmatched)) rgTotal = rgMatched + rgUnmatched;
+
+    return {
+      totalArtists: aTotal,
+      matchedArtists: Math.min(aMatched, aTotal),
+      unmatchedArtists: Math.max(aUnmatched || aTotal - aMatched, 0),
+      totalAlbums: rgTotal,
+      matchedAlbums: Math.min(rgMatched, rgTotal),
+      unmatchedAlbums: Math.max(rgUnmatched || rgTotal - rgMatched, 0),
+      lastRun: raw.lastRun ?? null,
+    };
+  }
+
+  const s = raw as Stats;
+  let ta = coalesceNum((s as any).totalArtists, (s as any).artistsTotal, (s as any).artists?.total);
+  let ma = coalesceNum((s as any).matchedArtists, (s as any).artistsMatched, (s as any).artists?.matched, (s as any).artists?.found);
+  let ua = coalesceNum((s as any).unmatchedArtists, (s as any).artistsUnmatched, (s as any).artists?.unmatched);
+  if (ta === 0 && (ma || ua)) ta = ma + ua;
+  if (ua === 0 && ta && ma && ta >= ma) ua = ta - ma;
+
+  let tr = coalesceNum((s as any).totalAlbums, (s as any).albumsTotal, (s as any).albums?.total);
+  let mr = coalesceNum((s as any).matchedAlbums, (s as any).albumsMatched, (s as any).albums?.matched, (s as any).albums?.found);
+  let ur = coalesceNum((s as any).unmatchedAlbums, (s as any).albumsUnmatched, (s as any).albums?.unmatched);
+  if (tr === 0 && (mr || ur)) tr = mr + ur;
+  if (ur === 0 && tr && mr && tr >= mr) ur = tr - mr;
+
+  return {
+    totalArtists: ta,
+    matchedArtists: Math.min(mr === undefined ? ma : ma, ta),
+    unmatchedArtists: Math.max(ua, 0),
+    totalAlbums: tr,
+    matchedAlbums: Math.min(mr, tr),
+    unmatchedAlbums: Math.max(ur, 0),
+    lastRun: s.lastRun ?? null,
+  };
+}
+
+function ProgressBar({ value, color }: { value: number; color?: 'primary' | 'accent' }) {
+  const pct = Math.max(0, Math.min(1, value || 0));
+  return (
+      <div className="progress">
+        <div
+            className="bar"
+            style={{
+              width: `${(pct * 100).toFixed(2)}%`,
+              background: color === 'accent' ? 'var(--accent)' : 'var(--primary)',
+            }}
+        />
+      </div>
+  );
+}
+
+// helper: маленький бейдж
+function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'ok'|'warn'|'err'|'muted' }) {
+  const cls =
+      tone === 'ok'   ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30' :
+          tone === 'warn' ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30' :
+              tone === 'err'  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30' :
+                  'bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30';
+  return <span className={`inline-flex items-center rounded px-2 py-[2px] text-xs ${cls}`}>{children}</span>;
+}
 
 export default function OverviewPage() {
-  const [sum, setSum] = useState<Summary | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busyY, setBusyY] = useState(false);
-  const [busyL, setBusyL] = useState(false);
+  const [data, setData] = useState<Required<Stats> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string>('');
 
-  async function load() {
-    try {
-      const s = await api<Summary>('/api/stats');
-      setSum(s);
-      setErr(null);
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    }
-  }
+  // new: состояние последнего/текущего запуска
+  const [latest, setLatest] = useState<RunShort | null>(null);
 
-  async function runYandex(force = false) {
-    setBusyY(true);
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      await api('/api/sync/yandex', { method: 'POST', body: JSON.stringify({ force }) });
-      await load();
+      const raw = await api('/api/stats');
+      setData(normalize(raw));
+      setMsg('');
     } catch (e: any) {
-      setErr(e?.message || String(e));
+      setMsg(e?.message || String(e));
     } finally {
-      setBusyY(false);
+      setLoading(false);
     }
-  }
+  }, []);
 
-  async function runLidarr() {
-    setBusyL(true);
+  // new: загрузка текущего/последнего рана
+  const loadLatest = useCallback(async () => {
     try {
-      await api('/api/sync/lidarr', { method: 'POST' });
-      await load();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusyL(false);
+      const r = await api<{ ok?: boolean; runs?: RunShort[] }>('/api/runs?limit=1');
+      setLatest(r?.runs?.[0] ?? null);
+    } catch {
+      // ignore
     }
-  }
+  }, []);
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 5000);
+    loadLatest();
+    const t = setInterval(loadLatest, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [load, loadLatest]);
+
+  const artistPct = useMemo(() => {
+    const t = toNum(data?.totalArtists ?? 0);
+    const m = toNum(data?.matchedArtists ?? 0);
+    return t > 0 ? m / t : 0;
+  }, [data]);
+
+  const albumPct = useMemo(() => {
+    const t = toNum(data?.totalAlbums ?? 0);
+    const m = toNum(data?.matchedAlbums ?? 0);
+    return t > 0 ? m / t : 0;
+  }, [data]);
+
+  async function runSyncYandex() {
+    setMsg('Starting Yandex sync…');
+    try {
+      const r = await api<SyncResp>('/api/sync/yandex', { method: 'POST' });
+      const ok = r?.ok === true || typeof r?.runId === 'number';
+      if (ok) {
+        setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`);
+        setTimeout(loadLatest, 400);
+      } else {
+        setMsg(`Sync failed${r?.error ? `: ${r.error}` : ''}`);
+      }
+    } catch (e: any) {
+      setMsg(`Sync error: ${e?.message || String(e)}`);
+    }
+  }
+
+  async function pushToLidarr() {
+    setMsg('Pushing to Lidarr…');
+    try {
+      const r = await api<SyncResp>('/api/sync/lidarr', { method: 'POST' });
+      const ok = r?.ok === true || typeof r?.runId === 'number';
+      if (ok) {
+        setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`);
+        setTimeout(loadLatest, 400);
+      } else {
+        setMsg(`Push failed${r?.error ? `: ${r.error}` : ''}`);
+      }
+    } catch (e: any) {
+      setMsg(`Push error: ${e?.message || String(e)}`);
+    }
+  }
 
   return (
-    <main style={{ maxWidth: 1100, margin: '0 auto' }}>
-      <Nav />
-      <div style={{ padding: 16 }}>
-        <h1>Overview</h1>
-        {err && (
-          <div
-            style={{
-              background: '#fee2e2',
-              border: '1px solid #fecaca',
-              padding: 8,
-              borderRadius: 6,
-              marginBottom: 12,
-            }}
-          >
-            {err}
-          </div>
-        )}
-        {!sum ? (
-          <p>Loading…</p>
-        ) : (
-          <>
-            <section
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))',
-                gap: 12,
-                marginBottom: 20,
-              }}
-            >
-              <Card title="Artists">
-                <Stat label="Total" value={sum.artists.total} />
-                <Stat label="Found" value={sum.artists.found} />
-                <Stat label="Unmatched" value={sum.artists.unmatched} />
-              </Card>
-              <Card title="Albums (release-groups)">
-                <Stat label="Total" value={sum.albums.total} />
-                <Stat label="Found" value={sum.albums.found} />
-                <Stat label="Unmatched" value={sum.albums.unmatched} />
-              </Card>
-            </section>
+      <>
+        <Nav />
+        <main className="mx-auto max-w-6xl px-4 py-4 space-y-6">
+          <h1 className="h1">Overview</h1>
 
-            <section
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))',
-                gap: 12,
-              }}
-            >
-              <Card title="Yandex sync">
-                <RunBlock run={sum.runs.yandex.active || sum.runs.yandex.last || null} />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => runYandex(false)} disabled={busyY}>
-                    Run
-                  </button>
-                  <button
-                    onClick={() => runYandex(true)}
-                    disabled={busyY}
-                    title="Force rematch (ignore cool-down)"
-                  >
-                    Run (force)
-                  </button>
-                </div>
-              </Card>
-              <Card title="Lidarr push">
-                <RunBlock run={sum.runs.lidarr.active || sum.runs.lidarr.last || null} />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button onClick={runLidarr} disabled={busyL}>
-                    Push to Lidarr
-                  </button>
-                </div>
-              </Card>
-            </section>
+          {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
-            <div style={{ marginTop: 16, fontSize: 13, opacity: 0.7 }}>
-              Live-логи переехали во вкладку <b>Live Logs</b>.
+          {/* статистика */}
+          <section className="grid gap-4 md:grid-cols-2">
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Artists matched</div>
+              <div className="text-2xl font-bold">
+                {toNum(data?.matchedArtists ?? 0)}/{toNum(data?.totalArtists ?? 0)}
+              </div>
+              <ProgressBar value={artistPct} color="accent" />
+              <div className="text-xs text-gray-500">Unmatched: {toNum(data?.unmatchedArtists ?? 0)}</div>
             </div>
-          </>
-        )}
-      </div>
-    </main>
-  );
-}
 
-function Card({ title, children }: any) {
-  return (
-    <div style={{ border: '1px solid #eee', borderRadius: 8, padding: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Albums matched</div>
+              <div className="text-2xl font-bold">
+                {toNum(data?.matchedAlbums ?? 0)}/{toNum(data?.totalAlbums ?? 0)}
+              </div>
+              <ProgressBar value={albumPct} color="primary" />
+              <div className="text-xs text-gray-500">Unmatched: {toNum(data?.unmatchedAlbums ?? 0)}</div>
+            </div>
+          </section>
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-      <span>{label}</span>
-      <span style={{ fontWeight: 600 }}>{value}</span>
-    </div>
-  );
-}
+          {/* NEW: Runner status */}
+          <section className="panel p-4">
+            <div className="text-sm text-gray-500 mb-1">Runner status</div>
+            {!latest ? (
+                <div className="text-sm text-gray-400">No runs yet.</div>
+            ) : latest.status === 'running' ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge tone="ok">running</Badge>
+                  <span>Job: <b>{latest.kind ?? 'n/a'}</b></span>
+                  <span className="text-gray-400">• started {new Date(latest.startedAt).toLocaleString()}</span>
+                </div>
+            ) : (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge tone="muted">idle</Badge>
+                  <span>Last: #{latest.id} • <b>{latest.kind ?? 'n/a'}</b> • {latest.status}</span>
+                  <span className="text-gray-400">
+                • {new Date(latest.startedAt).toLocaleString()}
+                    {latest.finishedAt ? ` → ${new Date(latest.finishedAt).toLocaleString()}` : ''}
+              </span>
+                  {latest.message ? <span className="text-gray-400">• {latest.message}</span> : null}
+                </div>
+            )}
+          </section>
 
-function RunBlock({ run }: { run: RunInfo | null }) {
-  if (!run) return <div style={{ opacity: 0.7 }}>No runs yet</div>;
-  const statusColor =
-    run.status === 'running' ? '#2563eb' : run.status === 'ok' ? '#16a34a' : '#dc2626';
-  return (
-    <div>
-      <div>
-        <b>ID:</b> {run.id} • <b>Status:</b>{' '}
-        <span style={{ color: statusColor }}>{run.status}</span>
-      </div>
-      <div style={{ fontSize: 13, opacity: 0.85 }}>
-        <b>Started:</b> {new Date(run.startedAt).toLocaleString()}
-        {run.finishedAt && (
-          <>
-            {' '}
-            • <b>Finished:</b> {new Date(run.finishedAt).toLocaleString()}
-          </>
-        )}
-        {typeof run.durationSec === 'number' && (
-          <>
-            {' '}
-            • <b>Duration:</b> {run.durationSec}s
-          </>
-        )}
-      </div>
-      {run.message && <div style={{ fontSize: 13, marginTop: 4, opacity: 0.8 }}>{run.message}</div>}
-    </div>
+          {/* кнопки */}
+          <section className="panel p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button className="btn btn-outline" onClick={load} disabled={loading}>
+                {loading ? 'Refreshing…' : 'Refresh'}
+              </button>
+              <button className="btn btn-primary" onClick={runSyncYandex}>
+                Sync Yandex
+              </button>
+              <button className="btn btn-primary" onClick={pushToLidarr}>
+                Push to Lidarr
+              </button>
+              {data?.lastRun ? (
+                  <span className="ml-auto text-sm text-gray-500">
+                Last run: #{data.lastRun.id} • {data.lastRun.status ?? 'n/a'} •{' '}
+                    {data.lastRun.startedAt ? new Date(data.lastRun.startedAt).toLocaleString() : 'n/a'}
+              </span>
+              ) : null}
+            </div>
+          </section>
+        </main>
+      </>
   );
 }

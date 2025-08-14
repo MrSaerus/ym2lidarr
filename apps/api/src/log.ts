@@ -37,14 +37,44 @@ export async function patchRunStats(runId: number, patch: Json) {
   });
 }
 
+function isLogLevel(x: any): x is 'info' | 'warn' | 'error' | 'debug' {
+  return x === 'info' || x === 'warn' || x === 'error' || x === 'debug';
+}
+
+export async function log(runId: number, data: Json): Promise<void>;
 export async function log(
-  runId: number,
-  level: 'info' | 'warn' | 'error' | 'debug',
-  message: string,
-  data?: Json,
-) {
+    runId: number,
+    level: 'info' | 'warn' | 'error' | 'debug',
+    message: string,
+    data?: Json,
+): Promise<void>;
+export async function log(
+    runId: number,
+    a: any,
+    b?: any,
+    c?: Json,
+): Promise<void> {
+  let level: 'info' | 'warn' | 'error' | 'debug' = 'info';
+  let message = 'stats';
+  let payload: Json | undefined;
+
+  if (typeof a === 'string') {
+    // форма: (runId, level, message, data?)
+    level = isLogLevel(a) ? a : 'info';           // <-- ключевая правка
+    message = typeof b === 'string' ? b : '';
+    payload = c;
+  } else {
+    // форма: (runId, dataObject)
+    payload = a as Json;
+  }
+
   await prisma.syncLog.create({
-    data: { runId, level, message, data: data ? JSON.stringify(data) : null },
+    data: {
+      runId,
+      level,
+      message,
+      data: payload ? JSON.stringify(payload) : null,
+    },
   });
 }
 

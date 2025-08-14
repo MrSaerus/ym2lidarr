@@ -1,72 +1,82 @@
 import { Router } from 'express';
-
 import { prisma } from '../prisma';
 
-const r = Router();
+const router = Router();
 
-function parseStats(stats?: string | null) {
-  if (!stats) return null;
-  try {
-    return JSON.parse(stats);
-  } catch {
-    return null;
-  }
+// Поддержим и с префиксом, и без него — на случай app.use('/api', router) ИЛИ app.use(router)
+const PREFIXES = ['', '/api'];
+
+function toInt(x: any, def: number): number {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : def;
+}
+function safeParseJson(s: string | null): any {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { return s; }
+}
+function mapRun(run: any) {
+  return {
+    id: run.id,
+    status: run.status,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    message: run.message ?? null,
+    kind: (run as any).kind ?? null, // если в схеме есть поле kind
+  };
 }
 
-// GET /api/runs/:id — вернуть run
-r.get('/:id', async (req, res) => {
-  const id = Number(req.params.id || 0);
-  if (!id) return res.status(400).json({ ok: false, error: 'Bad id' });
+// -------- РОУТЫ --------
 
-  const run = await prisma.syncRun.findUnique({ where: { id } });
-  if (!run) return res.status(404).json({ ok: false, error: 'Not found' });
-
-  res.json({
-    id: run.id,
-    kind: run.kind,
-    status: run.status,
-    message: run.message ?? null,
-    startedAt: run.startedAt,
-    finishedAt: run.finishedAt ?? null,
-    stats: parseStats(run.stats),
+// Список последних запусков (для селектора на странице логов)
+for (const p of PREFIXES) {
+  router.get(`${p}/runs`, async (req, res) => {
+    const limit = toInt(req.query.limit, 20);
+    const runs = await prisma.syncRun.findMany({
+      orderBy: { id: 'desc' },
+      take: limit,
+    });
+    return res.json({ ok: true, runs: runs.map(mapRun) });
   });
-});
+}
 
-// GET /api/runs/:id/logs?after=0&limit=200 — инкрементальная подгрузка логов
-r.get('/:id/logs', async (req, res) => {
-  const id = Number(req.params.id || 0);
-  if (!id) return res.status(400).json({ ok: false, error: 'Bad id' });
-
-  const after = Math.max(0, parseInt(String(req.query?.after ?? '0'), 10));
-  const limit = Math.min(1000, Math.max(1, parseInt(String(req.query?.limit ?? '200'), 10)));
-
-  const rows = await prisma.syncLog.findMany({
-    where: { runId: id, ...(after ? { id: { gt: after } } : {}) },
-    orderBy: { id: 'asc' },
-    take: limit,
+// Последний запуск; если нет — ok:false (НЕ 400)
+for (const p of PREFIXES) {
+  router.get(`${p}/runs/latest`, async (_req, res) => {
+    const run = await prisma.syncRun.findFirst({ orderBy: { id: 'desc' } });
+    if (!run) return res.json({ ok: false, reason: 'no-runs' });
+    return res.json({ ok: true, run: mapRun(run) });
   });
+}
 
-  res.json({
-    items: rows.map((l) => {
-      // В БД поле называется data (JSON-строка). Для фронта отдаём как "meta".
-      const raw = (l as any).meta ?? (l as any).data ?? null;
-      let meta: any = undefined;
-      if (raw != null) {
-        try {
-          meta = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        } catch {
-          meta = raw;
-        }
-      }
-      return {
-        id: l.id,
-        ts: l.ts as any, // Date → ISO уедет при сериализации
-        level: l.level as any, // 'debug'|'info'|'warn'|'error'
-        message: l.message,
-        meta,
-      };
-    }),
+// Логи запуска инкрементально по id (id > after)
+for (const p of PREFIXES) {
+  router.get(`${p}/runs/:id/logs`, async (req, res) => {
+    const runId = Number(req.params.id);
+    if (!Number.isFinite(runId)) {
+      return res.status(400).json({ ok: false, error: 'bad runId' });
+    }
+    const after = toInt(req.query.after, 0);
+    const limit = toInt(req.query.limit, 200);
+
+    const items = await prisma.syncLog.findMany({
+      where: { runId, id: { gt: after } },
+      orderBy: { id: 'asc' },
+      take: limit,
+      select: { id: true, ts: true, level: true, message: true, data: true, runId: true },
+    });
+
+    const mapped = items.map((l) => ({
+      id: l.id,
+      ts: l.ts,
+      level: l.level,
+      message: l.message,
+      data: safeParseJson(l.data), // отдаём уже распарсенным объектом
+      runId: l.runId,
+    }));
+    const nextAfter = mapped.length ? mapped[mapped.length - 1].id : after;
+
+    return res.json({ ok: true, items: mapped, nextAfter });
   });
-});
+}
 
-export default r;
+export default router;

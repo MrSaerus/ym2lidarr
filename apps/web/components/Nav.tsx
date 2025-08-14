@@ -1,44 +1,42 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import {
+  HomeIcon,
+  CheckCircleIcon,
+  QuestionMarkCircleIcon,
+  Cog6ToothIcon,
+  ArchiveBoxArrowDownIcon,
+  QueueListIcon,
+} from '@heroicons/react/24/outline';
 
 const tabs = [
-  { href: '/', label: 'Overview' },
-  { href: '/found', label: 'Found' },
-  { href: '/unmatched', label: 'Unmatched' },
-  { href: '/settings', label: 'Settings' },
-  { href: '/backups', label: 'Backups' },
-  { href: '/logs', label: 'Live Logs' },
+  { href: '/', label: 'Overview', Icon: HomeIcon },
+  { href: '/found', label: 'Found', Icon: CheckCircleIcon },
+  { href: '/unmatched', label: 'Unmatched', Icon: QuestionMarkCircleIcon },
+  { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
+  { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },
+  { href: '/logs', label: 'Live Logs', Icon: QueueListIcon },
 ];
 
 export default function Nav() {
   const r = useRouter();
-  const path = (r.asPath || r.pathname || '/').split('?')[0];
-
-  const isActive = (href: string) => {
-    if (href === '/') return path === '/';
-    return path === href || path.startsWith(href + '/');
-  };
-
   return (
-      <nav style={{ padding: '12px 16px', borderBottom: '1px solid #eee', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 700 }}>YM → Lidarr</span>
-          {tabs.map((t) => {
-            const active = isActive(t.href);
+      <nav className="px-4 py-3 border-b" style={{ borderColor: 'var(--panel-border)' }}>
+        <div className="mx-auto max-w-6xl flex flex-wrap items-center gap-2">
+          <span className="font-bold mr-2">YM → Lidarr</span>
+          {tabs.map(({ href, label, Icon }) => {
+            const active = r.pathname === href;
             return (
                 <Link
-                    key={t.href}
-                    href={t.href}
-                    style={{
-                      textDecoration: 'none',
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      background: active ? '#eef2ff' : 'transparent',
-                      color: active ? '#3730a3' : '#111',
-                      border: active ? '1px solid #c7d2fe' : '1px solid transparent',
-                    }}
+                    key={href}
+                    href={href}
+                    className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm no-underline ${
+                        active ? 'bg-[color:var(--panel)] border' : 'border'
+                    }`}
+                    style={{ borderColor: active ? 'var(--primary-600)' : 'transparent' }}
                 >
-                  {t.label}
+                  <Icon className="icon" />
+                  <span>{label}</span>
                 </Link>
             );
           })}
