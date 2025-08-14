@@ -13,31 +13,59 @@ function mbLink(mbid: string, kind?: 'artist' | 'album' | 'rg') {
 
 function ymLink(row: any) {
     if (row?.yandexArtistId) return `https://music.yandex.ru/artist/${row.yandexArtistId}`;
-    if (row?.yandexAlbumId) return `https://music.yandex.ru/album/${row?.yandexAlbumId}`;
-    const q =
-        row?.name ||
-        row?.artist ||
-        row?.Artist ||
-        (row?.artist && row?.album ? `${row.artist} ${row.album}` : '') ||
-        row?.title ||
-        '';
-    if (!q) return 'https://music.yandex.ru/';
-    return `https://music.yandex.ru/search?text=${encodeURIComponent(q)}`;
+    if (row?.yandexAlbumId)  return `https://music.yandex.ru/album/${row?.yandexAlbumId}`;
+
+    const artist = row?.artist || row?.Artist || '';
+    const album  = row?.album  || row?.title  || row?.Album || '';
+    const name   = row?.name || '';
+
+    // для альбомов ищем по "artist album/title", для артистов — по name/artist
+    const q = isAlbumRow(row)
+        ? (artist && album ? `${artist} ${album}` : artist || album || name)
+        : (name || artist);
+
+    return q ? `https://music.yandex.ru/search?text=${encodeURIComponent(q)}` : 'https://music.yandex.ru/';
 }
 
 function displayTitle(r: any): string {
+    // если это альбом — всегда показываем "Артист — Альбом/Title"
+    if (isAlbumRow(r)) {
+        const artist = r?.artist || r?.Artist || r?.name || '';
+        const album  = r?.album  || r?.title  || r?.Album || '';
+        const joined = [artist, album].filter(Boolean).join(' — ');
+        return joined || artist || album || '';
+    }
+
+    // иначе (артист) — прежняя логика
     return (
         r?.name ||
         r?.artist ||
         r?.Artist ||
-        (r?.artist && r?.album ? `${r.artist} — ${r.album}` : (r?.title || r?.Album || ''))
+        r?.title ||
+        r?.Album ||
+        ''
     ) as string;
+}
+
+// эвристика определения типа строки
+function isAlbumRow(r: any) {
+    return !!(
+        r?.ReleaseGroupMBID || r?.rgMbid ||
+        (r?.artist && (r?.album || r?.title)) ||
+        r?.kind === 'album' || r?.kind === 'rg'
+    );
+}
+function isArtistRow(r: any) {
+    return !isAlbumRow(r);
 }
 
 export default function FoundPage() {
     const [rows, setRows] = useState<FoundRow[]>([]);
     const [loading, setLoading] = useState(false);
-    const [msg, setMsg] = useState<string>('');
+    const [, setMsg] = useState<string>('');
+
+    // filter (tab)
+    const [target, setTarget] = useState<'artists' | 'albums'>('artists');
 
     // pagination
     const [page, setPage] = useState(1);
@@ -47,16 +75,25 @@ export default function FoundPage() {
     // sorting
     const [nameDir, setNameDir] = useState<'asc' | 'desc'>('asc');
 
-    const load = useCallback(async () => {
+    const fetchFound = useCallback(async (t: 'artists' | 'albums') => {
+        // пробуем сначала целевой эндпоинт с target
+        try {
+            return await api<any>(`/api/found?target=${t}&limit=100000`);
+        } catch {
+            // фолбэк — без target
+            try {
+                return await api<any>(`/api/found?limit=100000`);
+            } catch {
+                // последний фолбэк — базовый
+                return await api<any>(`/api/found`);
+            }
+        }
+    }, []);
+
+    const load = useCallback(async (t: 'artists' | 'albums' = target) => {
         setLoading(true);
         try {
-            // пробуем запросить много записей (если бэкенд поддерживает ?limit)
-            let r: any;
-            try {
-                r = await api<any>('/api/found?limit=100000');
-            } catch {
-                r = await api<any>('/api/found');
-            }
+            const r = await fetchFound(t);
             const items: any[] =
                 Array.isArray(r) ? r :
                     Array.isArray(r?.items) ? r.items :
@@ -69,26 +106,33 @@ export default function FoundPage() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [fetchFound, target]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => { load(target); }, [load, target]);
 
+    // применяем фильтр по выбранной вкладке (если бэкенд вернул всё вперемешку)
+    const filteredRows = useMemo(() => {
+        if (target === 'artists') return rows.filter(isArtistRow);
+        return rows.filter(isAlbumRow);
+    }, [rows, target]);
+
+    // сортировка (локализованная, учитывает кириллицу)
     const sortedRows = useMemo(() => {
         const mult = nameDir === 'asc' ? 1 : -1;
-        return rows.slice().sort((a, b) => {
+        return filteredRows.slice().sort((a, b) => {
             const A = (displayTitle(a) || '').toString();
             const B = (displayTitle(b) || '').toString();
-            // корректная локализованная сортировка (ру/ен), учитывает кириллицу
             const cmp = A.localeCompare(B, ['ru', 'en'], { sensitivity: 'base', numeric: true });
             if (cmp !== 0) return cmp * mult;
 
-            // стабильность: добиваем по MBID
+            // стабильность по MBID
             const amid = (a?.mbid || a?.MusicBrainzId || a?.ReleaseGroupMBID || '').toString();
             const bmid = (b?.mbid || b?.MusicBrainzId || b?.ReleaseGroupMBID || '').toString();
             return amid.localeCompare(bmid) * mult;
         });
-    }, [rows, nameDir]);
+    }, [filteredRows, nameDir]);
 
+    // пагинация
     const pageCount = pageSize === 0 ? 1 : Math.max(1, Math.ceil(sortedRows.length / pageSize));
     useEffect(() => {
         setPage((p) => Math.min(Math.max(1, p), pageCount));
@@ -96,8 +140,8 @@ export default function FoundPage() {
 
     const sliceStart = pageSize === 0 ? 0 : (page - 1) * pageSize;
     const sliceEnd   = pageSize === 0 ? sortedRows.length : sliceStart + pageSize;
+    const pageRows   = useMemo(() => sortedRows.slice(sliceStart, sliceEnd), [sortedRows, sliceStart, sliceEnd]);
 
-    const pageRows  = useMemo(() => sortedRows.slice(sliceStart, sliceEnd), [sortedRows, sliceStart, sliceEnd]);
     const rangeFrom = sortedRows.length ? sliceStart + 1 : 0;
     const rangeTo   = Math.min(sliceEnd, sortedRows.length);
     const nameArrow = nameDir === 'asc' ? '▲' : '▼';
@@ -109,9 +153,25 @@ export default function FoundPage() {
                 <h1 className="h1">Found</h1>
 
                 <div className="toolbar">
-                    <button className="btn btn-outline" onClick={load} disabled={loading}>
+                    <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
+                        <button
+                            className={`btn ${target === 'artists' ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setTarget('artists')}
+                        >
+                            Artists
+                        </button>
+                        <button
+                            className={`btn ${target === 'albums' ? 'btn-primary' : 'btn-outline'}`}
+                            onClick={() => setTarget('albums')}
+                        >
+                            Albums
+                        </button>
+                    </div>
+
+                    <button className="btn btn-outline" onClick={() => load(target)} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </button>
+
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-gray-500">Rows per page:</span>
                         <select

@@ -91,12 +91,20 @@ export default function SettingsPage() {
   async function testYandex() {
     setMsg('Testing Yandex…');
     try {
-      const r = await api<any>('/api/settings/test/yandex', { method: 'POST' });
-      setMsg(r?.ok ? `Yandex OK${r.uid ? ` (uid: ${r.uid})` : ''}` : `Yandex failed: ${r?.error || 'unknown error'}`);
+      const r = await api<any>('/api/settings/test/yandex', {
+        method: 'POST',
+        body: JSON.stringify({ token: settings.yandexToken || '' }), // <-- передаём токен из инпута
+      });
+      setMsg(
+          r?.ok
+              ? `Yandex OK${r.uid ? ` (uid: ${r.uid})` : ''}`
+              : `Yandex failed: ${r?.error || 'unknown error'}`
+      );
     } catch (e: any) {
       setMsg(e?.message || String(e));
     }
   }
+
 
   async function testLidarr() {
     setMsg('Testing Lidarr…');

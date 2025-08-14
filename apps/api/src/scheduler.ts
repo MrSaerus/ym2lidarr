@@ -25,10 +25,6 @@ function ts() {
   );
 }
 
-function ensureDir(dir: string) {
-  fs.mkdirSync(dir, { recursive: true });
-}
-
 /** Выполнить бэкап сейчас (VACUUM INTO + ротация) */
 export async function runBackupNow(): Promise<{
   ok: boolean;

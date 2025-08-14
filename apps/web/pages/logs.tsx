@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
 
@@ -116,24 +116,27 @@ export default function LogsPage() {
   const tick = useRef<number | null>(null);
   const prevCount = useRef(0);
 
-  useEffect(() => { loadRuns(); loadStats(); }, []);
-
-  async function loadRuns() {
+  const loadRuns = useCallback(async () => {
     try {
       const r = await api<{ ok: boolean; runs: RunShort[] }>('/api/runs?limit=30');
       if (r.ok) {
         setRuns(r.runs);
-        if (!sel && r.runs.length) setSel(r.runs[0].id);
+        setSel((prev) => (prev ?? (r.runs[0]?.id ?? null)));
       }
-    } catch {/* ignore */}
-  }
+    } catch {
+      /* ignore */
+    }
+  }, []); // stable, deps []
 
-  async function loadStats() {
+  const loadStats = useCallback(async () => {
     try {
       const raw = await api<any>('/api/stats');
+      // если у тебя есть normalizeStats (у тебя есть) — используем её
       setStats(normalizeStats(raw));
-    } catch {/* ignore */}
-  }
+    } catch {
+      /* ignore */
+    }
+  }, []); // stable, deps []
 
   async function pull() {
     if (!sel) return;
@@ -150,11 +153,9 @@ export default function LogsPage() {
   }
 
   useEffect(() => {
-    if (!sel) return;
-    setItems([]); setAfter(0);
-    pull();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel]);
+    loadRuns();
+    loadStats();
+  }, [loadRuns, loadStats]);
 
   useEffect(() => {
     if (!auto || !sel) { if (tick.current) clearInterval(tick.current); tick.current = null; return; }

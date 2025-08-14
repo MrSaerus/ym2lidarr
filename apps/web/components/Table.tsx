@@ -1,5 +1,6 @@
-// lightweight table primitives с поддержкой доп.классов
-import React, { PropsWithChildren } from 'react';
+import React from 'react';
+import type { PropsWithChildren } from 'react';
+
 
 type TProps = PropsWithChildren<{ className?: string }>;
 

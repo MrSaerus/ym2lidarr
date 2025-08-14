@@ -1,5 +1,5 @@
+// apps/api/src/routes/found.ts
 import { Router } from 'express';
-
 import { prisma } from '../prisma';
 
 const r = Router();
@@ -12,11 +12,17 @@ function pager(req: any) {
 
 /**
  * GET /api/found?type=artists|albums&limit=200&offset=0
+ * Также поддерживается алиас target=artists|albums (для совместимости с фронтом).
  * Возвращает уже сматченные объекты (не по флагу, а по наличию MBID).
  */
 r.get('/', async (req, res) => {
+  const rawTarget = (req.query?.type ?? req.query?.target ?? 'artists') as string;
+  const q = String(rawTarget).toLowerCase();
   const type =
-    String(req.query?.type || 'artists').toLowerCase() === 'albums' ? 'albums' : 'artists';
+      q === 'albums' || q === 'album' || q === 'rg' || q === 'release-groups'
+          ? 'albums'
+          : 'artists';
+
   const { limit, offset } = pager(req);
 
   if (type === 'artists') {
@@ -29,6 +35,7 @@ r.get('/', async (req, res) => {
       take: limit,
     });
     return res.json({
+      ok: true,
       type,
       total,
       items: rows.map((a) => ({ id: a.id, name: a.name, mbid: a.mbid })),
@@ -45,6 +52,7 @@ r.get('/', async (req, res) => {
     take: limit,
   });
   return res.json({
+    ok: true,
     type,
     total,
     items: rows.map((al) => ({
@@ -53,6 +61,8 @@ r.get('/', async (req, res) => {
       title: al.title,
       year: al.year,
       rgMbid: al.rgMbid,
+      mbid: al.rgMbid, // алиас для фронта
+      kind: 'album',
     })),
   });
 });
