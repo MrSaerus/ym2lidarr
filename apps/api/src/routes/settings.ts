@@ -156,10 +156,7 @@ r.post('/test/lidarr', async (req, res) => {
   }
 });
 
-// POST /api/settings — сохранить
 r.post('/', saveSettingsHandler);
-
-// PUT /api/settings — тоже сохранить (чтобы фронт мог слать PUT)
 r.put('/', saveSettingsHandler);
 
 // остальное (test/yandex, test/lidarr) — без изменений

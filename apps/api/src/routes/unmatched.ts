@@ -37,11 +37,11 @@ r.get('/', async (req, res) => {
     return res.json({
       type,
       total,
-      items: rows.map((a) => ({
+      items: rows.map((a: any) => ({
         id: a.id,
         name: a.name,
         candidates:
-          a.candidates?.map((c) => ({
+          a.candidates?.map((c: any) => ({
             id: c.mbid,
             name: c.name,
             score: c.score,
@@ -72,13 +72,13 @@ r.get('/', async (req, res) => {
   return res.json({
     type,
     total,
-    items: rows.map((al) => ({
+    items: rows.map((al: any) => ({
       id: al.id,
       artist: al.artist,
       title: al.title,
       year: al.year,
       candidates:
-        al.candidates?.map((c) => ({
+        al.candidates?.map((c: any) => ({
           id: c.rgMbid,
           title: c.title,
           primaryType: c.primaryType,

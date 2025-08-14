@@ -38,7 +38,7 @@ r.get('/', async (req, res) => {
       ok: true,
       type,
       total,
-      items: rows.map((a) => ({ id: a.id, name: a.name, mbid: a.mbid })),
+      items: rows.map((a: any) => ({ id: a.id, name: a.name, mbid: a.mbid })),
     });
   }
 
@@ -55,7 +55,7 @@ r.get('/', async (req, res) => {
     ok: true,
     type,
     total,
-    items: rows.map((al) => ({
+    items: rows.map((al: any) => ({
       id: al.id,
       artist: al.artist,
       title: al.title,
