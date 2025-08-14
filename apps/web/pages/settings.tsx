@@ -136,9 +136,10 @@ export default function SettingsPage() {
 
           {/* Yandex Music */}
           <section className="panel p-4 space-y-3">
-            <div className="text-sm font-medium text-gray-400">Yandex Music</div>
+            <div className="section-title">Yandex Music</div>
 
-            <FormRow label="Driver" help="Как получать лайки ЯМузыки: через Python proxy (рекомендуется) или нативно через токен.">
+            <FormRow label="Driver"
+                     help="Как получать лайки ЯМузыки: через Python proxy (рекомендуется) или нативно через токен.">
               <select
                   className="select"
                   value={settings.yandexDriver}

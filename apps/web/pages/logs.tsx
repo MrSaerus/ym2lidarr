@@ -1,4 +1,3 @@
-// apps/web/pages/logs.tsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
@@ -28,7 +27,6 @@ type Stats = Partial<{
   matchedAlbums: number | string;
 }>;
 
-// ---- helpers for /api/stats normalization (как на Overview)
 type LegacyOverview = {
   artists?: { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
   albums?:  { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
@@ -49,7 +47,6 @@ const coalesceNum = (...vals: any[]) => {
   return 0;
 };
 function normalizeStats(raw: any): Required<Stats> {
-  // старый формат { artists:{...}, albums:{...} }
   if (raw && (raw.artists || raw.albums)) {
     const d = raw as LegacyOverview;
 
@@ -77,7 +74,6 @@ function normalizeStats(raw: any): Required<Stats> {
     };
   }
 
-  // новый формат { totalArtists, matchedArtists, totalAlbums, matchedAlbums, ... }
   const s = raw as Stats;
   const totalArtists   = coalesceNum((s as any).totalArtists,   (s as any).artistsTotal, (s as any).artists?.total);
   const matchedArtists = coalesceNum((s as any).matchedArtists, (s as any).artistsMatched, (s as any).artists?.matched, (s as any).artists?.found);
@@ -91,30 +87,19 @@ function normalizeStats(raw: any): Required<Stats> {
     matchedAlbums: Math.min(matchedAlbums, totalAlbums),
   };
 }
-// ---- /helpers
 
 function parseData(l: LogItem): any {
   const v = l.data;
   if (v == null) return {};
   if (typeof v === 'string') {
-    try {
-      return JSON.parse(v);
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(v); } catch { return {}; }
   }
   return v;
 }
 
-function mbArtistUrl(id?: string) {
-  return id ? `https://musicbrainz.org/artist/${id}` : undefined;
-}
-function mbRGUrl(id?: string) {
-  return id ? `https://musicbrainz.org/release-group/${id}` : undefined;
-}
-function ymSearchUrl(q?: string) {
-  return q ? `https://music.yandex.ru/search?text=${encodeURIComponent(q)}` : undefined;
-}
+function mbArtistUrl(id?: string) { return id ? `https://musicbrainz.org/artist/${id}` : undefined; }
+function mbRGUrl(id?: string)     { return id ? `https://musicbrainz.org/release-group/${id}` : undefined; }
+function ymSearchUrl(q?: string)  { return q ? `https://music.yandex.ru/search?text=${encodeURIComponent(q)}` : undefined; }
 
 export default function LogsPage() {
   const [runs, setRuns] = useState<RunShort[]>([]);
@@ -125,19 +110,13 @@ export default function LogsPage() {
   const [auto, setAuto] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   const [loading, setLoading] = useState(false);
-  // фикс: приводим /api/stats к единому виду
   const [stats, setStats] = useState<Required<Stats> | null>(null);
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const tick = useRef<number | null>(null);
   const prevCount = useRef(0);
 
-  // ---- data
-  useEffect(() => {
-    loadRuns();
-    loadStats();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { loadRuns(); loadStats(); }, []);
 
   async function loadRuns() {
     try {
@@ -146,18 +125,14 @@ export default function LogsPage() {
         setRuns(r.runs);
         if (!sel && r.runs.length) setSel(r.runs[0].id);
       }
-    } catch {
-      /* ignore */
-    }
+    } catch {/* ignore */}
   }
 
   async function loadStats() {
     try {
       const raw = await api<any>('/api/stats');
       setStats(normalizeStats(raw));
-    } catch {
-      /* ignore */
-    }
+    } catch {/* ignore */}
   }
 
   async function pull() {
@@ -165,69 +140,50 @@ export default function LogsPage() {
     setLoading(true);
     try {
       const r = await api<{ ok: boolean; items: LogItem[]; nextAfter: number }>(
-          `/api/runs/${sel}/logs?after=${after}&limit=200`,
+          `/api/runs/${sel}/logs?after=${after}&limit=200`
       );
       if (r.ok) {
         if (r.items?.length) setItems((p) => [...p, ...r.items]);
         setAfter(r.nextAfter ?? after);
       }
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }
 
   useEffect(() => {
     if (!sel) return;
-    setItems([]);
-    setAfter(0);
+    setItems([]); setAfter(0);
     pull();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel]);
 
   useEffect(() => {
-    if (!auto || !sel) {
-      if (tick.current) clearInterval(tick.current);
-      tick.current = null;
-      return;
-    }
+    if (!auto || !sel) { if (tick.current) clearInterval(tick.current); tick.current = null; return; }
     tick.current = window.setInterval(() => pull(), 2000) as unknown as number;
-    return () => {
-      if (tick.current) clearInterval(tick.current);
-      tick.current = null;
-    };
+    return () => { if (tick.current) clearInterval(tick.current); tick.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, sel, after]);
 
-  const visItems = useMemo(
-      () => (showDebug ? items : items.filter((i) => i.level !== 'debug')),
-      [items, showDebug],
-  );
+  const visItems = useMemo(() => (showDebug ? items : items.filter(i => i.level !== 'debug')), [items, showDebug]);
 
   useEffect(() => {
     if (!auto) return;
     if (visItems.length > prevCount.current) {
       prevCount.current = visItems.length;
-      scroller.current?.scrollTo({
-        top: scroller.current.scrollHeight,
-        behavior: 'smooth',
-      });
+      scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
     }
   }, [visItems, auto]);
 
-  const startLine = useMemo(() => items.find((i) => parseData(i).event === 'start'), [items]);
-  const finishLine = useMemo(
-      () => items.slice().reverse().find((i) => parseData(i).event === 'finish'),
-      [items],
-  );
+  const startLine  = useMemo(() => items.find(i => parseData(i).event === 'start'), [items]);
+  const finishLine = useMemo(() => items.slice().reverse().find(i => parseData(i).event === 'finish'), [items]);
 
-  // ---- style helpers
+  // chips + уровни
   const pill = (t: string, cls: string) => (
       <span className={`inline-flex items-center rounded px-1.5 py-[2px] text-[11px] ${cls}`}>{t}</span>
   );
   const lvl = (s: string) =>
       ({
-        info: 'bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-500/30',
-        warn: 'bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/30',
+        info:  'bg-blue-500/15 text-blue-300 ring-1 ring-inset ring-blue-500/30',
+        warn:  'bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/30',
         error: 'bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-500/30',
         debug: 'bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-500/30',
       }[s] || 'bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-500/30');
@@ -235,165 +191,91 @@ export default function LogsPage() {
   const lineText = (l: LogItem) => {
     const d = parseData(l);
 
-    // NEW: более информативные строки для cool-down
     if (l.message?.startsWith('Artist skip (cool-down)')) {
-      return (
-          <>
-            Artist skip (cool-down) — <b>{d.name || d.artist || '—'}</b>
-            {d.song ? <> — <i>{d.song}</i></> : null}
-          </>
-      );
+      return <>Artist skip (cool-down) — <b>{d.name || d.artist || '—'}</b>{d.song ? <> — <i>{d.song}</i></> : null}</>;
     }
     if (l.message?.startsWith('Album skip (cool-down)')) {
-      return (
-          <>
-            Album skip (cool-down) — <b>{d.artist || '—'}</b>
-            {d.title ? <> — <i>{d.title}</i></> : null}
-          </>
-      );
+      return <>Album skip (cool-down) — <b>{d.artist || '—'}</b>{d.title ? <> — <i>{d.title}</i></> : null}</>;
     }
 
     switch (d.event) {
       case 'artist:found':
-        return (
-            <>
-              ✓ Found artist — <b>{d.name}</b>{' '}
-              {d.mbid && (
-                  <a className="text-indigo-300 underline ml-1" href={mbArtistUrl(d.mbid)} target="_blank" rel="noreferrer">
-                    MB
-                  </a>
-              )}
-              <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">
-                YM
-              </a>
-            </>
-        );
+        return <>
+          ✓ Found artist — <b>{d.name}</b>
+          {d.mbid && <a className="text-indigo-300 underline ml-1" href={mbArtistUrl(d.mbid)} target="_blank" rel="noreferrer">MB</a>}
+          <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">YM</a>
+        </>;
       case 'artist:not_found':
-        return (
-            <>
-              ✗ Artist not found — <b>{d.name}</b>{' '}
-              <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">
-                YM
-              </a>
-            </>
-        );
+        return <>✗ Artist not found — <b>{d.name}</b> <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">YM</a></>;
       case 'album:found':
-        return (
-            <>
-              ✓ Found album — <b>{d.artist}</b> — <i>{d.title}</i>{' '}
-              {d.mbid && (
-                  <a className="text-indigo-300 underline ml-1" href={mbRGUrl(d.mbid)} target="_blank" rel="noreferrer">
-                    MB
-                  </a>
-              )}
-              <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">
-                YM
-              </a>
-            </>
-        );
+        return <>
+          ✓ Found album — <b>{d.artist}</b> — <i>{d.title}</i>
+          {d.mbid && <a className="text-indigo-300 underline ml-1" href={mbRGUrl(d.mbid)} target="_blank" rel="noreferrer">MB</a>}
+          <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">YM</a>
+        </>;
       case 'album:not_found':
-        return (
-            <>
-              ✗ Album not found — <b>{d.artist}</b> — <i>{d.title}</i>{' '}
-              <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">
-                YM
-              </a>
-            </>
-        );
+        return <>✗ Album not found — <b>{d.artist}</b> — <i>{d.title}</i> <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">YM</a></>;
       case 'start':
         return <>Fetch likes from Yandex: artists {d.artists}, albums {d.albums} (driver: {d.driver})</>;
       case 'finish':
-        if (d.target) {
-          return <>Added to Lidarr: {d.added} new {d.target}, failed {d.failed}</>;
-        }
-        return (
-            <>
-              Matching finished — artists {d.artists?.matched}/{d.artists?.total} (skipped {d.artists?.skipped}); albums{' '}
-              {d.albums?.matched}/{d.albums?.total} (skipped {d.albums?.skipped})
-            </>
-        );
+        return d.target
+            ? <>Added to Lidarr: {d.added} new {d.target}, failed {d.failed}</>
+            : <>Matching finished — artists {d.artists?.matched}/{d.artists?.total} (skipped {d.artists?.skipped}); albums {d.albums?.matched}/{d.albums?.total} (skipped {d.albums?.skipped})</>;
       default:
         return <>{l.message}</>;
     }
   };
 
   return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
+      <div className="min-h-screen text-slate-100">
         <Nav />
-        <div className="mx-auto max-w-6xl px-4 py-6">
-          {/* controls */}
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <div className="rounded-md bg-slate-900 ring-1 ring-slate-800 p-2 flex flex-wrap items-center gap-2">
-              <span className="text-sm text-slate-300">Run:</span>
-              <select
-                  className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1"
-                  value={sel ?? ''}
-                  onChange={(e) => setSel(Number(e.target.value) || null)}
-              >
-                {!runs.length && <option value="">No runs yet</option>}
-                {runs.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      #{r.id} • {r.status} • {new Date(r.startedAt).toLocaleString()}
-                    </option>
-                ))}
-              </select>
+        <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
+          {/* controls — как на других страницах */}
+          <div className="toolbar flex-wrap gap-2">
+            <span className="text-sm text-gray-400">Run:</span>
+            <select
+                className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1"
+                value={sel ?? ''}
+                onChange={(e) => setSel(Number(e.target.value) || null)}
+            >
+              {!runs.length && <option value="">No runs yet</option>}
+              {runs.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    #{r.id} • {r.status} • {new Date(r.startedAt).toLocaleString()}
+                  </option>
+              ))}
+            </select>
 
-              <button
-                  className="ml-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 text-sm"
-                  onClick={loadRuns}
-              >
-                Refresh runs
-              </button>
+            <button className="btn btn-outline" onClick={loadRuns}>Refresh runs</button>
 
-              <label className="ml-2 inline-flex items-center gap-2 text-sm text-slate-300">
-                <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-                Auto follow
-              </label>
+            <label className="ml-2 inline-flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+              Auto follow
+            </label>
 
-              <label className="ml-2 inline-flex items-center gap-2 text-sm text-slate-300">
-                <input
-                    type="checkbox"
-                    checked={showDebug}
-                    onChange={(e) => setShowDebug(e.target.checked)}
-                />
-                Show debug
-              </label>
+            <label className="ml-2 inline-flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={showDebug} onChange={(e) => setShowDebug(e.target.checked)} />
+              Show debug
+            </label>
 
-              <button
-                  className="ml-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 text-sm"
-                  onClick={() => pull()}
-                  disabled={loading || !sel}
-              >
-                Pull once
-              </button>
-              <button
-                  className="ml-2 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1 text-sm"
-                  onClick={() => {
-                    setItems([]);
-                    setAfter(0);
-                    prevCount.current = 0;
-                  }}
-                  disabled={!sel}
-              >
-                Clear
-              </button>
-            </div>
+            <button className="btn btn-outline" onClick={() => pull()} disabled={loading || !sel}>Pull once</button>
+            <button
+                className="btn btn-outline"
+                onClick={() => { setItems([]); setAfter(0); prevCount.current = 0; }}
+                disabled={!sel}
+            >
+              Clear
+            </button>
           </div>
 
-          {/* summary */}
-          <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-lg bg-slate-900 ring-1 ring-slate-800 p-3">
+          {/* summary — такие же «панели», как на других страницах */}
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="panel p-3">
               <div className="text-xs text-slate-400 mb-1">Yandex likes (from log):</div>
               {startLine ? (
                   <div className="flex gap-2 items-center">
-                    {pill(
-                        'Artists ' + (parseData(startLine).artists ?? '—'),
-                        'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30',
-                    )}
-                    {pill(
-                        'Albums ' + (parseData(startLine).albums ?? '—'),
-                        'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30',
-                    )}
+                    {pill('Artists ' + (parseData(startLine).artists ?? '—'), 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30')}
+                    {pill('Albums ' + (parseData(startLine).albums ?? '—'), 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30')}
                     <span className="text-xs text-slate-500">driver: {parseData(startLine).driver}</span>
                   </div>
               ) : (
@@ -401,45 +283,31 @@ export default function LogsPage() {
               )}
             </div>
 
-            <div className="rounded-lg bg-slate-900 ring-1 ring-slate-800 p-3">
+            <div className="panel p-3">
               <div className="text-xs text-slate-400 mb-1">Database (current):</div>
               <div className="flex gap-2 items-center">
-                {pill(
-                    `Matched artists ${toNum(stats?.matchedArtists ?? 0)} / ${toNum(stats?.totalArtists ?? 0)}`,
-                    'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30',
-                )}
-                {pill(
-                    `Matched albums ${toNum(stats?.matchedAlbums ?? 0)} / ${toNum(stats?.totalAlbums ?? 0)}`,
-                    'bg-teal-500/15 text-teal-300 ring-1 ring-teal-500/30',
-                )}
+                {pill(`Matched artists ${toNum(stats?.matchedArtists ?? 0)} / ${toNum(stats?.totalArtists ?? 0)}`, 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30')}
+                {pill(`Matched albums ${toNum(stats?.matchedAlbums ?? 0)} / ${toNum(stats?.totalAlbums ?? 0)}`, 'bg-teal-500/15 text-teal-300 ring-1 ring-teal-500/30')}
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* log list */}
-          <div className="rounded-lg bg-slate-900 ring-1 ring-slate-800 overflow-hidden">
+          <div className="panel overflow-hidden">
             <div className="border-b border-slate-800 px-4 py-2 text-sm text-slate-300 sticky top-0 bg-slate-900/80 backdrop-blur">
               {sel ? `Run #${sel}` : 'Live Logs'}
               {finishLine && (
                   <span className="ml-3 text-xs text-slate-400">
-                {/* если finish из пуша в Lidarr */}
-                    {parseData(finishLine).target ? (
-                        <>
-                          • finished summary: added {parseData(finishLine).added} {parseData(finishLine).target}, failed{' '}
-                          {parseData(finishLine).failed}
-                        </>
-                    ) : (
-                        <>
-                          • matching summary: artists {parseData(finishLine).artists?.matched}/{parseData(finishLine).artists?.total}, albums{' '}
-                          {parseData(finishLine).albums?.matched}/{parseData(finishLine).albums?.total}
-                        </>
-                    )}
+                {parseData(finishLine).target ? (
+                    <>• finished summary: added {parseData(finishLine).added} {parseData(finishLine).target}, failed {parseData(finishLine).failed}</>
+                ) : (
+                    <>• matching summary: artists {parseData(finishLine).artists?.matched}/{parseData(finishLine).artists?.total}, albums {parseData(finishLine).albums?.matched}/{parseData(finishLine).albums?.total}</>
+                )}
               </span>
               )}
             </div>
 
             <div ref={scroller} className="max-h-[70vh] overflow-auto">
-              <ul className="divide-y divide-slate-800">
+              <ul className="log-list">
                 {visItems.length === 0 && (
                     <li className="px-4 py-10 text-center text-slate-500">
                       {loading ? 'Loading…' : sel ? 'No logs yet for this run.' : 'Select a run to view logs.'}
@@ -462,7 +330,7 @@ export default function LogsPage() {
               Showing {visItems.length} lines • After id = {after}
             </div>
           </div>
-        </div>
+        </main>
       </div>
   );
 }
