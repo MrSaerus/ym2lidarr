@@ -186,7 +186,7 @@ export default function UnmatchedPage() {
           </div>
 
           <div className="panel overflow-x-auto">
-            <Table className="table-like-logs">
+            <Table className="table-default">
               <thead>
               <tr>
                 <Th>#</Th>

@@ -28,9 +28,7 @@
         --muted: #6b7280;
     }
 
-    html, body, #__next {
-        height: 100%;
-    }
+    html, body, #__next { height: 100%; }
 
     body {
         @apply antialiased;
@@ -51,9 +49,7 @@
         @apply rounded-lg;
     }
 
-    .toolbar {
-        @apply flex flex-wrap items-center gap-2 mb-3;
-    }
+    .toolbar { @apply flex flex-wrap items-center gap-2 mb-3; }
 
     .btn {
         @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm;
@@ -76,15 +72,21 @@
         background: var(--panel);
         border: 1px solid var(--panel-border);
     }
-    .badge-ok    { border-color: rgba(34,211,238,.3); color: var(--accent); }
-    .badge-warn  { border-color: rgba(245,158,11,.3); color: var(--warn); }
-    .badge-err   { border-color: rgba(239,68,68,.3); color: var(--error); }
+    .badge-ok   { border-color: rgba(34,211,238,.3); color: var(--accent); }
+    .badge-warn { border-color: rgba(245,158,11,.3); color: var(--warn); }
+    .badge-err  { border-color: rgba(239,68,68,.3); color: var(--error); }
 
-    /* Формы (FormRow использует эти классы) */
-    .form-row { @apply grid grid-cols-1 md:grid-cols-3 gap-2 items-center; }
-    .form-row > label { @apply text-sm text-gray-400; }
-    .form-row > .control { @apply md:col-span-2; }
+    /* Вкладки (Nav) */
+    .tab {
+        @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm no-underline border;
+        border-color: transparent;
+    }
+    .tab--active {
+        background: var(--panel);
+        border-color: var(--primary-600);
+    }
 
+    /* Поля ввода */
     .input, .select, .textarea {
         @apply w-full rounded-md px-2 py-1.5 text-sm bg-transparent;
         border: 1px solid var(--panel-border);
@@ -95,48 +97,46 @@
         box-shadow: 0 0 0 2px rgba(139,92,246,.35);
     }
 
-    /* Таблицы */
+    /* Таблицы — общий базовый стиль */
     .table { @apply w-full border-collapse text-sm; }
     .table thead th {
-        @apply px-3 py-2 text-left text-gray-400 sticky top-0 bg-[color:var(--panel)];
+        @apply px-3 py-2 text-left text-gray-400 sticky top-0;
+        background: var(--panel);
         border-bottom: 1px solid var(--panel-border);
         z-index: 1;
     }
     .table tbody td {
-        @apply px-3 py-2 border-b;
+        @apply px-3 py-2 border-b align-middle;
         border-color: var(--panel-border);
+    }
+
+    /* Модификатор «как логи» */
+    .table-default thead th {
+        border-bottom: 1px solid rgba(148,163,184,0.18); /* slate-400 ~18% */
+    }
+    .table-default tbody tr + tr {
+        border-top: 1px solid rgba(148,163,184,0.12);     /* тонкая линия между строками */
+    }
+    .table-default tbody tr:hover {
+        background: rgba(148,163,184,0.06);               /* лёгкий hover */
     }
 
     /* Цветовые хелперы */
     .text-primary { color: var(--primary); }
     .text-ym-yellow { color: var(--ym); }
 
-    /* Прогрессбар (если используешь ProgressBar-компонент) */
-    .progress {
-        @apply w-full h-2 rounded-full bg-gray-700 overflow-hidden;
-    }
-    .progress .bar {
-        @apply h-full rounded-full;
-        background: var(--primary);
-    }
+    /* Прогрессбар — единые классы + вариации цвета */
+    .progress { @apply w-full h-2 rounded-full overflow-hidden; background: rgba(255,255,255,.08); }
+    .progress .bar { @apply h-full rounded-full; background: var(--primary); }
+    .bar--primary { background: var(--primary); }
+    .bar--accent  { background: var(--accent); }
+    .bar--ym      { background: var(--ym); }
 
     /* Размеры иконок — фиксируем 16px */
     .icon { @apply h-4 w-4 shrink-0; }
 
     .link { text-decoration: underline; opacity: .9; }
     .link:hover { opacity: 1; }
-
-    .table-like-logs thead th {
-        border-bottom: 1px solid rgba(148, 163, 184, 0.18); /* slate-400 ~18% */
-    }
-
-    .table-like-logs tbody tr + tr {
-        border-top: 1px solid rgba(148, 163, 184, 0.12);   /* тонкая линия между строками */
-    }
-
-    .table-like-logs tbody tr:hover {
-        background: rgba(148, 163, 184, 0.06);            /* лёгкий hover, как в логах */
-    }
 
     /* Кнопочные ссылки в таблицах */
     .link-chip {
@@ -155,26 +155,25 @@
     .link-chip:hover { background: rgba(51,65,85,.6); } /* slate-700/60 */
 
     .link-chip--ym {
-        border-color: rgba(250,204,21,.35);     /* amber */
+        border-color: rgba(250,204,21,.35);    /* amber */
         color: #fde68a;
-        background: rgba(120,53,15,.25);        /* amber-ish dark */
+        background: rgba(120,53,15,.25);       /* amber-ish dark */
     }
     .link-chip--ym:hover { background: rgba(180,83,9,.28); }
 
     .link-chip--mb {
-        border-color: rgba(99,102,241,.35);     /* indigo */
+        border-color: rgba(99,102,241,.35);    /* indigo */
         color: #c7d2fe;
-        background: rgba(49,46,129,.28);        /* indigo-ish dark */
+        background: rgba(49,46,129,.28);       /* indigo-ish dark */
     }
     .link-chip--mb:hover { background: rgba(67,56,202,.3); }
 
-    .log-list li + li {
-        border-top: 1px solid rgba(148, 163, 184, 0.12); /* slate-400 @ 12% */
-    }
-    .log-list li:hover {
-        background: rgba(148, 163, 184, 0.06);
-    }
+    /* Логи */
+    .log-list li + li { border-top: 1px solid rgba(148,163,184,0.12); }
+    .log-list li:hover { background: rgba(148,163,184,0.06); }
+
     /* --- Settings: layout & tone --- */
+    /* ЕДИНОЕ определение form-row (убрали ранний дубль) */
     .form-row {
         display: grid;
         grid-template-columns: 220px 1fr;
@@ -183,28 +182,23 @@
         padding: 8px 0;
     }
     .form-row + .form-row {
-        border-top: 1px solid rgba(148, 163, 184, 0.08); /* тонкий разделитель */
+        border-top: 1px solid rgba(148,163,184,0.08); /* тонкий разделитель */
     }
-
     .form-row-label {
         padding-top: 10px;
-        font-size: 13px;                  /* было крупнее — делаем спокойнее */
-        color: rgba(226, 232, 240, 0.8);  /* slate-200 @ 80% */
+        font-size: 13px;
+        color: rgba(226,232,240,0.8); /* slate-200 @ 80% */
     }
-
     .form-row-control .control > .input,
-    .form-row-control .control > .select {
-        width: 100%;
-    }
-
+    .form-row-control .control > .select { width: 100%; }
     .form-row-help {
         margin-top: 6px;
-        font-size: 12px;                  /* меньше и менее акцентно */
+        font-size: 12px;
         line-height: 1.45;
-        color: rgba(148, 163, 184, 0.75); /* slate-400 @ 75% */
+        color: rgba(148,163,184,0.75); /* slate-400 @ 75% */
     }
     .form-row-help code {
-        background: rgba(148, 163, 184, 0.12);
+        background: rgba(148,163,184,0.12);
         border-radius: 4px;
         padding: 0 4px;
         font-size: 12px;
@@ -215,19 +209,13 @@
         font-size: 12px;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        color: rgba(148, 163, 184, 0.7);  /* slate-400 @ 70% */
+        color: rgba(148,163,184,0.7);
         margin-bottom: 2px;
     }
 
     /* мобильная адаптация */
     @media (max-width: 640px) {
-        .form-row {
-            grid-template-columns: 1fr;
-            gap: 8px;
-        }
-        .form-row-label {
-            padding-top: 0;
-        }
+        .form-row { grid-template-columns: 1fr; gap: 8px; }
+        .form-row-label { padding-top: 0; }
     }
-
 }

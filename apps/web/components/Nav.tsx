@@ -30,10 +30,7 @@ export default function Nav() {
                 <Link
                     key={href}
                     href={href}
-                    className={`inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm no-underline ${
-                        active ? 'bg-[color:var(--panel)] border' : 'border'
-                    }`}
-                    style={{ borderColor: active ? 'var(--primary-600)' : 'transparent' }}
+                    className={`tab ${active ? 'tab--active' : ''}`}
                 >
                   <Icon className="icon" />
                   <span>{label}</span>

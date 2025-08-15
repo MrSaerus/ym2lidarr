@@ -6,17 +6,15 @@ type TProps = PropsWithChildren<{ className?: string }>;
 
 export function Table({ children, className = '' }: TProps) {
     return (
-        <table className={`w-full border-collapse text-sm text-slate-200 table-like-logs ${className}`}>
+        <table className={`table table-default ${className}`}>
             {children}
         </table>
     );
 }
 
-export function Th({ children, className = '' }: TProps) {
+export function Th({children, className = '' }: TProps) {
     return (
-        <th
-            className={`px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-400 bg-slate-900 sticky top-0 ${className}`}
-        >
+        <th className={`text-xs font-semibold uppercase tracking-wide ${className}`}>
             {children}
         </th>
     );
@@ -28,7 +26,7 @@ export function Td({
                        colSpan,
                    }: PropsWithChildren<{ className?: string; colSpan?: number }>) {
     return (
-        <td className={`px-3 py-2 align-middle ${className}`} colSpan={colSpan}>
+        <td className={`${className}`} colSpan={colSpan}>
             {children}
         </td>
     );

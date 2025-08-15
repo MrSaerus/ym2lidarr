@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
+import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
 
 type LegacyOverview = {
@@ -91,21 +92,6 @@ function normalize(raw: any): Required<Stats> {
     unmatchedAlbums: Math.max(ur, 0),
     lastRun: s.lastRun ?? null,
   };
-}
-
-function ProgressBar({ value, color }: { value: number; color?: 'primary' | 'accent' }) {
-  const pct = Math.max(0, Math.min(1, value || 0));
-  return (
-      <div className="progress">
-        <div
-            className="bar"
-            style={{
-              width: `${(pct * 100).toFixed(2)}%`,
-              background: color === 'accent' ? 'var(--accent)' : 'var(--primary)',
-            }}
-        />
-      </div>
-  );
 }
 
 // helper: маленький бейдж
