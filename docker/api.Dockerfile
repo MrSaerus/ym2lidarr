@@ -33,7 +33,7 @@ COPY apps/api/package.json ./apps/api/package.json
 RUN npm ci --omit=dev
 
 # Добавим Prisma CLI в рантайм, чтобы выполнять миграции
-RUN npm i prisma@6.14.0 --no-save
+RUN npm i prisma@5.22.0 --no-save
 
 # Копируем сгенерированный клиент
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma

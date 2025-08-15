@@ -65,7 +65,7 @@ for (const p of PREFIXES) {
       select: { id: true, ts: true, level: true, message: true, data: true, runId: true },
     });
 
-    const mapped = items.map((l: any) => ({
+    const mapped = items.map((l) => ({
       id: l.id,
       ts: l.ts,
       level: l.level,
