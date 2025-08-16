@@ -15,7 +15,7 @@ import unmatchedRouter from './routes/unmatched';
 import { initScheduler } from './scheduler';
 
 const app = express();
-const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
+const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
 
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
