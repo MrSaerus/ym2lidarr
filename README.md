@@ -2,6 +2,22 @@
 
 Сервис, забирает **лайки из Яндекс.Музыки** и отправляет их в **Lidarr** (кастом-лист артистов или релиз-группы альбомов).
 
+## Screenshots
+
+1. Main
+![Index](images/index.png)
+2. Found
+![Found](images/found.png)
+3. Unmatched
+![Unmatched](images/unmatched.png)
+4. Settings
+![Settings](images/settings.png)
+5. Backup
+![Backup](images/backup.png)
+6. Logs
+![Logs](images/logs.png)
+
+
 🚀 **Возможности**
 
 - Сбор лайкнутых **треков/альбомов** из Яндекс.Музыки.
