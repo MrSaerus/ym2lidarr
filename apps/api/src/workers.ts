@@ -1,7 +1,13 @@
 import { startRun, endRun, patchRunStats, log as dblog } from './log';
 import { notify } from './notify';
 import { prisma } from './prisma';
-import { ensureArtistInLidarr, ensureAlbumInLidarr } from './services/lidarr';
+import {
+  ensureArtistInLidarr,
+  ensureAlbumInLidarr,
+  getRootFolders,
+  getQualityProfiles,
+  getMetadataProfiles,
+} from './services/lidarr';
 import { mbFindArtist, mbFindReleaseGroup } from './services/mb';
 import { yandexPullLikes, setPyproxyUrl, getDriver } from './services/yandex';
 
@@ -9,7 +15,7 @@ function nkey(s: string) {
   return s.trim().toLowerCase();
 }
 
-const RECHECK_HOURS = parseInt(process.env.MB_RECHECK_HOURS || '168', 10); // 7 дней по умолчанию
+const RECHECK_HOURS = parseInt(process.env.MB_RECHECK_HOURS || '168', 10); // 7 дней
 function shouldRecheck(last?: Date | null, force = false) {
   if (force) return true;
   if (!last) return true;
@@ -22,34 +28,24 @@ async function getRunWithRetry(id: number, tries = 3, ms = 200) {
     try {
       const r = await prisma.syncRun.findUnique({ where: { id } });
       if (r) return r;
-    } catch {
-      // ignore
-    }
+    } catch {}
     await new Promise((res) => setTimeout(res, ms));
   }
   return prisma.syncRun.findUnique({ where: { id } });
 }
 
-/**
- * Синк Яндекс → БД (матчинг в MusicBrainz)
- * @param tokenOverride - опционально токен «на раз»
- * @param reuseRunId    - если задан, используем уже созданный run (например, создан маршрутом)
- * @param opts.force    - форсировать рематч без cool-down
- */
+/** ===== Yandex sync ===== */
 export async function runYandexSync(
     tokenOverride?: string,
     reuseRunId?: number,
     opts?: { force?: boolean },
 ) {
   const force = !!opts?.force;
-
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-  // pyproxy URL и драйвер из настроек
   setPyproxyUrl(setting?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
   const driver = getDriver(setting?.yandexDriver);
 
-  // токен
   const token =
       tokenOverride || setting?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN;
 
@@ -60,7 +56,6 @@ export async function runYandexSync(
     return;
   }
 
-  // создаём/подготавливаем run
   let runId: number;
   if (reuseRunId) {
     runId = reuseRunId;
@@ -92,7 +87,6 @@ export async function runYandexSync(
 
     const { artists, albums } = await yandexPullLikes(token, { driver });
 
-    // событие старта — для компактного отображения в логах
     await dblog(runId, 'info', 'Fetch likes from Yandex', {
       event: 'start',
       artists: artists.length,
@@ -100,21 +94,13 @@ export async function runYandexSync(
       driver,
     });
 
-    await patchRunStats(runId, {
-      a_total: artists.length,
-      al_total: albums.length,
-      phase: 'match',
-    });
+    await patchRunStats(runId, { a_total: artists.length, al_total: albums.length, phase: 'match' });
     await dblog(runId, 'info', `Got ${artists.length} artists, ${albums.length} albums`);
 
-    // ===== Artists matching =====
-    let a_done = 0,
-        a_matched = 0,
-        a_skipped = 0;
-
+    // Artists
+    let a_done = 0, a_matched = 0, a_skipped = 0;
     for (const name of artists) {
       const key = nkey(name);
-
       let a = await prisma.artist.upsert({
         where: { key },
         create: { key, name },
@@ -124,68 +110,36 @@ export async function runYandexSync(
       if (!a.mbid) {
         if (!shouldRecheck(a.mbCheckedAt, force)) {
           a_skipped++;
-          await dblog(runId, 'debug', 'Artist skip (cool-down)', {
-            name,
-            last: a.mbCheckedAt,
-            hours: RECHECK_HOURS,
-          });
+          await dblog(runId, 'debug', 'Artist skip (cool-down)', { name, last: a.mbCheckedAt, hours: RECHECK_HOURS });
         } else {
           const r = await mbFindArtist(name);
-
-          // кэш
           await prisma.cacheEntry.upsert({
             where: { key: `artist:${key}` },
-            create: {
-              scope: 'artist',
-              key: `artist:${key}`,
-              payload: JSON.stringify(r.raw ?? r),
-            },
+            create: { scope: 'artist', key: `artist:${key}`, payload: JSON.stringify(r.raw ?? r) },
             update: { payload: JSON.stringify(r.raw ?? r) },
           });
-
-          // кандидаты
           await prisma.artistCandidate.deleteMany({ where: { artistId: a.id } });
           if (Array.isArray(r.candidates) && r.candidates.length) {
             await prisma.artistCandidate.createMany({
               data: r.candidates.map((c: any) => ({
-                artistId: a.id,
-                mbid: c.id,
-                name: c.name || '',
-                score: c.score ?? null,
-                type: c.type || null,
-                country: c.country || null,
-                url: c.url || null,
-                highlight: !!c.highlight,
+                artistId: a.id, mbid: c.id, name: c.name || '', score: c.score ?? null, type: c.type || null,
+                country: c.country || null, url: c.url || null, highlight: !!c.highlight,
               })),
             });
           }
-
           if (r.mbid) {
             a = await prisma.artist.update({
               where: { id: a.id },
-              data: {
-                mbid: r.mbid,
-                matched: true,
-                mbCheckedAt: new Date(),
-                mbAttempts: { increment: 1 },
-              },
+              data: { mbid: r.mbid, matched: true, mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
             a_matched++;
-            // компактная строка в логах
-            await dblog(runId, 'info', 'Artist matched', {
-              event: 'artist:found',
-              name,
-              mbid: r.mbid,
-            });
+            await dblog(runId, 'info', 'Artist matched', { event: 'artist:found', name, mbid: r.mbid });
           } else {
             a = await prisma.artist.update({
               where: { id: a.id },
               data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
-            await dblog(runId, 'info', 'Artist not matched', {
-              event: 'artist:not_found',
-              name,
-            });
+            await dblog(runId, 'info', 'Artist not matched', { event: 'artist:not_found', name });
           }
         }
       } else {
@@ -193,20 +147,14 @@ export async function runYandexSync(
       }
 
       a_done++;
-      if (a_done % 5 === 0) {
-        await patchRunStats(runId, { a_done, a_matched, a_skipped });
-      }
+      if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_matched, a_skipped });
     }
     await patchRunStats(runId, { a_done, a_matched, a_skipped });
 
-    // ===== Albums matching =====
-    let al_done = 0,
-        al_matched = 0,
-        al_skipped = 0;
-
+    // Albums
+    let al_done = 0, al_matched = 0, al_skipped = 0;
     for (const al of albums) {
       const key = nkey(`${al.artist}|||${al.title}`);
-
       let rec = await prisma.album.upsert({
         where: { key },
         create: { key, artist: al.artist, title: al.title, year: al.year || null },
@@ -217,59 +165,33 @@ export async function runYandexSync(
         if (!shouldRecheck(rec.mbCheckedAt, force)) {
           al_skipped++;
           await dblog(runId, 'debug', 'Album skip (cool-down)', {
-            artist: al.artist,
-            title: al.title,
-            last: rec.mbCheckedAt,
-            hours: RECHECK_HOURS,
+            artist: al.artist, title: al.title, last: rec.mbCheckedAt, hours: RECHECK_HOURS,
           });
         } else {
           const r = await mbFindReleaseGroup(al.artist, al.title);
-
-          // кэш
           await prisma.cacheEntry.upsert({
             where: { key: `album:${key}` },
-            create: {
-              scope: 'album',
-              key: `album:${key}`,
-              payload: JSON.stringify(r.raw ?? r),
-            },
+            create: { scope: 'album', key: `album:${key}`, payload: JSON.stringify(r.raw ?? r) },
             update: { payload: JSON.stringify(r.raw ?? r) },
           });
-
-          // кандидаты
           await prisma.albumCandidate.deleteMany({ where: { albumId: rec.id } });
           if (Array.isArray(r.candidates) && r.candidates.length) {
             await prisma.albumCandidate.createMany({
               data: r.candidates.map((c: any) => ({
-                albumId: rec.id,
-                rgMbid: c.id,
-                title: c.title || '',
-                primaryType: c.primaryType || null,
-                firstReleaseDate: c.firstReleaseDate || null,
-                primaryArtist: c.primaryArtist || null,
-                score: c.score ?? null,
-                url: c.url || null,
-                highlight: !!c.highlight,
+                albumId: rec.id, rgMbid: c.id, title: c.title || '', primaryType: c.primaryType || null,
+                firstReleaseDate: c.firstReleaseDate || null, primaryArtist: c.primaryArtist || null,
+                score: c.score ?? null, url: c.url || null, highlight: !!c.highlight,
               })),
             });
           }
-
           if (r.mbid) {
             rec = await prisma.album.update({
               where: { id: rec.id },
-              data: {
-                rgMbid: r.mbid,
-                matched: true,
-                mbCheckedAt: new Date(),
-                mbAttempts: { increment: 1 },
-              },
+              data: { rgMbid: r.mbid, matched: true, mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
             al_matched++;
             await dblog(runId, 'info', 'Album matched', {
-              event: 'album:found',
-              artist: al.artist,
-              title: al.title,
-              mbid: r.mbid,
+              event: 'album:found', artist: al.artist, title: al.title, mbid: r.mbid,
             });
           } else {
             rec = await prisma.album.update({
@@ -277,9 +199,7 @@ export async function runYandexSync(
               data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
             await dblog(runId, 'info', 'Album not matched', {
-              event: 'album:not_found',
-              artist: al.artist,
-              title: al.title,
+              event: 'album:not_found', artist: al.artist, title: al.title,
             });
           }
         }
@@ -288,13 +208,10 @@ export async function runYandexSync(
       }
 
       al_done++;
-      if (al_done % 5 === 0) {
-        await patchRunStats(runId, { al_done, al_matched, al_skipped });
-      }
+      if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched, al_skipped });
     }
     await patchRunStats(runId, { al_done, al_matched, al_skipped, phase: 'done' });
 
-    // финальная сводка для компактного отображения
     await dblog(runId, 'info', 'Matching finished', {
       event: 'finish',
       artists: { total: artists.length, matched: a_matched, skipped: a_skipped },
@@ -303,31 +220,23 @@ export async function runYandexSync(
 
     await endRun(runId, 'ok');
 
-    // уведомление
     const finalRun = await getRunWithRetry(runId);
     try {
       const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
       await notify('yandex', 'ok', stats);
-    } catch {
-      /* noop */
-    }
+    } catch {}
   } catch (e: any) {
     await dblog(runId, 'error', 'Yandex sync failed', { error: String(e?.message || e) });
     await endRun(runId, 'error', String(e?.message || e));
-
     const finalRun = await getRunWithRetry(runId);
     try {
       const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
       await notify('yandex', 'error', stats);
-    } catch {
-      /* noop */
-    }
+    } catch {}
   }
 }
 
-/**
- * Пуш результатов в Lidarr (артисты по умолчанию, либо альбомы — из настроек)
- */
+/** ===== Lidarr push ===== */
 export async function runLidarrPush() {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
@@ -338,17 +247,81 @@ export async function runLidarrPush() {
   }
 
   const run = await startRun('lidarr', {
-    phase: 'push',
-    total: 0,
-    done: 0,
-    ok: 0,
-    failed: 0,
-    target: setting.pushTarget || 'artists',
+    phase: 'push', total: 0, done: 0, ok: 0, failed: 0, target: setting.pushTarget || 'artists',
   });
   if (!run) return;
 
   try {
     const target = setting.pushTarget === 'albums' ? 'albums' : 'artists';
+
+    // --- мягкий пречек с автоподбором единственного rootfolder ---
+    let effective = {
+      rootFolderPath: String(setting.rootFolderPath || '').replace(/\/+$/, ''),
+      qualityProfileId: Number.isFinite(Number(setting.qualityProfileId))
+          ? Number(setting.qualityProfileId) : undefined as number | undefined,
+      metadataProfileId: Number.isFinite(Number(setting.metadataProfileId))
+          ? Number(setting.metadataProfileId) : undefined as number | undefined,
+    };
+
+    try {
+      const [roots, qps, mps] = await Promise.all([
+        getRootFolders(setting as any),
+        getQualityProfiles(setting as any),
+        getMetadataProfiles(setting as any),
+      ]);
+
+      let matchedRoot = Array.isArray(roots)
+          ? roots.find((r: any) => String(r?.path || '').replace(/\/+$/, '') === effective.rootFolderPath)
+          : undefined;
+
+      if (!matchedRoot && Array.isArray(roots) && roots.length === 1) {
+        matchedRoot = roots[0];
+        effective.rootFolderPath = String(matchedRoot?.path || '').replace(/\/+$/, '');
+        await dblog(run.id, 'warn', 'Root path mismatch; using the only available rootfolder', {
+          wanted: setting.rootFolderPath, used: effective.rootFolderPath,
+        });
+      }
+
+      if (!matchedRoot) {
+        await dblog(run.id, 'error', 'Invalid Lidarr rootFolderPath', {
+          wanted: { rootFolderPath: effective.rootFolderPath || setting.rootFolderPath },
+          found: { roots },
+        });
+        await endRun(run.id, 'error', 'Invalid Lidarr rootFolderPath');
+        return;
+      }
+
+      const qpIds = new Set<number>(
+          (Array.isArray(qps) ? qps : []).map((q: any) => Number(q?.id)).filter(Number.isFinite),
+      );
+
+      const mpIdsFromApi = Array.isArray(mps)
+          ? mps.map((m: any) => Number(m?.id)).filter(Number.isFinite) : [];
+      const mpIdsFromRoots = Array.isArray(roots)
+          ? roots.map((r: any) => Number(r?.defaultMetadataProfileId)).filter(Number.isFinite) : [];
+      const mpIds = new Set<number>([...mpIdsFromApi, ...mpIdsFromRoots]);
+
+      if (!effective.qualityProfileId && matchedRoot?.defaultQualityProfileId) {
+        effective.qualityProfileId = Number(matchedRoot.defaultQualityProfileId);
+      }
+      if (!effective.metadataProfileId && matchedRoot?.defaultMetadataProfileId) {
+        effective.metadataProfileId = Number(matchedRoot.defaultMetadataProfileId);
+      }
+
+      const qpOk = !!effective.qualityProfileId && qpIds.has(effective.qualityProfileId);
+      const mpOk = !!effective.metadataProfileId && (mpIds.size === 0 ? true : mpIds.has(effective.metadataProfileId));
+
+      if (!qpOk || !mpOk) {
+        await dblog(run.id, 'warn', 'Lidarr profiles mismatch, using effective defaults', {
+          wanted: { qualityProfileId: setting.qualityProfileId, metadataProfileId: setting.metadataProfileId },
+          effective,
+          found: { qualityProfiles: qps, metadataProfiles: mps, fallbackMetaIdsFromRoots: Array.from(new Set(mpIdsFromRoots)) },
+        });
+      }
+    } catch (e: any) {
+      await dblog(run.id, 'warn', `Lidarr precheck failed (soft): ${String(e?.message || e)}`);
+    }
+    // --- /пречек ---
 
     const items =
         target === 'albums'
@@ -364,32 +337,86 @@ export async function runLidarrPush() {
     await patchRunStats(run.id, { total: items.length });
     await dblog(run.id, 'info', `Pushing ${items.length} ${target} to Lidarr`);
 
-    let done = 0,
-        ok = 0,
-        failed = 0;
+    let done = 0, ok = 0, failed = 0;
+
+    const effSetting = {
+      ...(setting as any),
+      rootFolderPath: effective.rootFolderPath,
+      qualityProfileId: effective.qualityProfileId,
+      metadataProfileId: effective.metadataProfileId,
+    };
 
     for (const it of items) {
       try {
         if (target === 'albums') {
-          await ensureAlbumInLidarr(setting as any, {
+          const res = await ensureAlbumInLidarr(effSetting as any, {
             artist: (it as any).artist,
             title: (it as any).title,
             rgMbid: (it as any).rgMbid!,
           });
+
+          const title = res?.title || (it as any).title;
+          const lidarrId = res?.id;
+          const path = res?.path;
+          const action = res?.__action || 'created';
+          const from = res?.__from;
+
+          // <<<<<< СООБЩЕНИЕ С ЧЕЛОВЕКОЧИТАЕМОЙ СВОДКОЙ >>>>>>
+          await dblog(
+              run.id,
+              'info',
+              `Pushed album: id=${lidarrId ?? 'n/a'} action=${action} title="${title}" rgMbid=${(it as any).rgMbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              {
+                target,
+                item: it.id,
+                action,
+                lidarrId,
+                path,
+                title,
+                rgMbid: (it as any).rgMbid,
+                from,
+                payload: res?.__request,
+                response: res?.__response,
+              },
+          );
+
         } else {
-          await ensureArtistInLidarr(setting as any, {
+          const res = await ensureArtistInLidarr(effSetting as any, {
             name: (it as any).name,
             mbid: (it as any).mbid!,
           });
+
+          const name = res?.artistName || (it as any).name;
+          const lidarrId = res?.id;
+          const path = res?.path;
+          const action = res?.__action || 'created';
+          const from = res?.__from;
+
+          // <<<<<< СООБЩЕНИЕ С ЧЕЛОВЕКОЧИТАЕМОЙ СВОДКОЙ >>>>>>
+          await dblog(
+              run.id,
+              'info',
+              `Pushed artist: id=${lidarrId ?? 'n/a'} action=${action} name="${name}" mbid=${(it as any).mbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              {
+                target,
+                item: it.id,
+                action,
+                lidarrId,
+                path,
+                name,
+                mbid: (it as any).mbid,
+                from,
+                payload: res?.__request,
+                response: res?.__response,
+              },
+          );
         }
         ok++;
-        await dblog(run.id, 'info', 'Pushed', { target, item: it.id });
       } catch (e: any) {
         failed++;
-        await dblog(run.id, 'warn', 'Push failed', {
+        await dblog(run.id, 'warn', `Push failed: ${String(e?.message || e)}`, {
           target,
           item: it.id,
-          error: String(e?.message || e),
         });
       }
 
@@ -404,19 +431,14 @@ export async function runLidarrPush() {
     try {
       const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
       await notify('lidarr', 'ok', stats);
-    } catch {
-      /* noop */
-    }
+    } catch {}
   } catch (e: any) {
     await dblog(run.id, 'error', 'Lidarr push failed', { error: String(e?.message || e) });
     await endRun(run.id, 'error', String(e?.message || e));
-
     const finalRun = await getRunWithRetry(run.id);
     try {
       const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
       await notify('lidarr', 'error', stats);
-    } catch {
-      /* noop */
-    }
+    } catch {}
   }
 }
