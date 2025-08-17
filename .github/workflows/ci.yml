@@ -1,0 +1,41 @@
+name: CI (tests)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "20"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Install, Build & Test
+    runs-on: ubuntu-latest
+    environment: ym2lidarr
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install deps (root + workspaces)
+        run: npm ci
+
+      - name: Prisma generate (apps/api)
+        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+
+      - name: Build API
+        run: npm --workspace apps/api run build --if-present
+
+      - name: Build Web
+        run: npm --workspace apps/web run build --if-present
+
+      - name: Run tests
+        run: npm test --workspaces --if-present

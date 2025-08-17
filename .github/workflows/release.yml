@@ -1,0 +1,100 @@
+name: Release (build all & push to Docker Hub)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  DOCKERHUB_NS: ${{ vars.DOCKERHUB_NS }}
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build_all:
+    name: Build all images (no push)
+    runs-on: ubuntu-latest
+    environment: ym2lidarr
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "api",    dockerfile: "api.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "web",    dockerfile: "web.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "pyproxy",dockerfile: "pyproxy.Dockerfile",repo: "ym2lidarr" }
+          - { name: "single", dockerfile: "single.Dockerfile", repo: "ym2lidarr" }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.target.name }} (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./${{ matrix.target.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: dummy/${{ matrix.target.repo }}:${{ github.event.release.tag_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  push_all:
+    name: Push all images (from release tag)
+    runs-on: ubuntu-latest
+    environment: ym2lidarr
+    needs: build_all
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: "api",    dockerfile: "api.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "web",    dockerfile: "web.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "pyproxy",dockerfile: "pyproxy.Dockerfile",repo: "ym2lidarr" }
+          - { name: "single", dockerfile: "single.Dockerfile", repo: "ym2lidarr" }
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Docker meta (${{ matrix.target.name }})
+        id: meta
+        uses: docker/metadata-action@v5
+        env:
+          IMAGE: ${{ env.DOCKERHUB_NS }}/${{ matrix.target.repo }}
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{major}},value=${{ github.event.release.tag_name }}
+            type=raw,value=latest
+
+      - name: Build & Push ${{ matrix.target.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./${{ matrix.target.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
