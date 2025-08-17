@@ -25,10 +25,10 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { name: "api",    dockerfile: "api.Dockerfile",    repo: "ym2lidarr" }
-          - { name: "web",    dockerfile: "web.Dockerfile",    repo: "ym2lidarr" }
-          - { name: "pyproxy",dockerfile: "pyproxy.Dockerfile",repo: "ym2lidarr" }
-          - { name: "single", dockerfile: "single.Dockerfile", repo: "ym2lidarr" }
+          - { name: "api",    dockerfile: "./docker/api.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "web",    dockerfile: "./docker/web.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "pyproxy",dockerfile: "./docker/pyproxy.Dockerfile",repo: "ym2lidarr" }
+          - { name: "single", dockerfile: "./docker/single.Dockerfile", repo: "ym2lidarr" }
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -56,10 +56,10 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { name: "api",    dockerfile: "api.Dockerfile",    repo: "ym2lidarr" }
-          - { name: "web",    dockerfile: "web.Dockerfile",    repo: "ym2lidarr" }
-          - { name: "pyproxy",dockerfile: "pyproxy.Dockerfile",repo: "ym2lidarr" }
-          - { name: "single", dockerfile: "single.Dockerfile", repo: "ym2lidarr" }
+          - { name: "api",    dockerfile: "./docker/api.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "web",    dockerfile: "./docker/web.Dockerfile",    repo: "ym2lidarr" }
+          - { name: "pyproxy",dockerfile: "./docker/pyproxy.Dockerfile",repo: "ym2lidarr" }
+          - { name: "single", dockerfile: "./docker/single.Dockerfile", repo: "ym2lidarr" }
 
     steps:
       - uses: actions/checkout@v4
