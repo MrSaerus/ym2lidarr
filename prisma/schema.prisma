@@ -13,8 +13,8 @@ model Setting {
   id Int @id @default(1)
 
   // планировщик синков
-  yandexCron      String?
-  lidarrCron      String?
+  yandexCron String?
+  lidarrCron String?
 
   // backup
   backupEnabled   Boolean @default(false)
@@ -23,15 +23,15 @@ model Setting {
   backupDir       String? // по умолчанию /app/data/backups
 
   // notifications
-  notifyType      String? // 'none' | 'telegram' | 'webhook'
-  telegramBot     String?
-  telegramChatId  String?
-  webhookUrl      String?
-  webhookSecret   String?
+  notifyType     String? // 'none' | 'telegram' | 'webhook'
+  telegramBot    String?
+  telegramChatId String?
+  webhookUrl     String?
+  webhookSecret  String?
 
   // yandex driver
-  yandexDriver    String? @default("pyproxy") // 'pyproxy' | 'native'
-  pyproxyUrl      String? // если нужно отличать от env
+  yandexDriver String? @default("pyproxy") // 'pyproxy' | 'native'
+  pyproxyUrl   String? // если нужно отличать от env
 
   // tokens & endpoints
   yandexToken  String?
@@ -61,19 +61,19 @@ model Setting {
 }
 
 model Artist {
-  id          Int       @id @default(autoincrement())
-  key         String    @unique
-  name        String
-  mbid        String?
-  matched     Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  name      String
+  mbid      String?
+  matched   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // NEW:
   mbCheckedAt DateTime?
   mbAttempts  Int       @default(0)
 
-  candidates  ArtistCandidate[]
+  candidates ArtistCandidate[]
 }
 
 model ArtistCandidate {
@@ -93,21 +93,21 @@ model ArtistCandidate {
 }
 
 model Album {
-  id              Int       @id @default(autoincrement())
-  key             String    @unique
-  artist          String
-  title           String
-  year            Int?
-  rgMbid          String?
-  matched         Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  artist    String
+  title     String
+  year      Int?
+  rgMbid    String?
+  matched   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // NEW:
-  mbCheckedAt     DateTime?
-  mbAttempts      Int       @default(0)
+  mbCheckedAt DateTime?
+  mbAttempts  Int       @default(0)
 
-  candidates      AlbumCandidate[]
+  candidates AlbumCandidate[]
 }
 
 model AlbumCandidate {
@@ -160,4 +160,16 @@ model SyncLog {
   run SyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, ts])
+}
+
+model ArtistPush {
+  id             Int      @id @default(autoincrement())
+  mbid           String   @unique
+  name           String
+  path           String?
+  lidarrArtistId Int?
+  status         String   @default("CREATED")
+  firstPushedAt  DateTime @default(now())
+  lastCheckedAt  DateTime @updatedAt
+  source         String?
 }

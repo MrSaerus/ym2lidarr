@@ -254,7 +254,6 @@ export async function runLidarrPush() {
   try {
     const target = setting.pushTarget === 'albums' ? 'albums' : 'artists';
 
-    // --- мягкий пречек с автоподбором единственного rootfolder ---
     let effective = {
       rootFolderPath: String(setting.rootFolderPath || '').replace(/\/+$/, ''),
       qualityProfileId: Number.isFinite(Number(setting.qualityProfileId))
@@ -361,11 +360,11 @@ export async function runLidarrPush() {
           const action = res?.__action || 'created';
           const from = res?.__from;
 
-          // <<<<<< СООБЩЕНИЕ С ЧЕЛОВЕКОЧИТАЕМОЙ СВОДКОЙ >>>>>>
           await dblog(
               run.id,
               'info',
-              `Pushed album: id=${lidarrId ?? 'n/a'} action=${action} title="${title}" rgMbid=${(it as any).rgMbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              // `Pushed album: id=${lidarrId ?? 'n/a'} action=${action} title="${title}" rgMbid=${(it as any).rgMbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              `Pushed album ${title}, action=${action}`,
               {
                 target,
                 item: it.id,
@@ -381,6 +380,30 @@ export async function runLidarrPush() {
           );
 
         } else {
+          const cached = await prisma.artistPush.findUnique({
+            where: { mbid: (it as any).mbid },
+          });
+
+          if (cached && (cached.status === 'CREATED' || cached.status === 'EXISTS')) {
+            await dblog(
+                run.id,
+                'info',
+                //`Skip push: artist already in Lidarr (status=${cached.status}) name="${cached.name}" mbid=${cached.mbid} lidarrId=${cached.lidarrArtistId ?? 'n/a'}`,
+                `Skip push: "${cached.name}" already in Lidarr`,
+                {
+                  target,
+                  item: it.id,
+                  action: 'skip',
+                  lidarrId: cached.lidarrArtistId,
+                  path: cached.path,
+                  name: cached.name,
+                  mbid: cached.mbid,
+                  from: 'cache',
+                },
+            );
+            continue;
+          }
+
           const res = await ensureArtistInLidarr(effSetting as any, {
             name: (it as any).name,
             mbid: (it as any).mbid!,
@@ -392,11 +415,11 @@ export async function runLidarrPush() {
           const action = res?.__action || 'created';
           const from = res?.__from;
 
-          // <<<<<< СООБЩЕНИЕ С ЧЕЛОВЕКОЧИТАЕМОЙ СВОДКОЙ >>>>>>
           await dblog(
               run.id,
               'info',
-              `Pushed artist: id=${lidarrId ?? 'n/a'} action=${action} name="${name}" mbid=${(it as any).mbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              // `Pushed artist: id=${lidarrId ?? 'n/a'} action=${action} name="${name}" mbid=${(it as any).mbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
+              `Pushed artist ${name}, action=${action}`,
               {
                 target,
                 item: it.id,
@@ -410,6 +433,24 @@ export async function runLidarrPush() {
                 response: res?.__response,
               },
           );
+
+          await prisma.artistPush.upsert({
+            where: { mbid: (it as any).mbid },
+            create: {
+              mbid: (it as any).mbid,
+              name,
+              path: path ?? null,
+              lidarrArtistId: lidarrId ?? null,
+              status: action === 'exists' ? 'EXISTS' : 'CREATED',
+              source: 'push',
+            },
+            update: {
+              name,
+              path: path ?? null,
+              lidarrArtistId: lidarrId ?? null,
+              status: action === 'exists' ? 'EXISTS' : 'CREATED',
+            },
+          });
         }
         ok++;
       } catch (e: any) {
