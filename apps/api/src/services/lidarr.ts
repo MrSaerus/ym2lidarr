@@ -7,14 +7,15 @@ export type Setting = {
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
   monitor?: string | null; // e.g. "all"
+  lidarrAllowNoMetadata?: boolean | null; // NEW: разрешить fallback без метаданных (только для артистов)
 };
 
 type EnsureResult = any & {
-  __action?: 'created' | 'exists' | 'skipped'; // <- добавил 'skipped'
+  __action?: 'created' | 'exists' | 'skipped'; // добавлен 'skipped'
   __from?: 'lookup' | 'fallback';
   __request?: any;
   __response?: any;
-  __reason?: string; // <- причина, когда skipped
+  __reason?: string; // причина для skipped
 };
 
 function baseUrl(s: Setting) {
@@ -144,11 +145,16 @@ export async function ensureArtistInLidarr(
     throw new Error('Lidarr settings missing: rootFolderPath, qualityProfileId, metadataProfileId');
   }
 
+  const allowNoMeta =
+      !!(s as any).lidarrAllowNoMetadata ||
+      String(process.env.LIDARR_ALLOW_NO_METADATA || '').toLowerCase() === 'true' ||
+      process.env.LIDARR_ALLOW_NO_METADATA === '1';
+
   // Уже есть?
   const existing = await findExistingArtistByMBID(s, a.mbid);
   if (existing) return { ...existing, __action: 'exists', __from: 'lookup' };
 
-  // Пробуем lookup; если пусто/упало — fallback: минимальный POST
+  // Пытаемся lookup по MBID
   let src: any | null = null;
   let from: 'lookup' | 'fallback' = 'lookup';
   try {
@@ -156,10 +162,18 @@ export async function ensureArtistInLidarr(
     if (Array.isArray(lu.data) && lu.data.length) {
       src = lu.data[0];
     } else {
+      // lookup вернул пусто
+      if (!allowNoMeta) {
+        return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+      }
       src = null;
       from = 'fallback';
     }
   } catch {
+    // lookup упал
+    if (!allowNoMeta) {
+      return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+    }
     src = null;
     from = 'fallback';
   }
@@ -175,10 +189,10 @@ export async function ensureArtistInLidarr(
     tags: [] as any[],
   };
 
+  // Если src нет, а fallback разрешён — минимально достаточное тело
   const body = src
       ? { ...src, ...baseBody }
       : {
-        // минимально достаточное тело без lookup
         artistName: a.name,
         path: `${normalizeRoot(s.rootFolderPath)}/${a.name}`.replace(/\/{2,}/g, '/'),
         ...baseBody,
@@ -189,14 +203,26 @@ export async function ensureArtistInLidarr(
   if (r.status >= 400 && String(r.data).includes('already exists')) {
     const again = await findExistingArtistByMBID(s, a.mbid);
     const res = again ?? r.data;
-    return { ...(res as any), __action: 'exists', __from: from, __request: body, __response: r.data };
+    return {
+      ...(res as any),
+      __action: 'exists',
+      __from: from,
+      __request: body,
+      __response: r.data,
+    };
   }
   if (r.status >= 400) {
     // отдадим максимально информативную ошибку
     throw new Error(`Lidarr add artist failed: ${r.status} ${JSON.stringify(r.data)}`);
   }
 
-  return { ...(r.data as any), __action: 'created', __from: from, __request: body, __response: r.data };
+  return {
+    ...(r.data as any),
+    __action: 'created',
+    __from: from,
+    __request: body,
+    __response: r.data,
+  };
 }
 
 export async function ensureAlbumInLidarr(
@@ -207,15 +233,17 @@ export async function ensureAlbumInLidarr(
     throw new Error('Lidarr settings missing: rootFolderPath, qualityProfileId, metadataProfileId');
   }
 
+  // сначала быстрая проверка, не добавлен ли уже (без зависимости от lookup)
   try {
     const lib0 = await api<any[]>(s, '/api/v1/album');
     const exists0 =
         Array.isArray(lib0.data) && lib0.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
     if (exists0) return { ...exists0, __action: 'exists', __from: 'lookup' };
   } catch {
-    // игнорируем — ниже ещё будет попытка
+    // ignore
   }
 
+  // lookup обязателен для альбомов — без него не создаём
   let src: any | null = null;
   try {
     const lu = await lookupWithRetry(s, `/api/v1/album/lookup?term=mbid:${al.rgMbid}`);
@@ -227,6 +255,7 @@ export async function ensureAlbumInLidarr(
     return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
   }
 
+  // Убедимся, что артист есть
   const artistMbid: string | undefined = src.foreignArtistId || src.artist?.foreignArtistId;
   if (artistMbid) {
     await ensureArtistInLidarr(s, {
@@ -235,13 +264,12 @@ export async function ensureAlbumInLidarr(
     });
   }
 
-  // 4) Ещё раз проверим наличие альбома (как и было изначально)
+  // повторная проверка наличия альбома
   const lib = await api<any[]>(s, '/api/v1/album');
   const exists =
       Array.isArray(lib.data) && lib.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
   if (exists) return { ...exists, __action: 'exists', __from: 'lookup' };
 
-  // 5) Создание
   const body = {
     ...src,
     foreignAlbumId: al.rgMbid,
@@ -260,10 +288,23 @@ export async function ensureAlbumInLidarr(
     const found = Array.isArray(refreshed.data)
         ? refreshed.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid))
         : r.data;
-    return { ...(found as any), __action: 'exists', __from: 'lookup', __request: body, __response: r.data };
+    return {
+      ...(found as any),
+      __action: 'exists',
+      __from: 'lookup',
+      __request: body,
+      __response: r.data,
+    };
   }
-  if (r.status >= 400)
+  if (r.status >= 400) {
     throw new Error(`Lidarr add album failed: ${r.status} ${JSON.stringify(r.data)}`);
+  }
 
-  return { ...(r.data as any), __action: 'created', __from: 'lookup', __request: body, __response: r.data };
+  return {
+    ...(r.data as any),
+    __action: 'created',
+    __from: 'lookup',
+    __request: body,
+    __response: r.data,
+  };
 }

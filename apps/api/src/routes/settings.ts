@@ -19,6 +19,7 @@ const ALLOWED_FIELDS = new Set([
   'lidarrApiKey',
   'pushTarget',
   'lidarrCron',
+  'lidarrAllowNoMetadata',
 
   // backup
   'backupEnabled',
@@ -50,6 +51,9 @@ function pickSettings(input: any) {
   if ('pushTarget' in out) {
     const v = String(out.pushTarget || '').toLowerCase();
     out.pushTarget = v === 'albums' ? 'albums' : 'artists';
+  }
+  if ('lidarrAllowNoMetadata' in out) {
+    out.lidarrAllowNoMetadata = !!out.lidarrAllowNoMetadata;
   }
   if ('backupEnabled' in out) {
     out.backupEnabled = !!out.backupEnabled;

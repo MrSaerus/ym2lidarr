@@ -10,11 +10,11 @@ datasource db {
 }
 
 model Setting {
-  id Int @id @default(1)
-
+  id                    Int     @id @default(1)
+  lidarrAllowNoMetadata Boolean @default(false)
   // планировщик синков
-  yandexCron String?
-  lidarrCron String?
+  yandexCron            String?
+  lidarrCron            String?
 
   // backup
   backupEnabled   Boolean @default(false)

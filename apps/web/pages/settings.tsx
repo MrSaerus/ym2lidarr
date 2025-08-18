@@ -15,6 +15,7 @@ type Settings = {
   lidarrApiKey?: string | null;
   pushTarget: 'artists' | 'albums';
   lidarrCron?: string | null;
+  lidarrAllowNoMetadata?: boolean | null;
 
   // Backup
   backupEnabled: boolean;
@@ -41,6 +42,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     lidarrApiKey: s.lidarrApiKey ?? '',
     pushTarget: (s.pushTarget as any) || 'artists',
     lidarrCron: s.lidarrCron ?? '0 */12 * * *', // каждые 12 часов
+    lidarrAllowNoMetadata: !!s.lidarrAllowNoMetadata,
 
     backupEnabled: !!s.backupEnabled,
     backupCron: s.backupCron ?? '0 3 * * *', // ежедневно в 03:00
@@ -214,7 +216,21 @@ export default function SettingsPage() {
                   placeholder="xxxxxxxxxxxxxxxx"
               />
             </FormRow>
-
+            <FormRow
+                label="Allow fallback without metadata"
+                help="Если сервер метаданных недоступен: разрешить создавать артистов без lookup (альбомы всё равно требуют метаданные)."
+            >
+              <div className="control flex items-center gap-2">
+                <input
+                    type="checkbox"
+                    checked={!!settings.lidarrAllowNoMetadata}
+                    onChange={(e) =>
+                        setSettings({ ...settings, lidarrAllowNoMetadata: e.target.checked })
+                    }
+                />
+                <span className="text-sm text-gray-500">Create artists without metadata when lookup fails</span>
+              </div>
+            </FormRow>
             <FormRow label="Push target" help="Кого отправлять в Lidarr при пуше: артистов (по умолчанию) или release-groups альбомов.">
               <select
                   className="select"
