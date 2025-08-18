@@ -173,3 +173,16 @@ model ArtistPush {
   lastCheckedAt  DateTime @updatedAt
   source         String?
 }
+
+model AlbumPush {
+  id            Int      @id @default(autoincrement())
+  mbid          String   @unique
+  title         String
+  artistName    String?
+  path          String?
+  lidarrAlbumId Int?
+  status        String   @default("CREATED")
+  firstPushedAt DateTime @default(now())
+  lastCheckedAt DateTime @updatedAt
+  source        String?
+}

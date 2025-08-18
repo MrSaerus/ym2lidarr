@@ -348,6 +348,29 @@ export async function runLidarrPush() {
     for (const it of items) {
       try {
         if (target === 'albums') {
+          const cachedAlbum = await prisma.albumPush.findUnique({
+            where: { mbid: (it as any).mbid },
+          });
+
+          if (cachedAlbum && (cachedAlbum.status === 'CREATED' || cachedAlbum.status === 'EXISTS')) {
+            await dblog(
+                run.id,
+                'info',
+                // `Skip push: album already in Lidarr (status=${cachedAlbum.status}) title="${cachedAlbum.title}" mbid=${cachedAlbum.mbid} lidarrId=${cachedAlbum.lidarrAlbumId ?? 'n/a'}`,
+                `Skip push: album ${cachedAlbum.title} already in Lidarr.`,
+                {
+                  target,
+                  item: (it as any).id,
+                  action: 'skip',
+                  lidarrId: cachedAlbum.lidarrAlbumId,
+                  path: cachedAlbum.path,
+                  title: cachedAlbum.title,
+                  mbid: cachedAlbum.mbid,
+                  from: 'cache',
+                },
+            );
+            continue;
+          }
           const res = await ensureAlbumInLidarr(effSetting as any, {
             artist: (it as any).artist,
             title: (it as any).title,
@@ -378,7 +401,23 @@ export async function runLidarrPush() {
                 response: res?.__response,
               },
           );
-
+          await prisma.albumPush.upsert({
+            where: { mbid: (it as any).mbid },
+            create: {
+              mbid: (it as any).mbid,
+              title,
+              path: path ?? null,
+              lidarrAlbumId: lidarrId ?? null,
+              status: action === 'exists' ? 'EXISTS' : 'CREATED',
+              source: 'push',
+            },
+            update: {
+              title,
+              path: path ?? null,
+              lidarrAlbumId: lidarrId ?? null,
+              status: action === 'exists' ? 'EXISTS' : 'CREATED',
+            },
+          });
         } else {
           const cached = await prisma.artistPush.findUnique({
             where: { mbid: (it as any).mbid },
