@@ -10,10 +10,11 @@ export type Setting = {
 };
 
 type EnsureResult = any & {
-  __action?: 'created' | 'exists';
+  __action?: 'created' | 'exists' | 'skipped'; // <- добавил 'skipped'
   __from?: 'lookup' | 'fallback';
   __request?: any;
   __response?: any;
+  __reason?: string; // <- причина, когда skipped
 };
 
 function baseUrl(s: Setting) {
@@ -206,10 +207,25 @@ export async function ensureAlbumInLidarr(
     throw new Error('Lidarr settings missing: rootFolderPath, qualityProfileId, metadataProfileId');
   }
 
-  const lu = await lookupWithRetry(s, `/api/v1/album/lookup?term=mbid:${al.rgMbid}`);
-  if (!Array.isArray(lu.data) || !lu.data.length)
-    throw new Error(`Lidarr lookup failed for album ${al.title} (${al.rgMbid})`);
-  const src = lu.data[0];
+  try {
+    const lib0 = await api<any[]>(s, '/api/v1/album');
+    const exists0 =
+        Array.isArray(lib0.data) && lib0.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
+    if (exists0) return { ...exists0, __action: 'exists', __from: 'lookup' };
+  } catch {
+    // игнорируем — ниже ещё будет попытка
+  }
+
+  let src: any | null = null;
+  try {
+    const lu = await lookupWithRetry(s, `/api/v1/album/lookup?term=mbid:${al.rgMbid}`);
+    if (!Array.isArray(lu.data) || !lu.data.length) {
+      return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+    }
+    src = lu.data[0];
+  } catch {
+    return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+  }
 
   const artistMbid: string | undefined = src.foreignArtistId || src.artist?.foreignArtistId;
   if (artistMbid) {
@@ -219,11 +235,13 @@ export async function ensureAlbumInLidarr(
     });
   }
 
+  // 4) Ещё раз проверим наличие альбома (как и было изначально)
   const lib = await api<any[]>(s, '/api/v1/album');
   const exists =
       Array.isArray(lib.data) && lib.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
   if (exists) return { ...exists, __action: 'exists', __from: 'lookup' };
 
+  // 5) Создание
   const body = {
     ...src,
     foreignAlbumId: al.rgMbid,

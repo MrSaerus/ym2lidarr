@@ -348,29 +348,33 @@ export async function runLidarrPush() {
     for (const it of items) {
       try {
         if (target === 'albums') {
-          const cachedAlbum = await prisma.albumPush.findUnique({
-            where: { mbid: (it as any).mbid },
-          });
-
-          if (cachedAlbum && (cachedAlbum.status === 'CREATED' || cachedAlbum.status === 'EXISTS')) {
-            await dblog(
-                run.id,
-                'info',
-                // `Skip push: album already in Lidarr (status=${cachedAlbum.status}) title="${cachedAlbum.title}" mbid=${cachedAlbum.mbid} lidarrId=${cachedAlbum.lidarrAlbumId ?? 'n/a'}`,
-                `Skip push: album ${cachedAlbum.title} already in Lidarr.`,
-                {
-                  target,
-                  item: (it as any).id,
-                  action: 'skip',
-                  lidarrId: cachedAlbum.lidarrAlbumId,
-                  path: cachedAlbum.path,
-                  title: cachedAlbum.title,
-                  mbid: cachedAlbum.mbid,
-                  from: 'cache',
-                },
-            );
-            continue;
+          // ====== ALBUM CACHE & SKIP (uses rgMbid) ======
+          const albumRgMbid = (it as any).rgMbid;
+          if (albumRgMbid) {
+            const cachedAlbum = await prisma.albumPush.findUnique({
+              where: { mbid: albumRgMbid },
+            });
+            if (cachedAlbum && (cachedAlbum.status === 'CREATED' || cachedAlbum.status === 'EXISTS')) {
+              await dblog(
+                  run.id,
+                  'info',
+                  `Skip push: album ${cachedAlbum.title} already in Lidarr.`,
+                  {
+                    target,
+                    item: (it as any).id,
+                    action: 'skip',
+                    lidarrId: cachedAlbum.lidarrAlbumId,
+                    path: cachedAlbum.path,
+                    title: cachedAlbum.title,
+                    mbid: cachedAlbum.mbid,
+                    from: 'cache',
+                  },
+              );
+              continue;
+            }
           }
+          // ===============================================
+
           const res = await ensureAlbumInLidarr(effSetting as any, {
             artist: (it as any).artist,
             title: (it as any).title,
@@ -386,7 +390,6 @@ export async function runLidarrPush() {
           await dblog(
               run.id,
               'info',
-              // `Pushed album: id=${lidarrId ?? 'n/a'} action=${action} title="${title}" rgMbid=${(it as any).rgMbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
               `Pushed album ${title}, action=${action}`,
               {
                 target,
@@ -401,24 +404,38 @@ export async function runLidarrPush() {
                 response: res?.__response,
               },
           );
-          await prisma.albumPush.upsert({
-            where: { mbid: (it as any).mbid },
-            create: {
-              mbid: (it as any).mbid,
-              title,
-              path: path ?? null,
-              lidarrAlbumId: lidarrId ?? null,
-              status: action === 'exists' ? 'EXISTS' : 'CREATED',
-              source: 'push',
-            },
-            update: {
-              title,
-              path: path ?? null,
-              lidarrAlbumId: lidarrId ?? null,
-              status: action === 'exists' ? 'EXISTS' : 'CREATED',
-            },
-          });
+
+          // ====== ALBUM UPSERT (MBID-guard with rgMbid) ======
+          if ((it as any).rgMbid) {
+            await prisma.albumPush.upsert({
+              where: { mbid: (it as any).rgMbid },
+              create: {
+                mbid: (it as any).rgMbid,
+                title,
+                path: path ?? null,
+                lidarrAlbumId: lidarrId ?? null,
+                status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                source: 'push',
+              },
+              update: {
+                title,
+                path: path ?? null,
+                lidarrAlbumId: lidarrId ?? null,
+                status: action === 'exists' ? 'EXISTS' : 'CREATED',
+              },
+            });
+          } else {
+            await dblog(
+                run.id,
+                'debug',
+                `Album push persisted without cache (no rgMbid): title="${title}" lidarrId=${lidarrId ?? 'n/a'} action=${action}`,
+                { target, item: (it as any).id, title, lidarrId, action }
+            );
+          }
+          // ================================================
+
         } else {
+          // ====== ARTIST CACHE & SKIP ======
           const cached = await prisma.artistPush.findUnique({
             where: { mbid: (it as any).mbid },
           });
@@ -427,7 +444,6 @@ export async function runLidarrPush() {
             await dblog(
                 run.id,
                 'info',
-                //`Skip push: artist already in Lidarr (status=${cached.status}) name="${cached.name}" mbid=${cached.mbid} lidarrId=${cached.lidarrArtistId ?? 'n/a'}`,
                 `Skip push: "${cached.name}" already in Lidarr`,
                 {
                   target,
@@ -442,6 +458,7 @@ export async function runLidarrPush() {
             );
             continue;
           }
+          // =================================
 
           const res = await ensureArtistInLidarr(effSetting as any, {
             name: (it as any).name,
@@ -457,7 +474,6 @@ export async function runLidarrPush() {
           await dblog(
               run.id,
               'info',
-              // `Pushed artist: id=${lidarrId ?? 'n/a'} action=${action} name="${name}" mbid=${(it as any).mbid} path="${path ?? 'n/a'}" from=${from ?? 'lookup'}`,
               `Pushed artist ${name}, action=${action}`,
               {
                 target,
