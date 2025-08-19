@@ -9,9 +9,12 @@ const r = Router();
 // Старт с возвратом runId (для live прогресса)
 r.post('/yandex', async (req, res) => {
   const override =
-    typeof req.body?.token === 'string' && req.body.token.trim()
-      ? req.body.token.trim()
-      : undefined;
+      typeof req.body?.token === 'string' && req.body.token.trim()
+        ? req.body.token.trim()
+            : undefined;
+  const force =
+      req.body?.force === true ||
+      String(req.query.force || '').toLowerCase() === 'true';
   const run = await startRun('yandex', {
     phase: 'start',
     a_total: 0,
@@ -22,7 +25,7 @@ r.post('/yandex', async (req, res) => {
     al_matched: 0,
   });
   // запустим асинхронно
-  runYandexSync(override, run.id).catch(() => {});
+  runYandexSync(override, run.id, { force }).catch(() => {});
   res.json({ started: true, runId: run.id });
 });
 

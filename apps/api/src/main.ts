@@ -14,6 +14,7 @@ import syncRouter from './routes/sync';
 import unmatchedRouter from './routes/unmatched';
 import { initScheduler } from './scheduler';
 import lidarrArtists from './routes/lidarr-artists';
+import yandexRouter from './routes/yandex';
 
 const app = express();
 const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
@@ -33,6 +34,7 @@ app.use('/api/stats', statsRouter);
 app.use(runsRouter);
 app.use('/api/backup', backupRouter);
 app.use('/api/lidarr', lidarrArtists);
+app.use('/api/yandex', yandexRouter);
 
 app.listen(PORT, async () => {
   console.log(`[api] listening on ${PORT}`);

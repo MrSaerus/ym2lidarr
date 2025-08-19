@@ -11,6 +11,12 @@ import {
 import { mbFindArtist, mbFindReleaseGroup } from './services/mb';
 import { yandexPullLikes, setPyproxyUrl, getDriver } from './services/yandex';
 
+// ⬇⬇⬇ NEW: кеш Яндекса
+import {
+  upsertYandexArtistCache,
+  upsertYandexAlbumCache,
+} from './services/yandex-cache';
+
 function nkey(s: string) {
   return s.trim().toLowerCase();
 }
@@ -89,30 +95,60 @@ export async function runYandexSync(
 
     await dblog(runId, 'info', 'Fetch likes from Yandex', {
       event: 'start',
-      artists: artists.length,
-      albums: albums.length,
+      artists: Array.isArray(artists) ? artists.length : 0,
+      albums: Array.isArray(albums) ? albums.length : 0,
       driver,
     });
 
     await patchRunStats(runId, { a_total: artists.length, al_total: albums.length, phase: 'match' });
     await dblog(runId, 'info', `Got ${artists.length} artists, ${albums.length} albums`);
 
-    // Artists
+    // ============================
+    // ========== Artists =========
+    // ============================
     let a_done = 0, a_matched = 0, a_skipped = 0;
-    for (const name of artists) {
-      const key = nkey(name);
+
+    for (const aRaw of artists as Array<string | { id?: number|string; name?: string; mbid?: string }>) {
+      // Нормализация входа от драйвера:
+      // поддерживаем и строки (name), и объекты { id, name, mbid? }
+      const aName = (typeof aRaw === 'string') ? aRaw : (aRaw?.name ?? '');
+      const yaArtistId =
+          (typeof aRaw === 'object' && aRaw !== null)
+              ? (aRaw.id != null ? Number(aRaw.id) : undefined)
+              : undefined;
+      const mbidFromYandex = (typeof aRaw === 'object' && aRaw !== null) ? (aRaw.mbid ?? undefined) : undefined;
+
+      const key = nkey(aName);
       let a = await prisma.artist.upsert({
         where: { key },
-        create: { key, name },
-        update: { name },
+        create: { key, name: aName },
+        update: { name: aName },
       });
 
+      // ⬇⬇⬇ NEW: Пишем кеш Яндекса (только если есть реальный Yandex Artist ID)
+      try {
+        if (yaArtistId) {
+          await upsertYandexArtistCache({
+            yandexArtistId: yaArtistId,
+            name: aName,
+            // если драйвер уже дал mbid — сохраним
+            mbid: mbidFromYandex ?? undefined,
+          });
+          await dblog(runId, 'debug', 'cache:artist upsert', { yandexArtistId: yaArtistId, name: aName });
+        } else {
+          await dblog(runId, 'debug', 'cache:artist skipped (no yandexArtistId)', { name: aName });
+        }
+      } catch (e: any) {
+        await dblog(runId, 'warn', 'cache:artist error', { name: aName, error: String(e?.message || e) });
+      }
+
+      // Дальше — прежняя логика матчинга на MB
       if (!a.mbid) {
         if (!shouldRecheck(a.mbCheckedAt, force)) {
           a_skipped++;
-          await dblog(runId, 'debug', 'Artist skip (cool-down)', { name, last: a.mbCheckedAt, hours: RECHECK_HOURS });
+          await dblog(runId, 'debug', 'Artist skip (cool-down)', { name: aName, last: a.mbCheckedAt, hours: RECHECK_HOURS });
         } else {
-          const r = await mbFindArtist(name);
+          const r = await mbFindArtist(aName);
           await prisma.cacheEntry.upsert({
             where: { key: `artist:${key}` },
             create: { scope: 'artist', key: `artist:${key}`, payload: JSON.stringify(r.raw ?? r) },
@@ -133,13 +169,13 @@ export async function runYandexSync(
               data: { mbid: r.mbid, matched: true, mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
             a_matched++;
-            await dblog(runId, 'info', 'Artist matched', { event: 'artist:found', name, mbid: r.mbid });
+            await dblog(runId, 'info', 'Artist matched', { event: 'artist:found', name: aName, mbid: r.mbid });
           } else {
             a = await prisma.artist.update({
               where: { id: a.id },
               data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
-            await dblog(runId, 'info', 'Artist not matched', { event: 'artist:not_found', name });
+            await dblog(runId, 'info', 'Artist not matched', { event: 'artist:not_found', name: aName });
           }
         }
       } else {
@@ -151,24 +187,59 @@ export async function runYandexSync(
     }
     await patchRunStats(runId, { a_done, a_matched, a_skipped });
 
-    // Albums
+    // ===========================
+    // ========== Albums =========
+    // ===========================
     let al_done = 0, al_matched = 0, al_skipped = 0;
-    for (const al of albums) {
-      const key = nkey(`${al.artist}|||${al.title}`);
+
+    for (const alRaw of albums as Array<{
+      id?: number|string; yandexAlbumId?: number|string;
+      title?: string; artist?: string; artistName?: string;
+      year?: number; rgMbid?: string;
+    }>) {
+      // Нормализация полей
+      const yaAlbumId = (alRaw?.yandexAlbumId ?? alRaw?.id) != null
+          ? Number(alRaw.yandexAlbumId ?? alRaw.id)
+          : undefined;
+      const title = String(alRaw?.title ?? '');
+      const artistName = String(alRaw?.artistName ?? alRaw?.artist ?? '');
+      const rgFromYandex = alRaw?.rgMbid ?? undefined;
+      const year = (typeof alRaw?.year === 'number') ? alRaw.year : undefined;
+
+      const key = nkey(`${artistName}|||${title}`);
       let rec = await prisma.album.upsert({
         where: { key },
-        create: { key, artist: al.artist, title: al.title, year: al.year || null },
-        update: { artist: al.artist, title: al.title, year: al.year || null },
+        create: { key, artist: artistName, title, year: year ?? null },
+        update: { artist: artistName, title, year: year ?? null },
       });
 
+      // ⬇⬇⬇ NEW: кеш Яндекса по альбомам (только при наличии реального Yandex Album ID)
+      try {
+        if (yaAlbumId) {
+          await upsertYandexAlbumCache({
+            yandexAlbumId: yaAlbumId,
+            title,
+            artistName,
+            rgMbid: rgFromYandex ?? undefined,
+            year: year ?? undefined,
+          });
+          await dblog(runId, 'debug', 'cache:album upsert', { yandexAlbumId: yaAlbumId, artistName, title });
+        } else {
+          await dblog(runId, 'debug', 'cache:album skipped (no yandexAlbumId)', { artistName, title });
+        }
+      } catch (e: any) {
+        await dblog(runId, 'warn', 'cache:album error', { artistName, title, error: String(e?.message || e) });
+      }
+
+      // Дальше — прежняя логика матчинга RG в MB
       if (!rec.rgMbid) {
         if (!shouldRecheck(rec.mbCheckedAt, force)) {
           al_skipped++;
           await dblog(runId, 'debug', 'Album skip (cool-down)', {
-            artist: al.artist, title: al.title, last: rec.mbCheckedAt, hours: RECHECK_HOURS,
+            artist: artistName, title, last: rec.mbCheckedAt, hours: RECHECK_HOURS,
           });
         } else {
-          const r = await mbFindReleaseGroup(al.artist, al.title);
+          const r = await mbFindReleaseGroup(artistName, title);
           await prisma.cacheEntry.upsert({
             where: { key: `album:${key}` },
             create: { scope: 'album', key: `album:${key}`, payload: JSON.stringify(r.raw ?? r) },
@@ -191,7 +262,7 @@ export async function runYandexSync(
             });
             al_matched++;
             await dblog(runId, 'info', 'Album matched', {
-              event: 'album:found', artist: al.artist, title: al.title, mbid: r.mbid,
+              event: 'album:found', artist: artistName, title, mbid: r.mbid,
             });
           } else {
             rec = await prisma.album.update({
@@ -199,7 +270,7 @@ export async function runYandexSync(
               data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } },
             });
             await dblog(runId, 'info', 'Album not matched', {
-              event: 'album:not_found', artist: al.artist, title: al.title,
+              event: 'album:not_found', artist: artistName, title,
             });
           }
         }

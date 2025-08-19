@@ -14,6 +14,7 @@ const tabs = [
   { href: '/found', label: 'Found', Icon: CheckCircleIcon },
   { href: '/unmatched', label: 'Unmatched', Icon: QuestionMarkCircleIcon },
   { href: '/artists', label: 'Artists', Icon: QuestionMarkCircleIcon },
+  { href: '/yandex', label: 'Yandex', Icon: QuestionMarkCircleIcon },
   { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
   { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },
   { href: '/logs', label: 'Live Logs', Icon: QueueListIcon },
