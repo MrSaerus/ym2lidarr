@@ -188,7 +188,19 @@ export default function ArtistsPage() {
                     <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </button>
-
+                    <button
+                        className="btn btn-outline"
+                        onClick={async () => {
+                            try {
+                                await api('/api/lidarr/resync', {method: 'POST'});
+                                await load(1); // перегружаем первую страницу после синка
+                            } catch (e: any) {
+                                alert('Resync failed: ' + (e?.message || String(e)));
+                            }
+                        }}
+                    >
+                        Resync cache
+                    </button>
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-gray-500">Rows per page:</span>
                         <select
@@ -202,11 +214,16 @@ export default function ArtistsPage() {
               {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
             </span>
                         <div className="flex items-center gap-1">
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>{'«'}</button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))} disabled={page <= 1}>{'‹'}</button>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(1)}
+                                    disabled={page <= 1}>{'«'}</button>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))}
+                                    disabled={page <= 1}>{'‹'}</button>
                             <span className="text-xs text-gray-500 px-2">Page {page}/{pageCount}</span>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>{'›'}</button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)} disabled={page >= pageCount}>{'»'}</button>
+                            <button className="btn btn-outline"
+                                    onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))}
+                                    disabled={page >= pageCount}>{'›'}</button>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)}
+                                    disabled={page >= pageCount}>{'»'}</button>
                         </div>
                     </div>
                 </div>
