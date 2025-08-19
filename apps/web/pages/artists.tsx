@@ -201,6 +201,19 @@ export default function ArtistsPage() {
                     >
                         Resync cache
                     </button>
+                    <button
+                        className="btn btn-outline"
+                        onClick={async () => {
+                            try {
+                                await api('/api/sync/lidarr/pull', {method: 'POST'});
+                                await load(1);
+                            } catch (e: any) {
+                                alert('Lidarr pull failed: ' + (e?.message || String(e)));
+                            }
+                        }}
+                    >
+                        Pull from Lidarr
+                    </button>
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-gray-500">Rows per page:</span>
                         <select
@@ -234,7 +247,7 @@ export default function ArtistsPage() {
                     <Table className="table-default">
                         <thead>
                         <tr>
-                            <Th>#</Th>
+                        <Th>#</Th>
                             <Th className="select-none">
                                 <button
                                     type="button"

@@ -239,25 +239,37 @@ export default function YandexPage() {
                     </button>
                     <button
                         className="btn btn-outline"
-                        disabled={forcing}
                         onClick={async () => {
                             try {
-                                setForcing(true);
-                                await api('/api/sync/yandex', {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({force: true}),
-                                });
-                                // сразу обновим первую страницу; если воркер ещё идёт — просто не увидим все изменения мгновенно
+                                await api('/api/sync/yandex/pull', {method: 'POST'});
                                 await load(1);
                             } catch (e: any) {
-                                alert('Force sync failed: ' + (e?.message || String(e)));
-                            } finally {
-                                setForcing(false);
+                                alert('Yandex pull failed: ' + (e?.message || String(e)));
                             }
                         }}
                     >
-                        {forcing ? 'Force syncing…' : 'Force sync'}
+                        Pull from Yandex
+                    </button>
+
+                    <button
+                        className="btn btn-outline"
+                        onClick={async () => {
+                            try {
+                                await api('/api/sync/match', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({
+                                        force: true,
+                                        target: (target === 'artists' ? 'artists' : 'albums')
+                                    }),
+                                });
+                                await load(1);
+                            } catch (e: any) {
+                                alert('Match failed: ' + (e?.message || String(e)));
+                            }
+                        }}
+                    >
+                        Match {target === 'artists' ? 'Artists' : 'Albums'}
                     </button>
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-gray-500">Rows per page:</span>

@@ -196,7 +196,6 @@ model LidarrArtist {
   added      DateTime?
   albums     Int?
   tracks     Int?
-  // SQLite не поддерживает Prisma BigInt; используем Float (DOUBLE) — хватает до ~9 PB без потери целостности.
   sizeOnDisk Float?
 
   removed    Boolean   @default(false)

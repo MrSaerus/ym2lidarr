@@ -1,9 +1,10 @@
+// apps/api/src/scheduler.ts
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 
 import { prisma } from './prisma';
-import { runYandexSync, runLidarrPush } from './workers';
+import { runYandexPull, runMbMatch, runLidarrPull, runLidarrPush } from './workers';
 
 let jobs: {
   yandex?: cron.ScheduledTask;
@@ -132,7 +133,7 @@ export async function reloadJobs() {
     jobs.yandex = cron.schedule(s.yandexCron, async () => {
       try {
         console.log('[cron] yandex sync');
-        await runYandexSync(); // без аргументов — совместимо по типам
+        await runYandexPull(); // без аргументов — совместимо по типам
       } catch (e) {
         console.error('[cron] yandex failed:', (e as Error).message);
       }
