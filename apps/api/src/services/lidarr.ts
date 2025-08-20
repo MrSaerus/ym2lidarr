@@ -1,86 +1,102 @@
+// apps/api/src/services/lidarr.ts
 import { request } from 'undici';
 
 export type Setting = {
   lidarrUrl: string;
   lidarrApiKey: string;
+
+  // дефолты из БД
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
   monitor?: string | null; // e.g. "all"
-  lidarrAllowNoMetadata?: boolean | null; // NEW: разрешить fallback без метаданных (только для артистов)
+
+  lidarrAllowNoMetadata?: boolean | null; // для артистов
 };
 
 type EnsureResult = any & {
-  __action?: 'created' | 'exists' | 'skipped'; // добавлен 'skipped'
+  __action?: 'created' | 'exists' | 'skipped';
   __from?: 'lookup' | 'fallback';
   __request?: any;
   __response?: any;
-  __reason?: string; // причина для skipped
+  __reason?: string;
 };
 
 function baseUrl(s: Setting) {
   return String(s.lidarrUrl || '').replace(/\/+$/, '');
 }
-
 function normalizeRoot(p?: string | null) {
   return String(p || '').replace(/\/+$/, '');
 }
 
-async function api<T = any>(
-    s: Setting,
-    path: string,
-    init?: Parameters<typeof request>[1],
-): Promise<{ status: number; data: T }> {
+/** Только БД + мягкие дефолты (на случай пустой БД) */
+function withDefaults(s: Setting): Setting {
+  return {
+    ...s,
+    rootFolderPath: s.rootFolderPath ?? '/music',
+    qualityProfileId: s.qualityProfileId ?? 1,
+    metadataProfileId: s.metadataProfileId ?? 1,
+    monitor: s.monitor ?? 'all',
+    lidarrAllowNoMetadata: !!s.lidarrAllowNoMetadata,
+  };
+}
+
+function assertPushSettings(s: Setting) {
+  const missing: string[] = [];
+  if (!s.rootFolderPath)     missing.push('rootFolderPath');
+  if (!s.qualityProfileId)   missing.push('qualityProfileId');
+  if (!s.metadataProfileId)  missing.push('metadataProfileId');
+  if (missing.length) {
+    const err: any = new Error(`Lidarr settings missing: ${missing.join(', ')}`);
+    err.code = 'LIDARR_CONFIG';
+    err.missing = missing;
+    throw err;
+  }
+}
+
+async function api<T = any>(s: Setting, path: string, init?: Parameters<typeof request>[1]) {
   const url = `${baseUrl(s)}${path}${path.includes('?') ? '&' : '?'}apikey=${s.lidarrApiKey}`;
   const res = await request(url, init);
   const text = await res.body.text();
   let data: any = null;
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
-  return { status: res.statusCode, data };
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  return { status: res.statusCode, data: data as T };
 }
 
-export async function testLidarr(s: Setting) {
+export async function testLidarr(s0: Setting) {
+  const s = withDefaults(s0);
   const r = await api(s, '/api/v1/system/status');
   return { ok: r.status < 400, status: r.status, data: r.data };
 }
 
-/* ======== Lists for UI dropdowns ======== */
-
-export async function getQualityProfiles(s: Setting) {
+/* ======== lists ======== */
+export async function getQualityProfiles(s0: Setting) {
+  const s = withDefaults(s0);
   const r = await api<any[]>(s, '/api/v1/qualityprofile');
   return Array.isArray(r.data) ? r.data : [];
 }
-
-export async function getMetadataProfiles(s: Setting) {
-  // разные сборки: пробуем несколько путей
-  const paths = ['/api/v1/metadataprofile', '/api/v1/metadata/profile', '/api/v1/metadataProfile'];
-  for (const p of paths) {
+export async function getMetadataProfiles(s0: Setting) {
+  const s = withDefaults(s0);
+  for (const p of ['/api/v1/metadataprofile', '/api/v1/metadata/profile', '/api/v1/metadataProfile']) {
     try {
       const r = await api<any[]>(s, p);
       if (Array.isArray(r.data)) return r.data;
-    } catch {
-      // next
-    }
+    } catch {}
   }
   return [];
 }
-
-export async function getRootFolders(s: Setting) {
+export async function getRootFolders(s0: Setting) {
+  const s = withDefaults(s0);
   const r = await api<any[]>(s, '/api/v1/rootfolder');
   return Array.isArray(r.data) ? r.data : [];
 }
-
-export async function getTags(s: Setting) {
+export async function getTags(s0: Setting) {
+  const s = withDefaults(s0);
   const r = await api<any[]>(s, '/api/v1/tag');
   return Array.isArray(r.data) ? r.data : [];
 }
 
-/* ======== Helpers used in push ======== */
-
+/* ======== helpers ======== */
 async function findExistingArtistByMBID(s: Setting, mbid: string) {
   const lookup = await api<any[]>(s, `/api/v1/artist?term=mbid:${mbid}`);
   if (Array.isArray(lookup.data) && lookup.data.some((a) => a.foreignArtistId?.includes(mbid))) {
@@ -90,34 +106,19 @@ async function findExistingArtistByMBID(s: Setting, mbid: string) {
   if (Array.isArray(all.data)) return all.data.find((a) => a.foreignArtistId?.includes(mbid));
   return null;
 }
-
 async function lookupWithRetry(s: Setting, path: string, attempts = 2, delayMs = 800) {
   let lastErr: any;
   for (let i = 0; i < attempts; i++) {
     try {
       const r = await api<any[]>(s, path);
       if (Array.isArray(r.data) && r.data.length) return r;
-      // даже если 200, но массив пуст — считаем ошибкой lookup
       lastErr = new Error('Lookup returned empty array');
-    } catch (e) {
-      lastErr = e;
-    }
-    if (i < attempts - 1) {
-      await new Promise((res) => setTimeout(res, delayMs));
-    }
+    } catch (e) { lastErr = e; }
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs));
   }
-  throw new Error(
-      `Lookup failed for ${path} (${attempts} attempts): ${String(lastErr?.message || lastErr)}`,
-  );
+  throw new Error(`Lookup failed for ${path} (${attempts} attempts): ${String(lastErr?.message || lastErr)}`);
 }
-
-async function postWithRetry(
-    s: Setting,
-    path: string,
-    body: any,
-    attempts = 3,
-    delayMs = 1000,
-): Promise<{ status: number; data: any }> {
+async function postWithRetry(s: Setting, path: string, body: any, attempts = 3, delayMs = 1000) {
   let last: { status: number; data: any } | null = null;
   for (let i = 0; i < attempts; i++) {
     const r = await api(s, path, {
@@ -126,56 +127,32 @@ async function postWithRetry(
       headers: { 'Content-Type': 'application/json' },
     });
     last = r;
-    // если не 500/503 — выходим сразу
     if (r.status < 500 || (r.status !== 500 && r.status !== 503)) return r;
-
-    // 500/503 — часто из-за SkyHook; подождём и повторим
-    if (i < attempts - 1) {
-      await new Promise((res) => setTimeout(res, delayMs));
-    }
+    if (i < attempts - 1) await new Promise(res => setTimeout(res, delayMs));
   }
   return last!;
 }
 
-export async function ensureArtistInLidarr(
-    s: Setting,
-    a: { name: string; mbid: string },
-): Promise<EnsureResult> {
-  if (!s.rootFolderPath || !s.qualityProfileId || !s.metadataProfileId) {
-    throw new Error('Lidarr settings missing: rootFolderPath, qualityProfileId, metadataProfileId');
-  }
+/* ======== public: ensure* ======== */
+export async function ensureArtistInLidarr(s0: Setting, a: { name: string; mbid: string }): Promise<EnsureResult> {
+  const s = withDefaults(s0);
+  assertPushSettings(s);
 
-  const allowNoMeta =
-      !!(s as any).lidarrAllowNoMetadata ||
-      String(process.env.LIDARR_ALLOW_NO_METADATA || '').toLowerCase() === 'true' ||
-      process.env.LIDARR_ALLOW_NO_METADATA === '1';
+  const allowNoMeta = !!s.lidarrAllowNoMetadata;
 
-  // Уже есть?
   const existing = await findExistingArtistByMBID(s, a.mbid);
   if (existing) return { ...existing, __action: 'exists', __from: 'lookup' };
 
-  // Пытаемся lookup по MBID
   let src: any | null = null;
   let from: 'lookup' | 'fallback' = 'lookup';
   try {
     const lu = await lookupWithRetry(s, `/api/v1/artist/lookup?term=mbid:${a.mbid}`);
-    if (Array.isArray(lu.data) && lu.data.length) {
-      src = lu.data[0];
-    } else {
-      // lookup вернул пусто
-      if (!allowNoMeta) {
-        return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
-      }
-      src = null;
-      from = 'fallback';
-    }
+    src = Array.isArray(lu.data) && lu.data.length ? lu.data[0] : null;
+    if (!src && !allowNoMeta) return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+    if (!src) from = 'fallback';
   } catch {
-    // lookup упал
-    if (!allowNoMeta) {
-      return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
-    }
-    src = null;
-    from = 'fallback';
+    if (!allowNoMeta) return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
+    src = null; from = 'fallback';
   }
 
   const baseBody = {
@@ -189,7 +166,6 @@ export async function ensureArtistInLidarr(
     tags: [] as any[],
   };
 
-  // Если src нет, а fallback разрешён — минимально достаточное тело
   const body = src
       ? { ...src, ...baseBody }
       : {
@@ -203,47 +179,23 @@ export async function ensureArtistInLidarr(
   if (r.status >= 400 && String(r.data).includes('already exists')) {
     const again = await findExistingArtistByMBID(s, a.mbid);
     const res = again ?? r.data;
-    return {
-      ...(res as any),
-      __action: 'exists',
-      __from: from,
-      __request: body,
-      __response: r.data,
-    };
+    return { ...(res as any), __action: 'exists', __from: from, __request: body, __response: r.data };
   }
-  if (r.status >= 400) {
-    // отдадим максимально информативную ошибку
-    throw new Error(`Lidarr add artist failed: ${r.status} ${JSON.stringify(r.data)}`);
-  }
+  if (r.status >= 400) throw new Error(`Lidarr add artist failed: ${r.status} ${JSON.stringify(r.data)}`);
 
-  return {
-    ...(r.data as any),
-    __action: 'created',
-    __from: from,
-    __request: body,
-    __response: r.data,
-  };
+  return { ...(r.data as any), __action: 'created', __from: from, __request: body, __response: r.data };
 }
 
-export async function ensureAlbumInLidarr(
-    s: Setting,
-    al: { artist: string; title: string; rgMbid: string },
-): Promise<EnsureResult> {
-  if (!s.rootFolderPath || !s.qualityProfileId || !s.metadataProfileId) {
-    throw new Error('Lidarr settings missing: rootFolderPath, qualityProfileId, metadataProfileId');
-  }
+export async function ensureAlbumInLidarr(s0: Setting, al: { artist: string; title: string; rgMbid: string }): Promise<EnsureResult> {
+  const s = withDefaults(s0);
+  assertPushSettings(s);
 
-  // сначала быстрая проверка, не добавлен ли уже (без зависимости от lookup)
   try {
     const lib0 = await api<any[]>(s, '/api/v1/album');
-    const exists0 =
-        Array.isArray(lib0.data) && lib0.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
+    const exists0 = Array.isArray(lib0.data) && lib0.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
     if (exists0) return { ...exists0, __action: 'exists', __from: 'lookup' };
-  } catch {
-    // ignore
-  }
+  } catch {}
 
-  // lookup обязателен для альбомов — без него не создаём
   let src: any | null = null;
   try {
     const lu = await lookupWithRetry(s, `/api/v1/album/lookup?term=mbid:${al.rgMbid}`);
@@ -255,7 +207,6 @@ export async function ensureAlbumInLidarr(
     return { __action: 'skipped', __reason: 'lidarrapi_metadata_unavailable' };
   }
 
-  // Убедимся, что артист есть
   const artistMbid: string | undefined = src.foreignArtistId || src.artist?.foreignArtistId;
   if (artistMbid) {
     await ensureArtistInLidarr(s, {
@@ -264,10 +215,8 @@ export async function ensureAlbumInLidarr(
     });
   }
 
-  // повторная проверка наличия альбома
   const lib = await api<any[]>(s, '/api/v1/album');
-  const exists =
-      Array.isArray(lib.data) && lib.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
+  const exists = Array.isArray(lib.data) && lib.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid));
   if (exists) return { ...exists, __action: 'exists', __from: 'lookup' };
 
   const body = {
@@ -288,23 +237,9 @@ export async function ensureAlbumInLidarr(
     const found = Array.isArray(refreshed.data)
         ? refreshed.data.find((x) => x.foreignAlbumId?.includes(al.rgMbid))
         : r.data;
-    return {
-      ...(found as any),
-      __action: 'exists',
-      __from: 'lookup',
-      __request: body,
-      __response: r.data,
-    };
+    return { ...(found as any), __action: 'exists', __from: 'lookup', __request: body, __response: r.data };
   }
-  if (r.status >= 400) {
-    throw new Error(`Lidarr add album failed: ${r.status} ${JSON.stringify(r.data)}`);
-  }
+  if (r.status >= 400) throw new Error(`Lidarr add album failed: ${r.status} ${JSON.stringify(r.data)}`);
 
-  return {
-    ...(r.data as any),
-    __action: 'created',
-    __from: 'lookup',
-    __request: body,
-    __response: r.data,
-  };
+  return { ...(r.data as any), __action: 'created', __from: 'lookup', __request: body, __response: r.data };
 }

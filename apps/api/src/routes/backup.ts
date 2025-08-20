@@ -1,3 +1,4 @@
+// apps/api/src/routes/backup.ts
 import { Router } from 'express';
 import path from 'path';
 
@@ -8,7 +9,8 @@ const r = Router();
 
 /** GET /api/backup/list — список бэкапов */
 r.get('/list', async (_req, res) => {
-  const s = await prisma.setting.findFirst();
+  // используем id=1 для единообразия со всем кодом
+  const s = await prisma.setting.findFirst({ where: { id: 1 } });
   const dir = s?.backupDir || '/app/data/backups';
   const files = listBackups(dir);
   res.json({ ok: true, dir, files });
@@ -19,13 +21,12 @@ r.post('/run', async (_req, res) => {
   const result = await runBackupNow();
 
   if (!result.ok) {
-    // Подберём статус: disabled → 400; всё остальное → 500
-    const status =
-        result.error && /disabled/i.test(result.error) ? 400 : 500;
+    // disabled → 400; остальное → 500
+    const status = result.error && /disabled/i.test(result.error) ? 400 : 500;
     return res.status(status).json(result);
   }
 
-  const s = await prisma.setting.findFirst();
+  const s = await prisma.setting.findFirst({ where: { id: 1 } });
   const dir = s?.backupDir || '/app/data/backups';
   const abs = result.file ? path.join(dir, result.file) : undefined;
 

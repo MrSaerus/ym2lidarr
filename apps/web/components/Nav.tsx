@@ -11,10 +11,9 @@ import {
 
 const tabs = [
   { href: '/', label: 'Overview', Icon: HomeIcon },
-  { href: '/found', label: 'Found', Icon: CheckCircleIcon },
-  { href: '/unmatched', label: 'Unmatched', Icon: QuestionMarkCircleIcon },
-  { href: '/artists', label: 'Artists', Icon: QuestionMarkCircleIcon },
+  { href: '/lidarr', label: 'Lidarr', Icon: QuestionMarkCircleIcon },
   { href: '/yandex', label: 'Yandex', Icon: QuestionMarkCircleIcon },
+  { href: '/unified', label: 'Unified', Icon: QuestionMarkCircleIcon },
   { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
   { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },
   { href: '/logs', label: 'Live Logs', Icon: QueueListIcon },

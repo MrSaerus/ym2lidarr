@@ -1,4 +1,8 @@
+// apps/api/src/routes/health.ts
 import { Router } from 'express';
+
 const r = Router();
-r.get('/', (_, res) => res.json({ ok: true }));
+
+r.get('/', (_req, res) => res.json({ ok: true }));
+
 export default r;

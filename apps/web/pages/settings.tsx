@@ -1,3 +1,4 @@
+// apps/web/pages/settings.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
@@ -16,6 +17,12 @@ type Settings = {
   pushTarget: 'artists' | 'albums';
   lidarrCron?: string | null;
   lidarrAllowNoMetadata?: boolean | null;
+
+  // Lidarr defaults (НОВЫЕ ПОЛЯ НА ФРОНТЕ)
+  rootFolderPath?: string | null;
+  qualityProfileId?: number | null;
+  metadataProfileId?: number | null;
+  monitor?: string | null;
 
   // Backup
   backupEnabled: boolean;
@@ -36,16 +43,22 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     yandexDriver: (s.yandexDriver as any) || 'pyproxy',
     yandexToken: s.yandexToken ?? '',
     pyproxyUrl: s.pyproxyUrl ?? 'http://pyproxy:8080',
-    yandexCron: s.yandexCron ?? '0 */6 * * *', // каждые 6 часов
+    yandexCron: s.yandexCron ?? '0 */6 * * *',
 
     lidarrUrl: s.lidarrUrl ?? 'http://localhost:8686',
     lidarrApiKey: s.lidarrApiKey ?? '',
     pushTarget: (s.pushTarget as any) || 'artists',
-    lidarrCron: s.lidarrCron ?? '0 */12 * * *', // каждые 12 часов
+    lidarrCron: s.lidarrCron ?? '0 */12 * * *',
     lidarrAllowNoMetadata: !!s.lidarrAllowNoMetadata,
 
+    // ДЕФОЛТЫ ЛИДАРА (подхватим из БД или применим мягкие)
+    rootFolderPath: s.rootFolderPath ?? '/music',
+    qualityProfileId: s.qualityProfileId ?? 1,
+    metadataProfileId: s.metadataProfileId ?? 1,
+    monitor: s.monitor ?? 'all',
+
     backupEnabled: !!s.backupEnabled,
-    backupCron: s.backupCron ?? '0 3 * * *', // ежедневно в 03:00
+    backupCron: s.backupCron ?? '0 3 * * *',
     backupDir: s.backupDir ?? '/app/data/backups',
     backupRetention: s.backupRetention ?? 14,
 
@@ -80,10 +93,7 @@ export default function SettingsPage() {
   async function save() {
     setMsg('Saving…');
     try {
-      await api('/api/settings', {
-        method: 'PUT',
-        body: JSON.stringify(settings),
-      });
+      await api('/api/settings', { method: 'PUT', body: settings });
       setMsg('Saved');
     } catch (e: any) {
       setMsg(e?.message || String(e));
@@ -93,38 +103,27 @@ export default function SettingsPage() {
   async function testYandex() {
     setMsg('Testing Yandex…');
     try {
-      const r = await api<any>('/api/settings/test/yandex', {
-        method: 'POST',
-        body: JSON.stringify({ token: settings.yandexToken || '' }), // <-- передаём токен из инпута
-      });
-      setMsg(
-          r?.ok
-              ? `Yandex OK${r.uid ? ` (uid: ${r.uid})` : ''}`
-              : `Yandex failed: ${r?.error || 'unknown error'}`
-      );
-    } catch (e: any) {
-      setMsg(e?.message || String(e));
-    }
+      const r = await api<any>('/api/settings/test/yandex', { method: 'POST', body: { token: settings.yandexToken || '' } });
+      setMsg(r?.ok ? `Yandex OK${r.uid ? ` (uid: ${r.uid})` : ''}` : `Yandex failed: ${r?.error || 'unknown error'}`);
+    } catch (e: any) { setMsg(e?.message || String(e)); }
   }
-
 
   async function testLidarr() {
     setMsg('Testing Lidarr…');
     try {
-      const r = await api<any>('/api/settings/test/lidarr', { method: 'POST' });
+      const r = await api<any>('/api/settings/test/lidarr', {
+        method: 'POST',
+        body: { lidarrUrl: settings.lidarrUrl || '', lidarrApiKey: settings.lidarrApiKey || '' },
+      });
       setMsg(r?.ok ? 'Lidarr OK' : `Lidarr failed: ${r?.error || 'unknown error'}`);
-    } catch (e: any) {
-      setMsg(e?.message || String(e));
-    }
+    } catch (e: any) { setMsg(e?.message || String(e)); }
   }
 
   async function listBackups() {
     try {
       const r = await api('/api/backup/list');
       setMsg(typeof r === 'string' ? r : JSON.stringify(r));
-    } catch (e: any) {
-      setMsg(e?.message || String(e));
-    }
+    } catch (e: any) { setMsg(e?.message || String(e)); }
   }
 
   async function runBackupNow() {
@@ -132,9 +131,7 @@ export default function SettingsPage() {
     try {
       const r = await api<any>('/api/backup/run', { method: 'POST' });
       setMsg(r?.ok ? 'Backup completed' : `Backup error: ${r?.error || 'unknown'}`);
-    } catch (e: any) {
-      setMsg(e?.message || String(e));
-    }
+    } catch (e: any) { setMsg(e?.message || String(e)); }
   }
 
   return (
@@ -147,9 +144,7 @@ export default function SettingsPage() {
           {/* Yandex Music */}
           <section className="panel p-4 space-y-3">
             <div className="section-title">Yandex Music</div>
-
-            <FormRow label="Driver"
-                     help="Как получать лайки ЯМузыки: через Python proxy (рекомендуется) или нативно через токен.">
+            <FormRow label="Driver" help="Как получать лайки ЯМузыки.">
               <select
                   className="select"
                   value={settings.yandexDriver}
@@ -159,37 +154,15 @@ export default function SettingsPage() {
                 <option value="native">native</option>
               </select>
             </FormRow>
-
-            <FormRow label="Yandex token" help="Используется только в режиме 'native'. Токен Паспорта/Музыки.">
-              <input
-                  className="input"
-                  value={settings.yandexToken || ''}
-                  onChange={(e) => setSettings({ ...settings, yandexToken: e.target.value })}
-                  placeholder="y0_AgAAA…"
-              />
+            <FormRow label="Yandex token" help="Используется только в режиме 'native'.">
+              <input className="input" value={settings.yandexToken || ''} onChange={(e) => setSettings({ ...settings, yandexToken: e.target.value })} placeholder="y0_AgAAA…" />
             </FormRow>
-
-            <FormRow label="pyProxy URL" help="Используется только в режиме 'pyproxy'. Адрес FastAPI-прокси для ЯМузыки.">
-              <input
-                  className="input"
-                  value={settings.pyproxyUrl || ''}
-                  onChange={(e) => setSettings({ ...settings, pyproxyUrl: e.target.value })}
-                  placeholder="http://pyproxy:8080"
-              />
+            <FormRow label="pyProxy URL" help="Используется только в режиме 'pyproxy'.">
+              <input className="input" value={settings.pyproxyUrl || ''} onChange={(e) => setSettings({ ...settings, pyproxyUrl: e.target.value })} placeholder="http://pyproxy:8080" />
             </FormRow>
-
-            <FormRow
-                label="Yandex sync cron"
-                help={<>CRON-расписание (UTC) для синхронизации лайков из Яндекс.Музыки. Примеры: <code>0 */6 * * *</code> — каждые 6 часов; <code>0 3 * * *</code> — ежедневно в 03:00.</>}
-            >
-              <input
-                  className="input"
-                  value={settings.yandexCron || ''}
-                  onChange={(e) => setSettings({ ...settings, yandexCron: e.target.value })}
-                  placeholder="0 */6 * * *"
-              />
+            <FormRow label="Yandex sync cron" help={<><code>0 */6 * * *</code> — каждые 6 часов</>}>
+              <input className="input" value={settings.yandexCron || ''} onChange={(e) => setSettings({ ...settings, yandexCron: e.target.value })} placeholder="0 */6 * * *" />
             </FormRow>
-
             <div className="toolbar">
               <button className="btn btn-outline" onClick={testYandex}>Test Yandex</button>
             </div>
@@ -197,62 +170,77 @@ export default function SettingsPage() {
 
           {/* Lidarr */}
           <section className="panel p-4 space-y-3">
-            <div className="text-sm font-medium text-gray-400">Lidarr</div>
+            <div className="section-title">Lidarr</div>
 
             <FormRow label="URL" help="Базовый URL Lidarr (например http://lidarr:8686).">
-              <input
-                  className="input"
-                  value={settings.lidarrUrl || ''}
-                  onChange={(e) => setSettings({ ...settings, lidarrUrl: e.target.value })}
-                  placeholder="http://localhost:8686"
-              />
+              <input className="input" value={settings.lidarrUrl || ''} onChange={(e) => setSettings({ ...settings, lidarrUrl: e.target.value })} placeholder="http://localhost:8686" />
             </FormRow>
-
             <FormRow label="API Key" help="Настройки → General → Security → API Key в Lidarr.">
-              <input
-                  className="input"
-                  value={settings.lidarrApiKey || ''}
-                  onChange={(e) => setSettings({ ...settings, lidarrApiKey: e.target.value })}
-                  placeholder="xxxxxxxxxxxxxxxx"
-              />
+              <input className="input" value={settings.lidarrApiKey || ''} onChange={(e) => setSettings({ ...settings, lidarrApiKey: e.target.value })} placeholder="xxxxxxxxxxxxxxxx" />
             </FormRow>
-            <FormRow
-                label="Allow fallback without metadata"
-                help="Если сервер метаданных недоступен: разрешить создавать артистов без lookup (альбомы всё равно требуют метаданные)."
-            >
+            <FormRow label="Allow fallback without metadata" help="Разрешить создавать артистов без lookup при недоступном SkyHook.">
               <div className="control flex items-center gap-2">
-                <input
-                    type="checkbox"
-                    checked={!!settings.lidarrAllowNoMetadata}
-                    onChange={(e) =>
-                        setSettings({ ...settings, lidarrAllowNoMetadata: e.target.checked })
-                    }
-                />
-                <span className="text-sm text-gray-500">Create artists without metadata when lookup fails</span>
+                <input type="checkbox" checked={!!settings.lidarrAllowNoMetadata} onChange={(e) => setSettings({ ...settings, lidarrAllowNoMetadata: e.target.checked })} />
+                <span className="text-sm text-gray-500">Create artists without metadata</span>
               </div>
             </FormRow>
-            <FormRow label="Push target" help="Кого отправлять в Lidarr при пуше: артистов (по умолчанию) или release-groups альбомов.">
-              <select
-                  className="select"
-                  value={settings.pushTarget}
-                  onChange={(e) => setSettings({ ...settings, pushTarget: e.target.value as any })}
-              >
+            <FormRow label="Push target" help="Кого отправлять в Lidarr при пуше.">
+              <select className="select" value={settings.pushTarget} onChange={(e) => setSettings({ ...settings, pushTarget: e.target.value as any })}>
                 <option value="artists">Artists (default)</option>
                 <option value="albums">Albums</option>
               </select>
             </FormRow>
-
-            <FormRow
-                label="Lidarr push cron"
-                help={<>CRON-расписание (UTC) для периодического пуша в Lidarr. Примеры: <code>0 */12 * * *</code> — каждые 12 часов; <code>30 4 * * *</code> — ежедневно в 04:30.</>}
-            >
-              <input
-                  className="input"
-                  value={settings.lidarrCron || ''}
-                  onChange={(e) => setSettings({ ...settings, lidarrCron: e.target.value })}
-                  placeholder="0 */12 * * *"
-              />
+            <FormRow label="Lidarr push cron" help={<><code>0 */12 * * *</code> — каждые 12 часов</>}>
+              <input className="input" value={settings.lidarrCron || ''} onChange={(e) => setSettings({ ...settings, lidarrCron: e.target.value })} placeholder="0 */12 * * *" />
             </FormRow>
+
+            {/* НОВАЯ СЕКЦИЯ: дефолты для добавления в Lidarr */}
+            <div className="mt-4 border-t border-gray-200 pt-4 space-y-3">
+              <div className="text-sm font-medium text-gray-400">Defaults for new items</div>
+
+              <FormRow label="Root folder path" help="Корень библиотеки в Lidarr, например /music.">
+                <input
+                    className="input"
+                    value={settings.rootFolderPath || ''}
+                    onChange={(e) => setSettings({ ...settings, rootFolderPath: e.target.value })}
+                    placeholder="/music"
+                />
+              </FormRow>
+
+              <FormRow label="Quality profile ID" help="ID профиля качества из Lidarr.">
+                <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={settings.qualityProfileId ?? 1}
+                    onChange={(e) => setSettings({ ...settings, qualityProfileId: Number(e.target.value || 1) })}
+                    placeholder="1"
+                />
+              </FormRow>
+
+              <FormRow label="Metadata profile ID" help="ID метадата-профиля из Lidarr.">
+                <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={settings.metadataProfileId ?? 1}
+                    onChange={(e) => setSettings({ ...settings, metadataProfileId: Number(e.target.value || 1) })}
+                    placeholder="1"
+                />
+              </FormRow>
+
+              <FormRow label="Monitor policy" help="Что мониторить у артиста при добавлении. Обычно 'all'.">
+                <select
+                    className="select"
+                    value={settings.monitor || 'all'}
+                    onChange={(e) => setSettings({ ...settings, monitor: e.target.value })}
+                >
+                  <option value="all">all</option>
+                  <option value="none">none</option>
+                  {/* при желании можно добавить другие варианты, если используете форк */}
+                </select>
+              </FormRow>
+            </div>
 
             <div className="toolbar">
               <button className="btn btn-outline" onClick={testLidarr}>Test Lidarr</button>
@@ -262,109 +250,23 @@ export default function SettingsPage() {
           {/* Backup */}
           <section className="panel p-4 space-y-3">
             <div className="text-sm font-medium text-gray-400">Backup</div>
-
             <FormRow label="Enable">
               <div className="control flex items-center gap-2">
-                <input
-                    type="checkbox"
-                    checked={!!settings.backupEnabled}
-                    onChange={(e) => setSettings({ ...settings, backupEnabled: e.target.checked })}
-                />
+                <input type="checkbox" checked={!!settings.backupEnabled} onChange={(e) => setSettings({ ...settings, backupEnabled: e.target.checked })} />
                 <span className="text-sm text-gray-500">Enable scheduled backups</span>
               </div>
             </FormRow>
-
-            <FormRow
-                label="Cron"
-                help={<>CRON-расписание (UTC) для резервного копирования. Примеры: <code>0 3 * * *</code> — ежедневно в 03:00; <code>0 */6 * * *</code> — каждые 6 часов.</>}
-            >
-              <input
-                  className="input"
-                  value={settings.backupCron || ''}
-                  onChange={(e) => setSettings({ ...settings, backupCron: e.target.value })}
-                  placeholder="0 3 * * *"
-              />
-            </FormRow>
-
-            <FormRow label="Directory" help="Каталог внутри контейнера/тома, куда складывать архивы БД.">
-              <input
-                  className="input"
-                  value={settings.backupDir || ''}
-                  onChange={(e) => setSettings({ ...settings, backupDir: e.target.value })}
-                  placeholder="/app/data/backups"
-              />
-            </FormRow>
-
-            <FormRow label="Retention" help="Сколько последних бэкапов хранить. 0 — хранить всё.">
-              <input
-                  className="input"
-                  type="number"
-                  min={0}
-                  value={settings.backupRetention ?? 0}
-                  onChange={(e) => setSettings({ ...settings, backupRetention: Number(e.target.value || 0) })}
-                  placeholder="14"
-              />
-            </FormRow>
-
+            <FormRow label="Cron"><input className="input" value={settings.backupCron || ''} onChange={(e) => setSettings({ ...settings, backupCron: e.target.value })} placeholder="0 3 * * *" /></FormRow>
+            <FormRow label="Directory"><input className="input" value={settings.backupDir || ''} onChange={(e) => setSettings({ ...settings, backupDir: e.target.value })} placeholder="/app/data/backups" /></FormRow>
+            <FormRow label="Retention"><input className="input" type="number" min={0} value={settings.backupRetention ?? 0} onChange={(e) => setSettings({ ...settings, backupRetention: Number(e.target.value || 0) })} placeholder="14" /></FormRow>
             <div className="toolbar">
               <button className="btn btn-outline" onClick={listBackups}>List backups</button>
               <button className="btn btn-primary" onClick={runBackupNow}>Run backup now</button>
             </div>
           </section>
 
-          {/* Notifications */}
-          <section className="panel p-4 space-y-3">
-            <div className="text-sm font-medium text-gray-400">Notifications</div>
-
-            <FormRow label="Type" help="Куда присылать уведомления о завершении синхронизаций.">
-              <select
-                  className="select"
-                  value={settings.notifyType}
-                  onChange={(e) => setSettings({ ...settings, notifyType: e.target.value as Settings['notifyType'] })}
-              >
-                <option value="disabled">Disabled</option>
-                <option value="telegram">Telegram</option>
-                <option value="webhook">Webhook</option>
-              </select>
-            </FormRow>
-
-            {settings.notifyType === 'telegram' && (
-                <>
-                  <FormRow label="Telegram bot token" help="Токен @BotFather.">
-                    <input
-                        className="input"
-                        value={settings.telegramBot || ''}
-                        onChange={(e) => setSettings({ ...settings, telegramBot: e.target.value })}
-                        placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-                    />
-                  </FormRow>
-                  <FormRow label="Telegram chat id" help="ID чата/пользователя, куда отправлять уведомления.">
-                    <input
-                        className="input"
-                        value={settings.telegramChatId || ''}
-                        onChange={(e) => setSettings({ ...settings, telegramChatId: e.target.value })}
-                        placeholder="123456789"
-                    />
-                  </FormRow>
-                </>
-            )}
-
-            {settings.notifyType === 'webhook' && (
-                <FormRow label="Webhook URL" help="POST JSON webhook при завершении синка.">
-                  <input
-                      className="input"
-                      value={settings.webhookUrl || ''}
-                      onChange={(e) => setSettings({ ...settings, webhookUrl: e.target.value })}
-                      placeholder="https://example.com/hook"
-                  />
-                </FormRow>
-            )}
-          </section>
-
           <div className="toolbar">
-            <button className="btn btn-primary" onClick={save} disabled={loading}>
-              {loading ? 'Saving…' : 'Save settings'}
-            </button>
+            <button className="btn btn-primary" onClick={save} disabled={loading}>{loading ? 'Saving…' : 'Save settings'}</button>
           </div>
         </main>
       </>

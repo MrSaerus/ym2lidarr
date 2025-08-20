@@ -1,3 +1,4 @@
+// apps/web/pages/logs.tsx
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
@@ -121,22 +122,21 @@ export default function LogsPage() {
       const r = await api<{ ok: boolean; runs: RunShort[] }>('/api/runs?limit=30');
       if (r.ok) {
         setRuns(r.runs);
-        setSel((prev) => (prev ?? (r.runs[0]?.id ?? null)));
+        setSel((prev) => prev ?? (r.runs[0]?.id ?? null));
       }
     } catch {
       /* ignore */
     }
-  }, []); // stable, deps []
+  }, []);
 
   const loadStats = useCallback(async () => {
     try {
       const raw = await api<any>('/api/stats');
-      // если у тебя есть normalizeStats (у тебя есть) — используем её
       setStats(normalizeStats(raw));
     } catch {
       /* ignore */
     }
-  }, []); // stable, deps []
+  }, []);
 
   async function pull() {
     if (!sel) return;
@@ -156,6 +156,13 @@ export default function LogsPage() {
     loadRuns();
     loadStats();
   }, [loadRuns, loadStats]);
+
+  // reset buffer when run changes
+  useEffect(() => {
+    setItems([]);
+    setAfter(0);
+    prevCount.current = 0;
+  }, [sel]);
 
   useEffect(() => {
     if (!auto || !sel) { if (tick.current) clearInterval(tick.current); tick.current = null; return; }
@@ -231,7 +238,7 @@ export default function LogsPage() {
       <div className="min-h-screen text-slate-100">
         <Nav />
         <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
-          {/* controls — как на других страницах */}
+          {/* controls */}
           <div className="toolbar flex-wrap gap-2">
             <span className="text-sm text-gray-400">Run:</span>
             <select
@@ -269,7 +276,7 @@ export default function LogsPage() {
             </button>
           </div>
 
-          {/* summary — такие же «панели», как на других страницах */}
+          {/* summary */}
           <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="panel p-3">
               <div className="text-xs text-slate-400 mb-1">Yandex likes (from log):</div>

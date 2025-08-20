@@ -54,7 +54,7 @@ function safeMerge(statsStr?: string | null, patch: Json = {}) {
   try {
     base = statsStr ? JSON.parse(statsStr) : {};
   } catch (e) {
-    console.warn('[log] write failed', e);
+    console.warn('[log] safeMerge parse failed:', e);
   }
   return { ...base, ...patch };
 }

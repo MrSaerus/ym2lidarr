@@ -95,7 +95,6 @@ export async function runBackupNow(): Promise<{
   }
 }
 
-
 /** Список файлов бэкапа в каталоге */
 export function listBackups(dir: string): { file: string; size: number; mtime: number }[] {
   try {
@@ -125,15 +124,15 @@ export async function reloadJobs() {
     jobs[k] = undefined;
   }
 
-  const s = await prisma.setting.findFirst(); // NOTE: singular model
+  const s = await prisma.setting.findFirst();
   if (!s) return;
 
-  // Яндекс
-  if (s.yandexCron && cron.validate(s.yandexCron)) {
-    jobs.yandex = cron.schedule(s.yandexCron, async () => {
+  // Яндекс (новые поля cronYandex/cronLidarr)
+  if (s.cronYandex && cron.validate(s.cronYandex)) {
+    jobs.yandex = cron.schedule(s.cronYandex, async () => {
       try {
         console.log('[cron] yandex sync');
-        await runYandexPull(); // без аргументов — совместимо по типам
+        await runYandexPull();
       } catch (e) {
         console.error('[cron] yandex failed:', (e as Error).message);
       }
@@ -141,8 +140,8 @@ export async function reloadJobs() {
   }
 
   // Lidarr
-  if (s.lidarrCron && cron.validate(s.lidarrCron)) {
-    jobs.lidarr = cron.schedule(s.lidarrCron, async () => {
+  if (s.cronLidarr && cron.validate(s.cronLidarr)) {
+    jobs.lidarr = cron.schedule(s.cronLidarr, async () => {
       try {
         console.log('[cron] lidarr push');
         await runLidarrPush();

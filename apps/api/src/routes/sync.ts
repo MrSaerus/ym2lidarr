@@ -1,19 +1,34 @@
+// apps/api/src/routes/sync.ts
 import { Router } from 'express';
 
 import { startRun } from '../log';
 import { prisma } from '../prisma';
 import { runYandexPull, runLidarrPull, runMbMatch, runLidarrPush } from '../workers';
+
 const r = Router();
 
 r.post('/yandex/pull', async (req, res) => {
-  const override = typeof req.body?.token === 'string' && req.body.token.trim() ? req.body.token.trim() : undefined;
-  const run = await startRun('yandex-pull', { phase: 'start', a_total: 0, a_done: 0, al_total: 0, al_done: 0 });
+  const override =
+      typeof req.body?.token === 'string' && req.body.token.trim()
+          ? req.body.token.trim()
+          : undefined;
+
+  // Унифицируем kind с воркером: 'yandex'
+  const run = await startRun('yandex', {
+    phase: 'start',
+    a_total: 0,
+    a_done: 0,
+    al_total: 0,
+    al_done: 0,
+  });
+
   runYandexPull(override, run.id).catch(() => {});
   res.json({ started: true, runId: run.id });
 });
 
 r.post('/lidarr/pull', async (_req, res) => {
-  const run = await startRun('lidarr-pull', { phase: 'start', total: 0, done: 0 });
+  // Унифицируем kind с воркером: 'lidarr'
+  const run = await startRun('lidarr', { phase: 'start', total: 0, done: 0 });
   runLidarrPull(run.id).catch(() => {});
   res.json({ started: true, runId: run.id });
 });
@@ -21,15 +36,28 @@ r.post('/lidarr/pull', async (_req, res) => {
 r.post('/match', async (req, res) => {
   const force = req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
   const target = (req.body?.target || req.query.target) as any; // 'artists' | 'albums' | 'both'
-  const run = await startRun('match', { phase: 'start', a_total: 0, a_done: 0, a_matched: 0, al_total: 0, al_done: 0, al_matched: 0 });
-  runMbMatch(run.id, { force, target: (['artists','albums','both'].includes(target) ? target : 'both') }).catch(() => {});
+
+  const run = await startRun('match', {
+    phase: 'start',
+    a_total: 0,
+    a_done: 0,
+    a_matched: 0,
+    al_total: 0,
+    al_done: 0,
+    al_matched: 0,
+  });
+
+  runMbMatch(run.id, {
+    force,
+    target: ['artists', 'albums', 'both'].includes(target) ? target : 'both',
+  }).catch(() => {});
   res.json({ started: true, runId: run.id });
 });
 
 r.post('/lidarr', async (_req, res) => {
-  const run = await startRun('lidarr', { phase: 'start', total: 0, done: 0, ok: 0, failed: 0 });
+  // Воркер сам создаёт Run внутри, поэтому здесь не создаём дубликат
   runLidarrPush().catch(() => {});
-  res.json({ started: true, runId: run.id });
+  res.json({ started: true });
 });
 
 // Список последних забегов

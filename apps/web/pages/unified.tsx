@@ -1,4 +1,4 @@
-// apps/web/pages/yandex.tsx
+// apps/web/pages/unified.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
@@ -7,32 +7,50 @@ import { useRouter } from 'next/router';
 
 type Target = 'artists' | 'albums';
 
-type YArtistRow = {
+type UArtistRow = {
     id: number;
     name: string;
-    yandexArtistId: number;
-    yandexUrl: string;
-    mbid?: string | null;
     mbUrl?: string | null;
+
+    yandexArtistId?: number | null;
+    yandexUrl?: string | null;
+
+    lidarrId?: number | null;
+    lidarrUrl?: string | null;
 };
-type YAlbumRow = {
+
+type UAlbumRow = {
     id: number;
     title: string;
     artistName: string;
-    yandexAlbumId: number;
-    yandexUrl: string;
-    rgMbid?: string | null;
-    rgUrl?: string | null;
+
+    rgUrl?: string | null;       // release-group
+    releaseUrl?: string | null;  // fallback на release
+
+    yandexAlbumId?: number | null;
+    yandexUrl?: string | null;
+
+    lidarrAlbumId?: number | null;
+    lidarrUrl?: string | null;
+
     year?: number | null;
 };
 
-type ApiResp<T> = { page: number; pageSize: number; total: number; items: T[] };
+type ApiResp<T> = {
+    page: number;
+    pageSize: number;
+    total: number;
+    items: T[];
+};
 
 type SortFieldArtists = 'name' | 'id';
 type SortFieldAlbums = 'title' | 'artist' | 'id';
 
-/* ==== Fixed link slots (Yandex | MusicBrainz) ==== */
-const LINKS_COL_WIDTH = 'w-[14rem]';
+/** ---------------- Fixed link slots ----------------
+ * 3 ячейки фиксированной ширины: Yandex | Lidarr | MusicBrainz
+ * При отсутствии ссылки рендерим невидимый плейсхолдер, чтобы сохранить сетку.
+ */
+const LINKS_COL_WIDTH = 'w-[20rem]'; // ~ ширина трёх чипов с зазорами; при желании подстрой
 
 function LinkSlot({
                       href,
@@ -40,9 +58,10 @@ function LinkSlot({
                       className,
                   }: {
     href?: string | null;
-    label: 'Yandex' | 'MusicBrainz';
+    label: 'Yandex' | 'Lidarr' | 'MusicBrainz';
     className: string;
 }) {
+    // одинаковая разметка, но невидимая, если ссылки нет — сохраняет ширину
     if (!href) {
         return (
             <span className={`link-chip ${className} invisible select-none`} aria-hidden="true">
@@ -59,25 +78,28 @@ function LinkSlot({
 
 function LinksFixedRow({
                            yandexUrl,
+                           lidarrUrl,
                            mbUrl,
                        }: {
     yandexUrl?: string | null;
+    lidarrUrl?: string | null;
     mbUrl?: string | null;
 }) {
     return (
-        <div className={`grid grid-cols-2 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
+        <div className={`grid grid-cols-3 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
             <LinkSlot href={yandexUrl} label="Yandex" className="link-chip--ym" />
+            <LinkSlot href={lidarrUrl} label="Lidarr" className="link-chip--lidarr" />
             <LinkSlot href={mbUrl} label="MusicBrainz" className="link-chip--mb" />
         </div>
     );
 }
-/* ================================================ */
+/* -------------------------------------------------- */
 
-export default function YandexPage() {
+export default function UnifiedPage() {
     const router = useRouter();
 
     const [target, setTarget] = useState<Target>('artists');
-    const [rows, setRows] = useState<(YArtistRow | YAlbumRow)[]>([]);
+    const [rows, setRows] = useState<(UArtistRow | UAlbumRow)[]>([]);
     const [loading, setLoading] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string>('');
 
@@ -88,6 +110,7 @@ export default function YandexPage() {
 
     const [sortByArtists, setSortByArtists] = useState<SortFieldArtists>('name');
     const [sortDirArtists, setSortDirArtists] = useState<'asc' | 'desc'>('asc');
+
     const [sortByAlbums, setSortByAlbums] = useState<SortFieldAlbums>('title');
     const [sortDirAlbums, setSortDirAlbums] = useState<'asc' | 'desc'>('asc');
 
@@ -130,10 +153,10 @@ export default function YandexPage() {
 
                 const path =
                     target === 'artists'
-                        ? `/api/yandex/artists?${params.toString()}`
-                        : `/api/yandex/albums?${params.toString()}`;
+                        ? `/api/unified/artists?${params.toString()}`
+                        : `/api/unified/albums?${params.toString()}`;
 
-                const r = await api<ApiResp<YArtistRow | YAlbumRow>>(path);
+                const r = await api<ApiResp<UArtistRow | UAlbumRow>>(path);
                 setRows(r.items || []);
                 setPage(p);
                 setTotal(r.total || 0);
@@ -155,9 +178,7 @@ export default function YandexPage() {
 
     function updateUrl(params: Record<string, string>) {
         if (!router.isReady) return;
-        router.replace({ pathname: router.pathname, query: { ...router.query, ...params } }, undefined, {
-            shallow: true,
-        });
+        router.replace({ pathname: router.pathname, query: { ...router.query, ...params } }, undefined, { shallow: true });
     }
     function setTargetAndUrl(t: Target) {
         setTarget(t);
@@ -260,6 +281,18 @@ export default function YandexPage() {
             alert('Yandex pull failed: ' + (e?.message || String(e)));
         }
     }
+    async function pullFromLidarr() {
+        try {
+            try {
+                await api('/api/sync/lidarr/pull', { method: 'POST' });
+            } catch {
+                await api('/api/sync/lidarr', { method: 'POST' });
+            }
+            await load(1);
+        } catch (e: any) {
+            alert('Lidarr pull failed: ' + (e?.message || String(e)));
+        }
+    }
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const headerArrow = (active: boolean) =>
@@ -273,20 +306,14 @@ export default function YandexPage() {
         <>
             <Nav />
             <main className="mx-auto max-w-6xl px-4 py-4">
-                <h1 className="h1">Yandex</h1>
+                <h1 className="h1">Unified</h1>
 
                 <div className="toolbar">
                     <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
-                        <button
-                            className={`btn ${target === 'artists' ? 'btn-primary' : 'btn-outline'}`}
-                            onClick={() => setTargetAndUrl('artists')}
-                        >
+                        <button className={`btn ${target === 'artists' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTargetAndUrl('artists')}>
                             Artists
                         </button>
-                        <button
-                            className={`btn ${target === 'albums' ? 'btn-primary' : 'btn-outline'}`}
-                            onClick={() => setTargetAndUrl('albums')}
-                        >
+                        <button className={`btn ${target === 'albums' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setTargetAndUrl('albums')}>
                             Albums
                         </button>
                     </div>
@@ -304,6 +331,9 @@ export default function YandexPage() {
                     <button className="btn btn-outline" onClick={pullFromYandex}>
                         Pull from Yandex
                     </button>
+                    <button className="btn btn-outline" onClick={pullFromLidarr}>
+                        Pull from Lidarr
+                    </button>
 
                     <button
                         className="btn btn-outline"
@@ -311,11 +341,8 @@ export default function YandexPage() {
                             try {
                                 await api('/api/sync/match', {
                                     method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({
-                                        force: true,
-                                        target: target === 'artists' ? 'artists' : 'albums',
-                                    }),
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ force: true, target: target === 'artists' ? 'artists' : 'albums' }),
                                 });
                                 await load(1);
                             } catch (e: any) {
@@ -328,33 +355,26 @@ export default function YandexPage() {
 
                     <div className="ml-auto flex items-center gap-2">
                         <span className="text-xs text-gray-500">Rows per page:</span>
-                        <select className="select" value={pageSize}
-                                onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
+                        <select className="select" value={pageSize} onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
                             {[25, 50, 100, 200].map((n) => (
                                 <option key={n} value={n}>
                                     {n}
                                 </option>
                             ))}
                         </select>
-                        <span className="text-xs text-gray-500">
-              {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
-            </span>
+                        <span className="text-xs text-gray-500">{total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}</span>
                         <div className="flex items-center gap-1">
                             <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>
                                 {'«'}
                             </button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))}
-                                    disabled={page <= 1}>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))} disabled={page <= 1}>
                                 {'‹'}
                             </button>
                             <span className="text-xs text-gray-500 px-2">Page {page}/{pageCount}</span>
-                            <button className="btn btn-outline"
-                                    onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))}
-                                    disabled={page >= pageCount}>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>
                                 {'›'}
                             </button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)}
-                                    disabled={page >= pageCount}>
+                            <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)} disabled={page >= pageCount}>
                                 {'»'}
                             </button>
                         </div>
@@ -371,12 +391,8 @@ export default function YandexPage() {
                             {target === 'artists' ? (
                                 <>
                                     <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortArtistsAndUrl('name')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
-                                            Name {headerArrow(sortByArtists === 'name')}
+                                        <button type="button" onClick={() => setSortArtistsAndUrl('name')} className="inline-flex items-center gap-1 hover:underline">
+                                            Artist {headerArrow(sortByArtists === 'name')}
                                         </button>
                                     </Th>
                                     <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
@@ -384,20 +400,12 @@ export default function YandexPage() {
                             ) : (
                                 <>
                                     <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortAlbumsAndUrl('title')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
+                                        <button type="button" onClick={() => setSortAlbumsAndUrl('title')} className="inline-flex items-center gap-1 hover:underline">
                                             Album {headerArrow(sortByAlbums === 'title')}
                                         </button>
                                     </Th>
                                     <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortAlbumsAndUrl('artist')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
+                                        <button type="button" onClick={() => setSortAlbumsAndUrl('artist')} className="inline-flex items-center gap-1 hover:underline">
                                             Artist {headerArrow(sortByAlbums === 'artist')}
                                         </button>
                                     </Th>
@@ -406,6 +414,7 @@ export default function YandexPage() {
                             )}
                         </tr>
                         </thead>
+
                         <tbody>
                         {rows.length === 0 ? (
                             <tr>
@@ -414,28 +423,26 @@ export default function YandexPage() {
                                 </Td>
                             </tr>
                         ) : target === 'artists' ? (
-                            (rows as YArtistRow[]).map((r, i) => (
-                                <tr key={`${r.yandexArtistId}-${i}`}>
+                            (rows as UArtistRow[]).map((r, i) => (
+                                <tr key={`${r.id}-${r.name}-${i}`}>
                                     <Td>{i + 1 + (page - 1) * pageSize}</Td>
                                     <Td>{r.name || '—'}</Td>
                                     <Td className="text-center">
-                                        <LinksFixedRow
-                                            yandexUrl={r.yandexUrl}
-                                            mbUrl={(r.mbid ? r.mbUrl : undefined) || undefined}
-                                        />
+                                        <LinksFixedRow yandexUrl={r.yandexUrl || undefined} lidarrUrl={r.lidarrUrl || undefined} mbUrl={r.mbUrl || undefined} />
                                     </Td>
                                 </tr>
                             ))
                         ) : (
-                            (rows as YAlbumRow[]).map((r, i) => (
-                                <tr key={`${r.yandexAlbumId}-${i}`}>
+                            (rows as UAlbumRow[]).map((r, i) => (
+                                <tr key={`${r.id}-${r.title}-${i}`}>
                                     <Td>{i + 1 + (page - 1) * pageSize}</Td>
                                     <Td>{r.title || '—'}</Td>
                                     <Td>{r.artistName || '—'}</Td>
                                     <Td className="text-center">
                                         <LinksFixedRow
-                                            yandexUrl={r.yandexUrl}
-                                            mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined}
+                                            yandexUrl={r.yandexUrl || undefined}
+                                            lidarrUrl={r.lidarrUrl || undefined}
+                                            mbUrl={(r.rgUrl || r.releaseUrl) || undefined}
                                         />
                                     </Td>
                                 </tr>

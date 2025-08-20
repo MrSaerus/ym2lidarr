@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,183 +7,54 @@ datasource db {
   url      = env("DATABASE_URL") // e.g. file:./data/app.db
 }
 
-model Setting {
-  id                    Int     @id @default(1)
-  lidarrAllowNoMetadata Boolean @default(false)
-  // планировщик синков
-  yandexCron            String?
-  lidarrCron            String?
+// /* ===================== Ingest: Yandex ===================== */
 
-  // backup
-  backupEnabled   Boolean @default(false)
-  backupCron      String? // например "0 3 * * *"
-  backupRetention Int?    @default(14) // хранить N последних файлов
-  backupDir       String? // по умолчанию /app/data/backups
-
-  // notifications
-  notifyType     String? // 'none' | 'telegram' | 'webhook'
-  telegramBot    String?
-  telegramChatId String?
-  webhookUrl     String?
-  webhookSecret  String?
-
-  // yandex driver
-  yandexDriver String? @default("pyproxy") // 'pyproxy' | 'native'
-  pyproxyUrl   String? // если нужно отличать от env
-
-  // tokens & endpoints
-  yandexToken  String?
-  lidarrUrl    String?
-  lidarrApiKey String?
-
-  // behaviour (enums → strings)
-  mode         String  @default("artists") // "artists" | "albums"
-  pushTarget   String  @default("artists") // "artists" | "albums"
-  enableExport Boolean @default(true)
-  enablePush   Boolean @default(false)
-  exportPath   String?
-
-  // Lidarr defaults
-  rootFolderPath    String?
-  qualityProfileId  Int?
-  metadataProfileId Int?
-  monitor           String?
-
-  // schedules (CRON)
-  cronYandex String @default("0 */6 * * *")
-  cronLidarr String @default("0 3 * * *")
-
-  // timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Artist {
+model YandexArtist {
   id        Int      @id @default(autoincrement())
-  key       String   @unique
+  ymId      String   @unique
   name      String
-  mbid      String?
-  matched   Boolean  @default(false)
-  createdAt DateTime @default(now())
+  key       String?
+  present   Boolean  @default(true)
+  raw       String?
   updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 
-  // NEW:
-  mbCheckedAt DateTime?
-  mbAttempts  Int       @default(0)
+  // результат матчинга
+  mbid String?
 
-  candidates ArtistCandidate[]
+  albums YandexAlbum[]
+
+  @@index([name])
+  @@index([present])
+  @@index([mbid])
 }
 
-model ArtistCandidate {
-  id        Int     @id @default(autoincrement())
-  artistId  Int
-  mbid      String
-  name      String
-  score     Int?
-  type      String? // Group/Person
-  country   String?
-  url       String?
-  highlight Boolean @default(false)
-
-  Artist Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
-
-  @@index([artistId])
-}
-
-model Album {
+model YandexAlbum {
   id        Int      @id @default(autoincrement())
-  key       String   @unique
-  artist    String
+  ymId      String   @unique
   title     String
+  artist    String?
   year      Int?
-  rgMbid    String?
-  matched   Boolean  @default(false)
-  createdAt DateTime @default(now())
+  key       String?
+  present   Boolean  @default(true)
+  raw       String?
   updatedAt DateTime @updatedAt
-
-  // NEW:
-  mbCheckedAt DateTime?
-  mbAttempts  Int       @default(0)
-
-  candidates AlbumCandidate[]
-}
-
-model AlbumCandidate {
-  id               Int     @id @default(autoincrement())
-  albumId          Int
-  rgMbid           String
-  title            String
-  primaryType      String?
-  firstReleaseDate String?
-  primaryArtist    String?
-  score            Int?
-  url              String?
-  highlight        Boolean @default(false)
-
-  Album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
-
-  @@index([albumId])
-}
-
-model CacheEntry {
-  id        Int      @id @default(autoincrement())
-  scope     String // 'artist' | 'album'
-  key       String   @unique // normalized cache key (e.g. "artist:<norm>" / "album:<norm>")
-  payload   String // JSON string (was Json)
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+
+  // связь на артиста Yandex по его ymId
+  yandexArtistId String?
+  artistRef      YandexArtist? @relation(fields: [yandexArtistId], references: [ymId], onDelete: SetNull)
+
+  // результат матчинга (release-group MBID)
+  rgMbid String?
+
+  @@index([title])
+  @@index([present])
+  @@index([yandexArtistId])
+  @@index([rgMbid])
 }
 
-model SyncRun {
-  id         Int       @id @default(autoincrement())
-  kind       String // 'yandex' | 'lidarr' | 'export'
-  startedAt  DateTime  @default(now())
-  finishedAt DateTime?
-  status     String // 'running' | 'ok' | 'error'
-  stats      String? // JSON string
-  message    String?
-
-  // <-- добавили обратную связь
-  logs SyncLog[]
-}
-
-model SyncLog {
-  id      Int      @id @default(autoincrement())
-  runId   Int
-  ts      DateTime @default(now())
-  level   String // 'info' | 'warn' | 'error' | 'debug'
-  message String
-  data    String? // JSON string (optional)
-
-  run SyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
-
-  @@index([runId, ts])
-}
-
-model ArtistPush {
-  id             Int      @id @default(autoincrement())
-  mbid           String   @unique
-  name           String
-  path           String?
-  lidarrArtistId Int?
-  status         String   @default("CREATED")
-  firstPushedAt  DateTime @default(now())
-  lastCheckedAt  DateTime @updatedAt
-  source         String?
-}
-
-model AlbumPush {
-  id            Int      @id @default(autoincrement())
-  mbid          String   @unique
-  title         String
-  artistName    String?
-  path          String?
-  lidarrAlbumId Int?
-  status        String   @default("CREATED")
-  firstPushedAt DateTime @default(now())
-  lastCheckedAt DateTime @updatedAt
-  source        String?
-}
+// /* ===================== Ingest: Lidarr ===================== */
 
 model LidarrArtist {
   id         Int       @id
@@ -197,15 +66,188 @@ model LidarrArtist {
   albums     Int?
   tracks     Int?
   sizeOnDisk Float?
-
   removed    Boolean   @default(false)
   lastSyncAt DateTime?
   updatedAt  DateTime  @updatedAt
   createdAt  DateTime  @default(now())
+
+  albumsRel LidarrAlbum[]
 
   @@index([name])
   @@index([mbid])
   @@index([monitored])
   @@index([added])
   @@index([sizeOnDisk])
+  @@index([removed])
+}
+
+model LidarrAlbum {
+  id         Int       @id
+  mbid       String?
+  title      String
+  artistName String?
+  path       String?
+  monitored  Boolean   @default(false)
+  added      DateTime?
+  sizeOnDisk Float?
+  tracks     Int?
+  removed    Boolean   @default(false)
+  lastSyncAt DateTime?
+  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
+
+  // связь на артиста Lidarr по его numeric id
+  artistId  Int?
+  artistRef LidarrArtist? @relation(fields: [artistId], references: [id], onDelete: SetNull)
+
+  @@index([title])
+  @@index([artistName])
+  @@index([mbid])
+  @@index([removed])
+  @@index([artistId])
+}
+
+// /* ===================== MB Sync (трекинг) ===================== */
+
+model MbSyncItem {
+  id            Int       @id @default(autoincrement())
+  kind          String // 'yandex-artist' | 'yandex-album'
+  targetId      Int
+  attempts      Int       @default(0)
+  lastCheckedAt DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+
+  @@unique([kind, targetId])
+  @@index([kind, lastCheckedAt])
+}
+
+// /* ===================== Push to Lidarr (кэш статуса) ===================== */
+
+model ArtistPush {
+  id             Int      @id @default(autoincrement())
+  artistId       Int?
+  mbid           String?
+  name           String
+  path           String?
+  lidarrArtistId Int?
+  status         String   @default("CREATED")
+  attempts       Int      @default(0)
+  lastError      String?
+  firstPushedAt  DateTime @default(now())
+  lastCheckedAt  DateTime @updatedAt
+  source         String?
+
+  @@index([status, lastCheckedAt])
+  @@index([lidarrArtistId])
+  @@index([artistId])
+}
+
+model AlbumPush {
+  id            Int      @id @default(autoincrement())
+  albumId       Int?
+  mbid          String?
+  title         String
+  artistName    String?
+  path          String?
+  lidarrAlbumId Int?
+  status        String   @default("CREATED")
+  attempts      Int      @default(0)
+  lastError     String?
+  firstPushedAt DateTime @default(now())
+  lastCheckedAt DateTime @updatedAt
+  source        String?
+
+  @@index([status, lastCheckedAt])
+  @@index([lidarrAlbumId])
+  @@index([albumId])
+}
+
+// /* ===================== Cache + Runs/Logs ===================== */
+
+model CacheEntry {
+  id        Int       @id @default(autoincrement())
+  scope     String // 'ya:artist' | 'ya:album'
+  key       String    @unique
+  payload   String
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([scope])
+  @@index([expiresAt])
+}
+
+model SyncRun {
+  id         Int       @id @default(autoincrement())
+  kind       String // 'yandex' | 'lidarr' | 'export' | 'match'
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String // 'running' | 'ok' | 'error'
+  stats      String?
+  message    String?
+
+  logs SyncLog[]
+
+  @@index([kind, status, startedAt])
+}
+
+model SyncLog {
+  id      Int      @id @default(autoincrement())
+  runId   Int
+  ts      DateTime @default(now())
+  level   String // 'info' | 'warn' | 'error' | 'debug'
+  message String
+  data    String?
+
+  run SyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, ts])
+  @@index([level, ts])
+}
+
+// /* ===================== Settings ===================== */
+
+model Setting {
+  id                    Int     @id @default(1)
+  lidarrAllowNoMetadata Boolean @default(false)
+
+  backupEnabled   Boolean @default(false)
+  backupCron      String?
+  backupRetention Int?    @default(14)
+  backupDir       String?
+
+  notifyType     String  @default("none") // 'none' | 'telegram' | 'webhook'
+  telegramBot    String?
+  telegramChatId String?
+  webhookUrl     String?
+  webhookSecret  String?
+
+  yandexDriver String  @default("pyproxy") // 'pyproxy' | 'native'
+  pyproxyUrl   String?
+
+  yandexToken  String?
+  lidarrUrl    String?
+  lidarrApiKey String?
+
+  mode         String  @default("artists") // 'artists' | 'albums'
+  pushTarget   String  @default("artists") // 'artists' | 'albums'
+  enableExport Boolean @default(true)
+  enablePush   Boolean @default(false)
+  exportPath   String?
+
+  rootFolderPath    String?
+  qualityProfileId  Int?
+  metadataProfileId Int?
+  monitor           String? // 'all' | 'future' | 'none'
+
+  cronYandex String @default("0 */6 * * *")
+  cronLidarr String @default("0 3 * * *")
+
+  // deprecated
+  yandexCron String?
+  lidarrCron String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

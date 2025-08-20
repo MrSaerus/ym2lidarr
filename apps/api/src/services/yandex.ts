@@ -1,9 +1,9 @@
+// apps/api/src/services/yandex.ts
 import { request } from 'undici';
 
 /**
- * Yandex Music service: native HTTP client + optional Python sidecar (pyproxy).
- * - setPyproxyUrl(url) — чтобы менять URL из настроек
- * - getDriver(value)   — нормализует значение 'pyproxy' | 'native'
+ * Yandex Music service: pyproxy-only интерфейс + верификация токена.
+ * ВАЖНО: yandexPullLikes требует PY (pyproxy URL). Без него — ошибка.
  */
 
 const BASE = 'https://api.music.yandex.net';
@@ -19,20 +19,13 @@ export function getDriver(settingValue?: string | null): 'pyproxy' | 'native' {
   return v === 'native' ? 'native' : 'pyproxy';
 }
 
-// "правдоподобные" заголовки для нативных вызовов
+// "правдоподобные" заголовки для нативных вызовов (нужны только для fallback-проверки токена)
 const DEFAULT_UA =
-  process.env.YA_UA ||
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+    process.env.YA_UA ||
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 const YM_CLIENT = process.env.YA_CLIENT || 'Windows/6.45.1';
 
 type YAccount = { uid: number; login?: string | null };
-type FullTrack = {
-  id: number;
-  title?: string;
-  durationMs?: number;
-  albums?: { title?: string; year?: number; releaseYear?: number }[];
-  artists?: { name?: string }[];
-};
 
 function authHeaders(token: string) {
   return {
@@ -81,88 +74,77 @@ export async function yandexGetAccount(token: string): Promise<YAccount> {
 }
 
 /**
- * Забирает лайки (артисты/альбомы) либо через pyproxy, либо нативно.
+ * Лайки через PYPROXY.
+ * Возвращает нормализованные массивы: артисты и альбомы.
+ * Если pyproxy не отдаёт id, оставляем их пустыми — воркер сам поставит плейсхолдер key.
  */
 export async function yandexPullLikes(
-  token: string,
-  opts?: { driver?: 'pyproxy' | 'native' },
-): Promise<{ artists: string[]; albums: { artist: string; title: string; year?: number }[] }> {
-  const driver = (opts?.driver || 'pyproxy') as 'pyproxy' | 'native';
-
-  // Предпочитаем pyproxy, если он доступен и драйвер = pyproxy
-  if (driver === 'pyproxy' && PY) {
-    const resp = await request(`${PY}/likes`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token }),
-    });
-    const data: any = await resp.body.json();
-    if (!resp.statusCode || resp.statusCode >= 400) {
-      throw new Error(`pyproxy ${resp.statusCode}`);
-    }
-    return {
-      artists: Array.isArray(data?.artists) ? data.artists : [],
-      albums: Array.isArray(data?.albums) ? data.albums : [],
-    };
+    token: string,
+    _opts?: { driver?: 'pyproxy' | 'native' },
+): Promise<{
+  artists: Array<{ id?: number; name: string; mbid?: string | null }>;
+  albums: Array<{ id?: number; title: string; artistName: string; year?: number; artistId?: number; rgMbid?: string | null }>;
+}> {
+  if (!PY) {
+    throw new Error('YA pyproxy URL is not configured (set settings.pyproxyUrl or YA_PYPROXY_URL)');
   }
 
-  // --- Нативный путь (может словить SmartCaptcha на некоторых IP/заголовках) ---
-  const acc = await yandexGetAccount(token);
-  if (!acc.uid) throw new Error('Yandex token invalid or no UID');
-
-  const data: any = await getJSON(`/users/${acc.uid}/likes/tracks`, token);
-  const list: any[] = data?.result?.tracks || data?.result?.library?.tracks || data?.result || [];
-  const pairs = list
-    .map((x: any) => {
-      const id = x?.id ?? x?.trackId ?? x?.track?.id;
-      const aid = x?.albumId ?? x?.album?.id ?? x?.track?.albumId ?? x?.track?.albums?.[0]?.id;
-      if (!id) return null;
-      return aid ? `${id}:${aid}` : String(id);
-    })
-    .filter(Boolean) as string[];
-
-  const batch = 100;
-  const full: FullTrack[] = [];
-  for (let i = 0; i < pairs.length; i += batch) {
-    const chunk = pairs.slice(i, i + batch);
-    const tr: any = await getJSON('/tracks', token, { 'track-ids': chunk.join(',') });
-    const arr: any[] = Array.isArray(tr?.result) ? tr.result : tr?.result?.tracks || [];
-    for (const t of arr) {
-      full.push({
-        id: Number(t.id),
-        title: t.title,
-        durationMs: t.durationMs ?? t.duration_ms,
-        albums: t.albums,
-        artists: t.artists,
-      });
-    }
+  const resp = await request(`${PY}/likes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  const raw: any = await resp.body.json();
+  if (!resp.statusCode || resp.statusCode >= 400) {
+    throw new Error(`pyproxy /likes ${resp.statusCode}`);
   }
 
-  // Уникальные артисты
-  const artistsMap = new Map<string, string>();
-  for (const t of full) {
-    for (const a of t.artists || []) {
-      if (a?.name) {
-        const k = a.name.trim().toLowerCase();
-        if (!artistsMap.has(k)) artistsMap.set(k, a.name.trim());
-      }
-    }
-  }
-  const artists = Array.from(artistsMap.values());
+  const artistsRaw: any[] = Array.isArray(raw?.artists) ? raw.artists : [];
+  const albumsRaw: any[] = Array.isArray(raw?.albums) ? raw.albums : [];
 
-  // Уникальные альбомы (по главному артисту + названию)
-  const albumMap = new Map<string, { artist: string; title: string; year?: number }>();
-  for (const t of full) {
-    const mainArtist = t.artists?.[0]?.name || '';
-    const alb = t.albums?.[0];
-    if (!alb?.title) continue;
-    const year = alb.year ?? alb.releaseYear;
-    const key = `${mainArtist.trim().toLowerCase()}|||${alb.title.trim().toLowerCase()}`;
-    if (!albumMap.has(key)) {
-      albumMap.set(key, { artist: mainArtist, title: alb.title, year });
-    }
-  }
-  const albums = Array.from(albumMap.values());
+  const artists = artistsRaw
+      .map((x) => {
+        if (typeof x === 'string') {
+          return { name: x } as { id?: number; name: string; mbid?: string | null };
+        }
+        const id =
+            typeof x?.id === 'number'
+                ? x.id
+                : Number.isFinite(Number(x?.yandexArtistId))
+                    ? Number(x.yandexArtistId)
+                    : undefined;
+        const name = String(x?.name || '').trim();
+        const mbid = typeof x?.mbid === 'string' ? x.mbid : null;
+        return { id, name, mbid };
+      })
+      .filter((a) => a.name);
+
+  const albums = albumsRaw
+      .map((x) => {
+        const id =
+            typeof x?.id === 'number'
+                ? x.id
+                : Number.isFinite(Number(x?.yandexAlbumId))
+                    ? Number(x.yandexAlbumId)
+                    : undefined;
+        const title = String(x?.title || '').trim();
+        const artistName = String(x?.artistName || x?.artist || '').trim();
+        const year =
+            typeof x?.year === 'number'
+                ? x.year
+                : Number.isFinite(Number(x?.releaseYear))
+                    ? Number(x.releaseYear)
+                    : undefined;
+        const artistId =
+            typeof x?.artistId === 'number'
+                ? x.artistId
+                : Number.isFinite(Number(x?.yandexArtistId))
+                    ? Number(x.yandexArtistId)
+                    : undefined;
+        const rgMbid = typeof x?.rgMbid === 'string' ? x.rgMbid : null;
+        return { id, title, artistName, year, artistId, rgMbid };
+      })
+      .filter((a) => a.title || a.artistName);
 
   return { artists, albums };
 }
@@ -179,7 +161,7 @@ export async function yandexVerifyToken(token: string) {
         body: JSON.stringify({ token }),
       });
       const data: any = await resp.body.json();
-      return data; // { ok, uid, login, tracks? } или { ok:false, error }
+      return data; // { ok, uid, login, ... } или { ok:false, error }
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e) };
     }

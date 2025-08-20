@@ -1,27 +1,66 @@
+// apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
 
-type LegacyOverview = {
-  artists?: { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
-  albums?:  { total?: number | string; matched?: number | string; unmatched?: number | string; found?: number | string };
-  lastRun?: { id: number; status?: string; startedAt?: string | null } | null;
+type CountBlock = { total: number; matched: number; unmatched: number };
+
+type LatestYA = {
+  id: number;
+  title: string;
+  artistName: string;
+  year?: number | null;
+  yandexUrl?: string;
+  mbUrl?: string;
 };
 
-type Stats = {
-  totalArtists?: number | string;
-  matchedArtists?: number | string;
-  unmatchedArtists?: number | string;
-  totalAlbums?: number | string;
-  matchedAlbums?: number | string;
-  unmatchedAlbums?: number | string;
-  lastRun?: { id: number; status?: string; startedAt?: string | null } | null;
+type LatestLA = {
+  id: number;
+  title: string;
+  artistName: string;
+  added: string | null;
+  lidarrUrl?: string;
+  mbUrl?: string;
 };
 
-type SyncResp = { ok?: boolean; runId?: number; error?: string };
+type LatestYArtist = {
+  id: number;
+  name: string;
+  yandexUrl?: string;
+  mbUrl?: string;
+};
+type LatestLArtist = {
+  id: number;
+  name: string;
+  added?: string | null;
+  lidarrUrl?: string;
+  mbUrl?: string;
+};
 
-// new: короткая модель ран-записи
+type StatsResp = {
+  yandex?: {
+    artists: CountBlock;
+    albums: CountBlock;
+    latestAlbums?: LatestYA[];
+    latestArtists?: LatestYArtist[];
+  };
+  lidarr?: {
+    artists: CountBlock;
+    albums: CountBlock;
+    latestAlbums?: LatestLA[];
+    latestArtists?: LatestLArtist[];
+  };
+  // backward-compat
+  artists?: { total?: number; found?: number; unmatched?: number };
+  albums?: { total?: number; found?: number; unmatched?: number };
+  runs?: {
+    yandex?: { active: any; last: any };
+    lidarr?: { active: any; last: any };
+    match?: { active: any; last: any };
+  };
+};
+
 type RunShort = {
   id: number;
   status: 'running' | 'ok' | 'error' | string;
@@ -35,156 +74,108 @@ const toNum = (v: any) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
-const coalesceNum = (...vals: any[]) => {
-  for (const v of vals) {
-    if (v !== undefined && v !== null) {
-      const n = toNum(v);
-      if (!Number.isNaN(n)) return n;
-    }
-  }
-  return 0;
+const pct = (matched: number, total: number) => {
+  const t = toNum(total), m = toNum(matched);
+  return t > 0 ? m / t : 0;
 };
 
-function normalize(raw: any): Required<Stats> {
-  if (raw && (raw.artists || raw.albums)) {
-    const d = raw as LegacyOverview;
-
-    const aMatched = coalesceNum(d.artists?.matched, d.artists?.found);
-    const aUnmatched = coalesceNum(d.artists?.unmatched);
-    let aTotal = coalesceNum(d.artists?.total);
-    if (aTotal === 0 && (aMatched || aUnmatched)) aTotal = aMatched + aUnmatched;
-
-    const rgMatched = coalesceNum(d.albums?.matched, d.albums?.found);
-    const rgUnmatched = coalesceNum(d.albums?.unmatched);
-    let rgTotal = coalesceNum(d.albums?.total);
-    if (rgTotal === 0 && (rgMatched || rgUnmatched)) rgTotal = rgMatched + rgUnmatched;
-
-    return {
-      totalArtists: aTotal,
-      matchedArtists: Math.min(aMatched, aTotal),
-      unmatchedArtists: Math.max(aUnmatched || aTotal - aMatched, 0),
-      totalAlbums: rgTotal,
-      matchedAlbums: Math.min(rgMatched, rgTotal),
-      unmatchedAlbums: Math.max(rgUnmatched || rgTotal - rgMatched, 0),
-      lastRun: raw.lastRun ?? null,
-    };
-  }
-
-  const s = raw as Stats;
-  let ta = coalesceNum((s as any).totalArtists, (s as any).artistsTotal, (s as any).artists?.total);
-  let ma = coalesceNum((s as any).matchedArtists, (s as any).artistsMatched, (s as any).artists?.matched, (s as any).artists?.found);
-  let ua = coalesceNum((s as any).unmatchedArtists, (s as any).artistsUnmatched, (s as any).artists?.unmatched);
-  if (ta === 0 && (ma || ua)) ta = ma + ua;
-  if (ua === 0 && ta && ma && ta >= ma) ua = ta - ma;
-
-  let tr = coalesceNum((s as any).totalAlbums, (s as any).albumsTotal, (s as any).albums?.total);
-  let mr = coalesceNum((s as any).matchedAlbums, (s as any).albumsMatched, (s as any).albums?.matched, (s as any).albums?.found);
-  let ur = coalesceNum((s as any).unmatchedAlbums, (s as any).albumsUnmatched, (s as any).albums?.unmatched);
-  if (tr === 0 && (mr || ur)) tr = mr + ur;
-  if (ur === 0 && tr && mr && tr >= mr) ur = tr - mr;
-
-  return {
-    totalArtists: ta,
-    matchedArtists: Math.min(mr === undefined ? ma : ma, ta),
-    unmatchedArtists: Math.max(ua, 0),
-    totalAlbums: tr,
-    matchedAlbums: Math.min(mr, tr),
-    unmatchedAlbums: Math.max(ur, 0),
-    lastRun: s.lastRun ?? null,
-  };
-}
-
-// helper: маленький бейдж
 function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'ok'|'warn'|'err'|'muted' }) {
   const cls =
-      tone === 'ok'   ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30' :
-          tone === 'warn' ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30' :
-              tone === 'err'  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30' :
-                  'bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30';
+      tone === 'ok'
+          ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
+          : tone === 'warn'
+              ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
+              : tone === 'err'
+                  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
+                  : 'bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30';
   return <span className={`inline-flex items-center rounded px-2 py-[2px] text-xs ${cls}`}>{children}</span>;
 }
 
-export default function OverviewPage() {
-  const [data, setData] = useState<Required<Stats> | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string>('');
+async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
+  let lastErr: any;
+  for (const p of paths) {
+    try { return await api<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined }); }
+    catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('All endpoints failed');
+}
 
-  // new: состояние последнего/текущего запуска
+export default function OverviewPage() {
+  const [stats, setStats] = useState<StatsResp | null>(null);
   const [latest, setLatest] = useState<RunShort | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const raw = await api('/api/stats');
-      setData(normalize(raw));
-      setMsg('');
-    } catch (e: any) {
-      setMsg(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
+    try { setStats(await api<StatsResp>('/api/stats')); setMsg(''); }
+    catch (e: any) { setMsg(e?.message || String(e)); }
+    finally { setLoading(false); }
   }, []);
 
-  // new: загрузка текущего/последнего рана
   const loadLatest = useCallback(async () => {
     try {
       const r = await api<{ ok?: boolean; runs?: RunShort[] }>('/api/runs?limit=1');
       setLatest(r?.runs?.[0] ?? null);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
-    load();
-    loadLatest();
+    load(); loadLatest();
     const t = setInterval(loadLatest, 5000);
     return () => clearInterval(t);
   }, [load, loadLatest]);
 
-  const artistPct = useMemo(() => {
-    const t = toNum(data?.totalArtists ?? 0);
-    const m = toNum(data?.matchedArtists ?? 0);
-    return t > 0 ? m / t : 0;
-  }, [data]);
+  // Yandex counters (fallback-friendly)
+  const yA = {
+    total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0),
+    matched: toNum(stats?.yandex?.artists?.matched ?? stats?.artists?.found ?? 0),
+    unmatched: toNum(
+        stats?.yandex?.artists?.unmatched ??
+        (stats?.artists?.total != null && stats?.artists?.found != null
+            ? Number(stats.artists.total) - Number(stats.artists.found)
+            : 0),
+    ),
+  };
+  const yR = {
+    total: toNum(stats?.yandex?.albums?.total ?? stats?.albums?.total ?? 0),
+    matched: toNum(stats?.yandex?.albums?.matched ?? stats?.albums?.found ?? 0),
+    unmatched: toNum(
+        stats?.yandex?.albums?.unmatched ??
+        (stats?.albums?.total != null && stats?.albums?.found != null
+            ? Number(stats.albums.total) - Number(stats.albums.found)
+            : 0),
+    ),
+  };
 
-  const albumPct = useMemo(() => {
-    const t = toNum(data?.totalAlbums ?? 0);
-    const m = toNum(data?.matchedAlbums ?? 0);
-    return t > 0 ? m / t : 0;
-  }, [data]);
+  // Lidarr counters
+  const lA = {
+    total: toNum(stats?.lidarr?.artists?.total ?? 0),
+    matched: toNum(stats?.lidarr?.artists?.matched ?? 0),
+    unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0),
+  };
+  const lR = {
+    total: toNum(stats?.lidarr?.albums?.total ?? 0),
+    matched: toNum(stats?.lidarr?.albums?.matched ?? 0),
+    unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0),
+  };
 
-  async function runSyncYandex() {
-    setMsg('Starting Yandex sync…');
-    try {
-      const r = await api<SyncResp>('/api/sync/yandex', { method: 'POST' });
-      const ok = r?.ok === true || typeof r?.runId === 'number';
-      if (ok) {
-        setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`);
-        setTimeout(loadLatest, 400);
-      } else {
-        setMsg(`Sync failed${r?.error ? `: ${r.error}` : ''}`);
-      }
-    } catch (e: any) {
-      setMsg(`Sync error: ${e?.message || String(e)}`);
-    }
-  }
+  const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA]);
+  const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR]);
+  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
+  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
 
-  async function pushToLidarr() {
-    setMsg('Pushing to Lidarr…');
-    try {
-      const r = await api<SyncResp>('/api/sync/lidarr', { method: 'POST' });
-      const ok = r?.ok === true || typeof r?.runId === 'number';
-      if (ok) {
-        setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`);
-        setTimeout(loadLatest, 400);
-      } else {
-        setMsg(`Push failed${r?.error ? `: ${r.error}` : ''}`);
-      }
-    } catch (e: any) {
-      setMsg(`Push error: ${e?.message || String(e)}`);
-    }
-  }
+  // actions
+  async function resyncCacheLidarrArtists() { setMsg('Resyncing Lidarr cache (artists)…'); try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); } catch(e:any){ setMsg(`Lidarr resync error: ${e?.message||String(e)}`);} }
+  async function resyncCacheYandexAlbums() { return pullFromYandexAlbums(); }
+  async function pullFromLidarrArtists() { setMsg('Pull from Lidarr (artists)…'); try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr pull OK'); load(); } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`);} }
+  async function pullFromLidarrAlbums() { return pullFromLidarrArtists(); }
+  async function pullFromYandexArtists() { setMsg('Pull from Yandex (artists)…'); try { await tryPostMany(['/api/sync/yandex/pull','/api/sync/yandex','/api/yandex/pull'],{target:'artists'}); setMsg('Yandex pull OK'); load(); } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`);} }
+  async function pullFromYandexAlbums() { setMsg('Pull from Yandex (albums)…'); try { await tryPostMany(['/api/sync/yandex/pull','/api/sync/yandex','/api/yandex/pull'],{target:'albums'}); setMsg('Yandex pull OK'); load(); } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`);} }
+  async function matchYandexArtists() { setMsg('Matching Yandex artists…'); try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'artists'} as any}); setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
+  async function matchYandexAlbums()  { setMsg('Matching Yandex albums…');  try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'albums'} as any});  setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
+  async function runSyncYandex() { setMsg('Starting Yandex sync…'); try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex','/api/sync/yandex/pull','/api/yandex/pull']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`); setTimeout(loadLatest,400);} else { setMsg(`Sync failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`);} }
+  async function pushToLidarr()   { setMsg('Pushing to Lidarr…');      try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/lidarr','/api/lidarr']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`); setTimeout(loadLatest,400);} else { setMsg(`Push failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`);} }
 
   return (
       <>
@@ -194,28 +185,201 @@ export default function OverviewPage() {
 
           {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
-          {/* статистика */}
+          {/* ALBUMS */}
           <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Artists matched</div>
-              <div className="text-2xl font-bold">
-                {toNum(data?.matchedArtists ?? 0)}/{toNum(data?.totalArtists ?? 0)}
+            {/* Yandex albums (2 slots: Yandex + MB) */}
+            <div className="panel p-4">
+              <div className="section-title mb-2">Latest Yandex albums</div>
+              <div className="space-y-1">
+                {(stats?.yandex?.latestAlbums || []).length === 0 ? (
+                    <div className="text-sm text-gray-500">No data</div>
+                ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-gray-400">
+                      <tr>
+                        <th className="text-left w-10">#</th>
+                        <th className="text-left">Album</th>
+                        <th className="text-left">Artist</th>
+                        <th className="text-right links-col-2">Links</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {(stats?.yandex?.latestAlbums || []).slice(0, 5).map((r, i) => (
+                          <tr key={`ya-${r.id}-${i}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{i + 1}</td>
+                            <td className="py-1 pr-2">{r.title || '—'}</td>
+                            <td className="py-1 pr-2">{r.artistName || '—'}</td>
+                            <td className="py-1 links-col-2">
+                              <div className="link-tray link-tray-2 link-tray-right">
+                                {r.yandexUrl
+                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                                    : <span className="link-chip placeholder">Yandex</span>}
+                                {r.mbUrl
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                              </div>
+                            </td>
+                          </tr>
+                      ))}
+                      </tbody>
+                    </table>
+                )}
               </div>
-              <ProgressBar value={artistPct} color="accent" />
-              <div className="text-xs text-gray-500">Unmatched: {toNum(data?.unmatchedArtists ?? 0)}</div>
             </div>
 
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Albums matched</div>
-              <div className="text-2xl font-bold">
-                {toNum(data?.matchedAlbums ?? 0)}/{toNum(data?.totalAlbums ?? 0)}
+            {/* Lidarr albums (2 slots: Lidarr + MB) */}
+            <div className="panel p-4">
+              <div className="section-title mb-2">Latest Lidarr albums</div>
+              <div className="space-y-1">
+                {(stats?.lidarr?.latestAlbums || []).length === 0 ? (
+                    <div className="text-sm text-gray-500">No data</div>
+                ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-gray-400">
+                      <tr>
+                        <th className="text-left w-10">#</th>
+                        <th className="text-left">Album</th>
+                        <th className="text-left">Artist</th>
+                        <th className="text-right links-col-2">Links</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {(stats?.lidarr?.latestAlbums || []).slice(0, 5).map((r, i) => (
+                          <tr key={`la-${r.id}-${i}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{i + 1}</td>
+                            <td className="py-1 pr-2">{r.title || '—'}</td>
+                            <td className="py-1 pr-2">{r.artistName || '—'}</td>
+                            <td className="py-1 links-col-2">
+                              <div className="link-tray link-tray-2 link-tray-right">
+                                {r.lidarrUrl
+                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                {r.mbUrl
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                              </div>
+                            </td>
+                          </tr>
+                      ))}
+                      </tbody>
+                    </table>
+                )}
               </div>
-              <ProgressBar value={albumPct} color="primary" />
-              <div className="text-xs text-gray-500">Unmatched: {toNum(data?.unmatchedAlbums ?? 0)}</div>
             </div>
           </section>
 
-          {/* NEW: Runner status */}
+          {/* ARTISTS */}
+          <section className="grid gap-4 md:grid-cols-2">
+            {/* Yandex artists */}
+            <div className="panel p-4">
+              <div className="section-title mb-2">Latest Yandex artists</div>
+              <div className="space-y-1">
+                {(stats?.yandex?.latestArtists || []).length === 0 ? (
+                    <div className="text-sm text-gray-500">No data</div>
+                ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-gray-400">
+                      <tr>
+                        <th className="text-left w-10">#</th>
+                        <th className="text-left">Artist</th>
+                        <th className="text-right links-col-2">Links</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {(stats?.yandex?.latestArtists || []).slice(0, 5).map((r, i) => (
+                          <tr key={`yart-${r.id}-${i}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{i + 1}</td>
+                            <td className="py-1 pr-2">{r.name || '—'}</td>
+                            <td className="py-1 links-col-2">
+                              <div className="link-tray link-tray-2 link-tray-right">
+                                {r.yandexUrl
+                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                                    : <span className="link-chip placeholder">Yandex</span>}
+                                {r.mbUrl
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                              </div>
+                            </td>
+                          </tr>
+                      ))}
+                      </tbody>
+                    </table>
+                )}
+              </div>
+            </div>
+
+            {/* Lidarr artists */}
+            <div className="panel p-4">
+              <div className="section-title mb-2">Latest Lidarr artists</div>
+              <div className="space-y-1">
+                {(stats?.lidarr?.latestArtists || []).length === 0 ? (
+                    <div className="text-sm text-gray-500">No data</div>
+                ) : (
+                    <table className="w-full text-sm">
+                      <thead className="text-gray-400">
+                      <tr>
+                        <th className="text-left w-10">#</th>
+                        <th className="text-left">Artist</th>
+                        <th className="text-right links-col-2">Links</th>
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {(stats?.lidarr?.latestArtists || []).slice(0, 5).map((r, i) => (
+                          <tr key={`lart-${r.id}-${i}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{i + 1}</td>
+                            <td className="py-1 pr-2">{r.name || '—'}</td>
+                            <td className="py-1 links-col-2">
+                              <div className="link-tray link-tray-2 link-tray-right">
+                                {r.lidarrUrl
+                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                {r.mbUrl
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                              </div>
+                            </td>
+                          </tr>
+                      ))}
+                      </tbody>
+                    </table>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* Yandex stats */}
+          <section className="grid gap-4 md:grid-cols-2">
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
+              <div className="text-2xl font-bold">{yA.matched}/{yA.total}</div>
+              <ProgressBar value={yArtistPct} color="accent" />
+              <div className="text-xs text-gray-500">Unmatched: {yA.unmatched}</div>
+            </div>
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Albums matched (Yandex)</div>
+              <div className="text-2xl font-bold">{yR.matched}/{yR.total}</div>
+              <ProgressBar value={yAlbumPct} color="primary" />
+              <div className="text-xs text-gray-500">Unmatched: {yR.unmatched}</div>
+            </div>
+          </section>
+
+          {/* Lidarr stats */}
+          <section className="grid gap-4 md:grid-cols-2">
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
+              <div className="text-2xl font-bold">{lA.matched}/{lA.total}</div>
+              <ProgressBar value={lArtistPct} color="accent" />
+              <div className="text-xs text-gray-500">Without MBID: {lA.unmatched}</div>
+            </div>
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Albums (Lidarr, with RG MBID)</div>
+              <div className="text-2xl font-bold">{lR.matched}/{lR.total}</div>
+              <ProgressBar value={lAlbumPct} color="primary" />
+              <div className="text-xs text-gray-500">Without RG MBID: {lR.unmatched}</div>
+            </div>
+          </section>
+
+          {/* Runner & buttons */}
           <section className="panel p-4">
             <div className="text-sm text-gray-500 mb-1">Runner status</div>
             {!latest ? (
@@ -239,26 +403,54 @@ export default function OverviewPage() {
             )}
           </section>
 
-          {/* кнопки */}
           <section className="panel p-4">
             <div className="flex flex-wrap items-center gap-2">
               <button className="btn btn-outline" onClick={load} disabled={loading}>
                 {loading ? 'Refreshing…' : 'Refresh'}
               </button>
-              <button className="btn btn-primary" onClick={runSyncYandex}>
-                Sync Yandex
-              </button>
-              <button className="btn btn-primary" onClick={pushToLidarr}>
-                Push to Lidarr
-              </button>
-              {data?.lastRun ? (
-                  <span className="ml-auto text-sm text-gray-500">
-                Last run: #{data.lastRun.id} • {data.lastRun.status ?? 'n/a'} •{' '}
-                    {data.lastRun.startedAt ? new Date(data.lastRun.startedAt).toLocaleString() : 'n/a'}
-              </span>
-              ) : null}
+              <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists</button>
+              <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
+              <button className="btn btn-outline" onClick={pullFromLidarrArtists}>Pull from Lidarr Artists</button>
+              <button className="btn btn-outline" onClick={pullFromLidarrAlbums}>Pull from Lidarr Albums</button>
+              <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from Yandex Artists</button>
+              <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from Yandex Albums</button>
+              <button className="btn btn-outline" onClick={matchYandexArtists}>Match Yandex Artists</button>
+              <button className="btn btn-outline" onClick={matchYandexAlbums}>Match Yandex Albums</button>
+              <button className="btn btn-primary" onClick={runSyncYandex}>Sync Yandex</button>
+              <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
             </div>
           </section>
+
+          {/* local styles */}
+          <style jsx>{`
+          :root {
+            --chip-w: 96px;
+            --chip-gap: 6px; /* небольшой зазор между чипами */
+          }
+          /* фиксированная ширина колонки Links на два чипа */
+          .links-col-2 {
+            width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
+          }
+          .link-tray {
+            display: flex;
+            align-items: center;
+            gap: var(--chip-gap);
+            white-space: nowrap;
+          }
+          .link-tray-right { justify-content: flex-end; }
+          .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+          .link-tray :global(.link-chip) {
+            display: inline-flex;
+            justify-content: center;
+            width: var(--chip-w);
+          }
+          .link-tray :global(.link-chip.placeholder) {
+            visibility: hidden; /* держим место для отсутствующего слота */
+          }
+          .link-margin-right-5{
+            margin-right: 5px;
+          }
+        `}</style>
         </main>
       </>
   );

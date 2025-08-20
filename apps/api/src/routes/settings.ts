@@ -3,23 +3,36 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import { reloadJobs } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
+import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
 
 const r = Router();
 
-// ← Оставляем ALLOWED_FIELDS, но поправим комментарий:
+// Разрешённые поля настроек (только новые имена)
 const ALLOWED_FIELDS = new Set([
   // yandex
   'yandexToken',
   'yandexDriver',
   'pyproxyUrl',
-  'yandexCron',
+  'cronYandex',
 
   // lidarr
   'lidarrUrl',
   'lidarrApiKey',
   'pushTarget',
-  'lidarrCron',
+  'cronLidarr',
   'lidarrAllowNoMetadata',
+
+  // lidarr defaults
+  'rootFolderPath',
+  'qualityProfileId',
+  'metadataProfileId',
+  'monitor',
+
+  // behaviour
+  'mode',
+  'enableExport',
+  'enablePush',
+  'exportPath',
 
   // backup
   'backupEnabled',
@@ -28,7 +41,7 @@ const ALLOWED_FIELDS = new Set([
   'backupDir',
 
   // notifications
-  'notifyType', // 'disabled' | 'telegram' | 'webhook'
+  'notifyType',
   'telegramBot',
   'telegramChatId',
   'webhookUrl',
@@ -52,6 +65,10 @@ function pickSettings(input: any) {
     const v = String(out.pushTarget || '').toLowerCase();
     out.pushTarget = v === 'albums' ? 'albums' : 'artists';
   }
+  if ('mode' in out) {
+    const v = String(out.mode || '').toLowerCase();
+    out.mode = v === 'albums' ? 'albums' : 'artists';
+  }
   if ('lidarrAllowNoMetadata' in out) {
     out.lidarrAllowNoMetadata = !!out.lidarrAllowNoMetadata;
   }
@@ -64,9 +81,8 @@ function pickSettings(input: any) {
     else out.backupRetention = n;
   }
   if ('notifyType' in out) {
-    // приводим к тем же значениям, что ждёт фронт
     const v = String(out.notifyType || '').toLowerCase();
-    out.notifyType = ['telegram', 'webhook', 'disabled'].includes(v) ? v : 'disabled';
+    out.notifyType = ['telegram', 'webhook', 'none', 'disabled'].includes(v) ? (v === 'disabled' ? 'none' : v) : 'none';
   }
   if ('pyproxyUrl' in out && typeof out.pyproxyUrl === 'string') {
     out.pyproxyUrl = out.pyproxyUrl.replace(/\/+$/, '');
@@ -74,8 +90,69 @@ function pickSettings(input: any) {
   if ('lidarrUrl' in out && typeof out.lidarrUrl === 'string') {
     out.lidarrUrl = out.lidarrUrl.replace(/\/+$/, '');
   }
+  if ('rootFolderPath' in out && typeof out.rootFolderPath === 'string') {
+    out.rootFolderPath = out.rootFolderPath.replace(/\/+$/, '');
+  }
+  if ('qualityProfileId' in out && out.qualityProfileId != null) {
+    const n = parseInt(String(out.qualityProfileId), 10);
+    if (Number.isFinite(n)) out.qualityProfileId = n; else delete out.qualityProfileId;
+  }
+  if ('metadataProfileId' in out && out.metadataProfileId != null) {
+    const n = parseInt(String(out.metadataProfileId), 10);
+    if (Number.isFinite(n)) out.metadataProfileId = n; else delete out.metadataProfileId;
+  }
+  if ('monitor' in out) {
+    const v = String(out.monitor || '').toLowerCase();
+    out.monitor = ['all', 'future', 'none'].includes(v) ? v : 'all';
+  }
 
   return out;
+}
+
+// ===== helpers =====
+
+function sanitizePath(p?: string | null) {
+  return String(p || '').replace(/\/+$/, '');
+}
+
+function toNum(x: any): number | null {
+  const n = parseInt(String(x), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: string }) {
+  const [roots, qps, mps] = await Promise.all([
+    getRootFolders(s as any),
+    getQualityProfiles(s as any),
+    getMetadataProfiles(s as any),
+  ]);
+
+  // Выбираем root:
+  // 1) если один — его
+  // 2) иначе — с дефолтными профилями
+  // 3) иначе — первый
+  let chosenRoot: any = null;
+  if (Array.isArray(roots) && roots.length) {
+    if (roots.length === 1) chosenRoot = roots[0];
+    else chosenRoot = roots.find((r: any) => r?.defaultQualityProfileId || r?.defaultMetadataProfileId) || roots[0];
+  }
+
+  const rootFolderPath = chosenRoot?.path ? sanitizePath(chosenRoot.path) : null;
+
+  // Выбираем профили:
+  const qpFromRoot = toNum(chosenRoot?.defaultQualityProfileId);
+  const mpFromRoot = toNum(chosenRoot?.defaultMetadataProfileId);
+
+  const qpFirst = Array.isArray(qps) && qps.length ? toNum(qps[0]?.id) : null;
+  const mpFirst = Array.isArray(mps) && mps.length ? toNum(mps[0]?.id) : null;
+
+  const qualityProfileId = qpFromRoot ?? qpFirst ?? null;
+  const metadataProfileId = mpFromRoot ?? mpFirst ?? null;
+
+  // Мониторинг по умолчанию пусть будет 'all'
+  const monitor: 'all' | 'future' | 'none' = 'all';
+
+  return { rootFolderPath, qualityProfileId, metadataProfileId, monitor };
 }
 
 // helper, чтобы не дублировать POST/PUT
@@ -97,10 +174,6 @@ async function saveSettingsHandler(req: any, res: any) {
 // GET /api/settings
 r.get('/', async (_req, res) => {
   const s: any = await prisma.setting.findFirst({ where: { id: 1 } });
-
-  // бэк-компат: если в БД лежит 'none', отдадим 'disabled'
-  if (s && s.notifyType === 'none') s.notifyType = 'disabled';
-
   res.json(s || {});
 });
 
@@ -127,17 +200,19 @@ r.post('/test/yandex', async (req, res) => {
   }
 });
 
-// POST /api/settings/test/lidarr  { lidarrUrl?: string, lidarrApiKey?: string }
+// POST /api/settings/test/lidarr
+// ТЕПЕРЬ: при успешном коннекте подбираем дефолтные root/profile и,
+// если поля ещё пустые — сохраняем их в БД.
 r.post('/test/lidarr', async (req, res) => {
   try {
     const body = req.body || {};
     let lidarrUrl = (typeof body.lidarrUrl === 'string' && body.lidarrUrl) || undefined;
     let lidarrApiKey = (typeof body.lidarrApiKey === 'string' && body.lidarrApiKey) || undefined;
 
+    const s0 = await prisma.setting.findFirst({ where: { id: 1 } });
     if (!lidarrUrl || !lidarrApiKey) {
-      const s = await prisma.setting.findFirst({ where: { id: 1 } });
-      lidarrUrl = lidarrUrl || s?.lidarrUrl || undefined;
-      lidarrApiKey = lidarrApiKey || s?.lidarrApiKey || undefined;
+      lidarrUrl = lidarrUrl || s0?.lidarrUrl || undefined;
+      lidarrApiKey = lidarrApiKey || s0?.lidarrApiKey || undefined;
     }
     if (!lidarrUrl || !lidarrApiKey) {
       return res.status(400).json({ ok: false, error: 'No Lidarr URL or API key' });
@@ -154,7 +229,78 @@ r.post('/test/lidarr', async (req, res) => {
     try { data = JSON.parse(text); } catch { data = text; }
 
     const ok = r2.statusCode >= 200 && r2.statusCode < 300;
-    res.json({ ok, status: r2.statusCode, data });
+
+    // Если всё ок — подтянем дефолты из Lidarr
+    let defaults: any = null;
+    let applied: Record<string, any> = {};
+    let appliedCount = 0;
+
+    if (ok) {
+      const d = await computeLidarrDefaults({ lidarrUrl: base, lidarrApiKey });
+      defaults = d;
+
+      // Применяем, если в БД пусто
+      const needUpdate: any = {};
+      if (!s0?.rootFolderPath && d.rootFolderPath) needUpdate.rootFolderPath = d.rootFolderPath;
+      if (!s0?.qualityProfileId && d.qualityProfileId != null) needUpdate.qualityProfileId = d.qualityProfileId;
+      if (!s0?.metadataProfileId && d.metadataProfileId != null) needUpdate.metadataProfileId = d.metadataProfileId;
+      if (!s0?.monitor && d.monitor) needUpdate.monitor = d.monitor;
+
+      if (Object.keys(needUpdate).length > 0) {
+        const saved = await prisma.setting.upsert({
+          where: { id: 1 },
+          create: { id: 1, lidarrUrl: base, lidarrApiKey, ...needUpdate },
+          update: { lidarrUrl: base, lidarrApiKey, ...needUpdate },
+        });
+        applied = needUpdate;
+        appliedCount = Object.keys(needUpdate).length;
+
+        // Перезапускаем джобы (на случай, если monitor/profile влияют)
+        await reloadJobs();
+      }
+    }
+
+    res.json({ ok, status: r2.statusCode, data, defaults, applied, appliedCount });
+  } catch (e: any) {
+    res.status(400).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// POST /api/settings/lidarr/defaults  { overwrite?: boolean }
+// Ручное подтягивание дефолтов и сохранение (по желанию — с перезаписью).
+r.post('/lidarr/defaults', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const overwrite = !!body.overwrite;
+
+    const s = await prisma.setting.findFirst({ where: { id: 1 } });
+    const lidarrUrl = s?.lidarrUrl?.replace(/\/+$/, '');
+    const lidarrApiKey = s?.lidarrApiKey || '';
+
+    if (!lidarrUrl || !lidarrApiKey) {
+      return res.status(400).json({ ok: false, error: 'No Lidarr URL or API key in settings' });
+    }
+
+    const d = await computeLidarrDefaults({ lidarrUrl, lidarrApiKey });
+
+    const update: any = {};
+    if (overwrite || !s?.rootFolderPath)     update.rootFolderPath    = d.rootFolderPath ?? s?.rootFolderPath ?? null;
+    if (overwrite || !s?.qualityProfileId)   update.qualityProfileId  = d.qualityProfileId ?? s?.qualityProfileId ?? null;
+    if (overwrite || !s?.metadataProfileId)  update.metadataProfileId = d.metadataProfileId ?? s?.metadataProfileId ?? null;
+    if (overwrite || !s?.monitor)            update.monitor           = d.monitor ?? s?.monitor ?? 'all';
+
+    let appliedCount = 0;
+    if (Object.keys(update).length > 0) {
+      await prisma.setting.upsert({
+        where: { id: 1 },
+        create: { id: 1, lidarrUrl, lidarrApiKey, ...update },
+        update: { ...update },
+      });
+      appliedCount = Object.keys(update).length;
+      await reloadJobs();
+    }
+
+    res.json({ ok: true, defaults: d, applied: update, appliedCount });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
@@ -163,8 +309,7 @@ r.post('/test/lidarr', async (req, res) => {
 // POST /api/settings — сохранить
 r.post('/', saveSettingsHandler);
 
-// PUT /api/settings — тоже сохранить (чтобы фронт мог слать PUT)
+// PUT /api/settings — тоже сохранить
 r.put('/', saveSettingsHandler);
 
-// остальное (test/yandex, test/lidarr) — без изменений
 export default r;

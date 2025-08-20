@@ -1,3 +1,4 @@
+// apps/api/src/services/mb.ts
 import Bottleneck from 'bottleneck';
 import { request } from 'undici';
 
@@ -5,8 +6,9 @@ const limiter = new Bottleneck({ minTime: 1100 }); // ~1 req/sec
 const BASE = 'https://musicbrainz.org/ws/2';
 const UA = 'ym-to-lidarr/1.2 (+contact: you@example.com)';
 
-type ArtistCandidate = {
-  id: string;
+export type ArtistCandidateMB = {
+  externalId: string;
+  source: 'mb';
   name: string;
   score?: number;
   disambiguation?: string;
@@ -19,8 +21,9 @@ type ArtistCandidate = {
   highlight?: boolean;
 };
 
-type ReleaseGroupCandidate = {
-  id: string;
+export type ReleaseGroupCandidateMB = {
+  externalId: string;
+  source: 'mb';
   title: string;
   primaryType?: string;
   secondaryTypes?: string[];
@@ -31,45 +34,53 @@ type ReleaseGroupCandidate = {
   highlight?: boolean;
 };
 
-async function getJSON(url: string) {
+async function getJSON<T = unknown>(url: string): Promise<T> {
   const res = await request(url, { headers: { 'User-Agent': UA } });
   if (res.statusCode >= 400) {
     const body = await res.body.text();
     throw new Error(`MB ${url} ${res.statusCode}: ${body}`);
   }
-  return await res.body.json();
+  // undici's .json() is typed as unknown — cast at the boundary
+  const data = (await res.body.json()) as unknown as T;
+  return data;
 }
 
 function norm(s?: string) {
   return (s || '').trim().toLowerCase();
 }
-function pickMedian(values: (string | undefined | null)[]) {
+
+function pickMedian(values: (string | undefined | null)[]): string | undefined {
   const v = values.filter(Boolean) as string[];
-  if (!v.length) return undefined as unknown as string;
+  if (!v.length) return undefined;
   const freq: Record<string, number> = {};
   for (const x of v) freq[x] = (freq[x] || 0) + 1;
   return Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0];
 }
 
+/**
+ * Поиск артиста в MusicBrainz.
+ * Возвращает { externalId, candidates, raw }, где candidates имеют поля source/externalId.
+ */
 export const mbFindArtist = limiter.wrap(async (name: string) => {
   const url = `${BASE}/artist?fmt=json&query=${encodeURIComponent(`artist:"${name}"`)}`;
   const raw: any = await getJSON(url);
   const list: any[] = raw?.artists || [];
   if (!list.length)
-    return { mbid: null as string | null, candidates: [] as ArtistCandidate[], raw };
+    return { externalId: null as string | null, candidates: [] as ArtistCandidateMB[], raw };
 
   const exact = list.filter((a: any) => norm(a.name) === norm(name));
   const ranked: any[] = exact
-    .concat(list.filter((a: any) => !exact.includes(a)))
-    .slice(0, 50)
-    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+      .concat(list.filter((a: any) => !exact.includes(a)))
+      .slice(0, 50)
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 
   const hit = ranked[0];
 
-  const candidates: ArtistCandidate[] = ranked.slice(0, 3).map((a: any): ArtistCandidate => {
+  const candidates: ArtistCandidateMB[] = ranked.slice(0, 3).map((a: any): ArtistCandidateMB => {
     const life = a['life-span'] || {};
     return {
-      id: a.id,
+      externalId: a.id,
+      source: 'mb',
       name: a.name,
       score: a.score,
       disambiguation: a.disambiguation,
@@ -88,23 +99,27 @@ export const mbFindArtist = limiter.wrap(async (name: string) => {
     c.highlight = (!!typeMed && c.type === typeMed) || (!!countryMed && c.country === countryMed);
   });
 
-  return { mbid: hit?.id ?? null, candidates, raw };
+  return { externalId: hit?.id ?? null, candidates, raw };
 });
 
+/**
+ * Поиск release-group (альбома) по артисту и названию.
+ * Возвращает { externalId, candidates, raw }, где candidates имеют поля source/externalId.
+ */
 export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: string) => {
   const q = `releasegroup:"${title}" AND artist:"${artist}"`;
   const url = `${BASE}/release-group?fmt=json&query=${encodeURIComponent(q)}`;
   const raw: any = await getJSON(url);
   const list: any[] = raw?.['release-groups'] || [];
   if (!list.length)
-    return { mbid: null as string | null, candidates: [] as ReleaseGroupCandidate[], raw };
+    return { externalId: null as string | null, candidates: [] as ReleaseGroupCandidateMB[], raw };
 
   const clean = (s: string) =>
-    (s || '')
-      .replace(/\s*[([].*?[)\]]\s*/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
+      (s || '')
+          .replace(/\s*[([].*?[)\]]\s*/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
 
   const primaryArtist = (rg: any) => {
     const ac = rg['artist-credit'] || [];
@@ -113,33 +128,34 @@ export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: str
   };
 
   const exact = list.filter(
-    (rg: any) => clean(rg.title) === clean(title) && norm(primaryArtist(rg)) === norm(artist),
+      (rg: any) => clean(rg.title) === clean(title) && norm(primaryArtist(rg)) === norm(artist),
   );
   const ranked: any[] = exact
-    .concat(list.filter((rg: any) => !exact.includes(rg)))
-    .slice(0, 50)
-    .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+      .concat(list.filter((rg: any) => !exact.includes(rg)))
+      .slice(0, 50)
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 
   const hit = ranked[0];
 
-  const candidates: ReleaseGroupCandidate[] = ranked.slice(0, 3).map(
-    (rg: any): ReleaseGroupCandidate => ({
-      id: rg.id,
-      title: rg.title,
-      primaryType: rg['primary-type'],
-      secondaryTypes: rg['secondary-types'],
-      firstReleaseDate: rg['first-release-date'],
-      primaryArtist: primaryArtist(rg),
-      score: rg.score,
-      url: rg.id ? `https://musicbrainz.org/release-group/${rg.id}` : undefined,
-    }),
+  const candidates: ReleaseGroupCandidateMB[] = ranked.slice(0, 3).map(
+      (rg: any): ReleaseGroupCandidateMB => ({
+        externalId: rg.id,
+        source: 'mb',
+        title: rg.title,
+        primaryType: rg['primary-type'],
+        secondaryTypes: rg['secondary-types'],
+        firstReleaseDate: rg['first-release-date'],
+        primaryArtist: primaryArtist(rg),
+        score: rg.score,
+        url: rg.id ? `https://musicbrainz.org/release-group/${rg.id}` : undefined,
+      }),
   );
 
   const typeMed = pickMedian(candidates.map((c) => c.primaryType));
   candidates.forEach((c) => {
     c.highlight =
-      (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
+        (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
   });
 
-  return { mbid: hit?.id ?? null, candidates, raw };
+  return { externalId: hit?.id ?? null, candidates, raw };
 });

@@ -1,44 +1,71 @@
+// apps/api/src/notify.ts
 import { request } from 'undici';
-
 import { prisma } from './prisma';
 
-export async function notify(
-  kind: 'yandex' | 'lidarr' | 'export',
-  status: 'ok' | 'error',
-  stats: any,
-) {
-  const s = await prisma.setting.findFirst({ where: { id: 1 } });
-  const type = (s?.notifyType || 'none').toLowerCase();
-  if (type === 'none') return;
+type Kind = 'yandex' | 'lidarr' | 'export' | 'match';
+type Status = 'ok' | 'error';
 
-  const text = [
-    `Sync ${kind}: *${status.toUpperCase()}*`,
-    stats ? '```\n' + JSON.stringify(stats, null, 2) + '\n```' : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+function makeTelegramMessage(kind: Kind, status: Status, stats: any) {
+  const header = `Sync ${kind}: *${status.toUpperCase()}*`;
+  let payload = '';
+  try {
+    if (stats != null) {
+      const s = typeof stats === 'string' ? stats : JSON.stringify(stats, null, 2);
+      payload = `\n\`\`\`\n${s}\n\`\`\``;
+    }
+  } catch {
+    // ignore stringify issues
+  }
+  return `${header}${payload}`;
+}
+
+export async function notify(kind: Kind, status: Status, stats: any) {
+  const s = await prisma.setting.findFirst({ where: { id: 1 } });
+
+  // нормализуем тип: поддерживаем legacy 'none'
+  const rawType = (s?.notifyType || 'disabled').toLowerCase();
+  const type = rawType === 'none' ? 'disabled' : rawType;
+
+  if (type === 'disabled') return;
 
   try {
     if (type === 'telegram' && s?.telegramBot && s?.telegramChatId) {
       const url = `https://api.telegram.org/bot${s.telegramBot}/sendMessage`;
-      const body = { chat_id: s.telegramChatId, text, parse_mode: 'Markdown' };
+      const body = {
+        chat_id: s.telegramChatId,
+        text: makeTelegramMessage(kind, status, stats),
+        parse_mode: 'Markdown', // используем Markdown для тройных бэктиков
+        disable_web_page_preview: true,
+      };
       await request(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
       console.log('[notify] telegram ok');
-    } else if (type === 'webhook' && s?.webhookUrl) {
+      return;
+    }
+
+    if (type === 'webhook' && s?.webhookUrl) {
+      const payload = {
+        kind,
+        status,
+        stats,
+        ts: new Date().toISOString(),
+      };
       await request(s.webhookUrl, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           ...(s.webhookSecret ? { 'X-Webhook-Secret': s.webhookSecret } : {}),
         },
-        body: JSON.stringify({ kind, status, stats, ts: new Date().toISOString() }),
+        body: JSON.stringify(payload),
       });
       console.log('[notify] webhook ok');
+      return;
     }
+
+    console.log('[notify] skipped: misconfigured settings for type:', type);
   } catch (e: any) {
     console.warn('[notify] failed:', e?.message || e);
   }

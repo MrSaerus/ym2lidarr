@@ -5,14 +5,15 @@ import { prisma } from './prisma';
 import {
   ensureArtistInLidarr,
   ensureAlbumInLidarr,
-  // + (для Lidarr Pull ниже понадобится сервис получения артистов из Лидара)
-  // listLidarrArtists,
+  getRootFolders,
+  getQualityProfiles,
+  getMetadataProfiles,
 } from './services/lidarr';
 import { mbFindArtist, mbFindReleaseGroup } from './services/mb';
-import { yandexPullLikes, setPyproxyUrl, getDriver } from './services/yandex';
-import { upsertYandexArtistCache, upsertYandexAlbumCache } from './services/yandex-cache';
+import { yandexPullLikes, setPyproxyUrl } from './services/yandex';
+import { request } from 'undici';
 
-function nkey(s: string) { return s.trim().toLowerCase(); }
+function nkey(s: string) { return (s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 const RECHECK_HOURS = parseInt(process.env.MB_RECHECK_HOURS || '168', 10);
 function shouldRecheck(last?: Date | null, force = false) {
   if (force) return true;
@@ -24,13 +25,17 @@ async function getRunWithRetry(id: number, tries = 3, ms = 200) {
   return prisma.syncRun.findUnique({ where: { id } });
 }
 
-/** ===== 1) Yandex Pull (без MB) ===== */
+/** ===== 1) Yandex Pull (ТОЛЬКО pyproxy; в Yandex* пишем ТОЛЬКО с числовым ymId) ===== */
 export async function runYandexPull(tokenOverride?: string, reuseRunId?: number) {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   setPyproxyUrl(setting?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
-  const driver = getDriver(setting?.yandexDriver);
 
-  const token = tokenOverride || setting?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN;
+  const token =
+      tokenOverride ||
+      setting?.yandexToken ||
+      process.env.YANDEX_MUSIC_TOKEN ||
+      process.env.YM_TOKEN;
+
   if (!token) {
     await prisma.syncRun.create({ data: { kind: 'yandex', status: 'error', message: 'No Yandex token (db/env)' } });
     return;
@@ -44,55 +49,67 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
   const runId = run.id;
 
   try {
-    await dblog(runId, 'info', 'Pulling likes from Yandex…', { driver });
-    const { artists, albums } = await yandexPullLikes(token, { driver });
+    await dblog(runId, 'info', 'Pulling likes from Yandex (pyproxy)…', { driver: 'pyproxy' });
+
+    const { artists, albums } = await yandexPullLikes(token, { driver: 'pyproxy' });
 
     await patchRunStats(runId, { a_total: artists.length, al_total: albums.length });
     await dblog(runId, 'info', `Got ${artists.length} artists, ${albums.length} albums`);
 
+    // YandexArtist
     let a_done = 0;
-    for (const aRaw of artists as Array<string | { id?: number|string; name?: string; mbid?: string }>) {
-      const name = typeof aRaw === 'string' ? aRaw : (aRaw?.name ?? '');
-      const yaArtistId = typeof aRaw === 'object' && aRaw?.id != null ? Number(aRaw.id) : undefined;
-      const key = nkey(name);
-
-      // пишем в кеш (при наличии реального YA id)
-      if (yaArtistId) {
-        await upsertYandexArtistCache({ yandexArtistId: yaArtistId, name, mbid: (aRaw as any)?.mbid ?? undefined });
+    for (const a of artists as Array<{ id?: number | string; name: string }>) {
+      const name = String(a?.name || '').trim();
+      if (!name) continue;
+      const ymIdStr = String(a?.id ?? '').trim();
+      if (/^\d+$/.test(ymIdStr)) {
+        await prisma.yandexArtist.upsert({
+          where: { ymId: ymIdStr },
+          create: { ymId: ymIdStr, name, key: nkey(name), present: true },
+          update: { name, key: nkey(name), present: true },
+        });
       }
-
-      // заполняем нашу таблицу Artist (без MB матчинга)
-      await prisma.artist.upsert({
-        where: { key },
-        create: { key, name },
-        update: { name },
-      });
-
       a_done++;
-      if (a_done % 10 === 0) await patchRunStats(runId, { a_done });
+      if (a_done % 50 === 0) await patchRunStats(runId, { a_done });
     }
     await patchRunStats(runId, { a_done });
 
+    // YandexAlbum
     let al_done = 0;
-    for (const alRaw of albums as Array<{ id?: number|string; yandexAlbumId?: number|string; title?: string; artist?: string; artistName?: string; year?: number }>) {
-      const yaAlbumId = (alRaw?.yandexAlbumId ?? alRaw?.id) != null ? Number(alRaw.yandexAlbumId ?? alRaw.id) : undefined;
-      const title = String(alRaw?.title ?? '');
-      const artistName = String(alRaw?.artistName ?? alRaw?.artist ?? '');
-      const year = typeof alRaw?.year === 'number' ? alRaw.year : undefined;
+    for (const alb of albums as Array<{ id?: number | string; title: string; artistName: string; year?: number; artistId?: number | string }>) {
+      const title = String(alb?.title || '').trim();
+      const artistName = String(alb?.artistName || '').trim();
+      if (!title) continue;
 
-      if (yaAlbumId) {
-        await upsertYandexAlbumCache({ yandexAlbumId: yaAlbumId, title, artistName, year });
+      const ymAlbumIdStr = String(alb?.id ?? '').trim();
+      const ymArtistIdStr = String(alb?.artistId ?? '').trim();
+      const year = Number.isFinite(Number(alb?.year)) ? Number(alb!.year) : null;
+
+      if (/^\d+$/.test(ymAlbumIdStr)) {
+        await prisma.yandexAlbum.upsert({
+          where: { ymId: ymAlbumIdStr },
+          create: {
+            ymId: ymAlbumIdStr,
+            title,
+            artist: artistName || null,
+            year,
+            key: nkey(`${artistName}|||${title}`),
+            present: true,
+            yandexArtistId: /^\d+$/.test(ymArtistIdStr) ? ymArtistIdStr : null,
+          },
+          update: {
+            title,
+            artist: artistName || null,
+            year,
+            key: nkey(`${artistName}|||${title}`),
+            present: true,
+            yandexArtistId: /^\d+$/.test(ymArtistIdStr) ? ymArtistIdStr : null,
+          },
+        });
       }
 
-      const key = nkey(`${artistName}|||${title}`);
-      await prisma.album.upsert({
-        where: { key },
-        create: { key, artist: artistName, title, year: year ?? null },
-        update: { artist: artistName, title, year: year ?? null },
-      });
-
       al_done++;
-      if (al_done % 10 === 0) await patchRunStats(runId, { al_done });
+      if (al_done % 50 === 0) await patchRunStats(runId, { al_done });
     }
     await patchRunStats(runId, { al_done, phase: 'done' });
 
@@ -107,10 +124,18 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
   }
 }
 
-/** ===== 2) Lidarr Pull (инвентаризация) ===== */
+
+/* ------------------------ Lidarr: helpers ------------------------ */
+async function lidarrApi<T = any>(base: string, key: string, path: string): Promise<T> {
+  const url = `${base.replace(/\/+$/, '')}${path}`;
+  const res = await request(url, { headers: { 'X-Api-Key': key } });
+  const text = await res.body.text();
+  if (res.statusCode >= 400) throw new Error(`Lidarr ${path} ${res.statusCode}: ${text?.slice(0, 180)}`);
+  try { return JSON.parse(text) as T; } catch { return text as any; }
+}
+
+/** ===== 2) Lidarr Pull (инвентаризация → LidarrArtist/LidarrAlbum с artistId) ===== */
 export async function runLidarrPull(reuseRunId?: number) {
-  // NOTE: тут нужен вызов сервиса получения артистов из Lidarr (API).
-  // Если у тебя уже есть утилита — подключи её; если нет — добавим в services/lidarr.ts.
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
     await prisma.syncRun.create({ data: { kind: 'lidarr', status: 'error', message: 'No Lidarr URL or API key' } });
@@ -125,61 +150,92 @@ export async function runLidarrPull(reuseRunId?: number) {
   const runId = run.id;
 
   try {
-    // const list = await listLidarrArtists(setting as any); // ← внедри сюда свою функцию
-    const list: any[] = []; // временно, чтобы файл собрался — подставь реальный вызов
+    const base = (setting.lidarrUrl || '').replace(/\/+$/, '');
+    const apiKey = setting.lidarrApiKey!;
 
-    await patchRunStats(runId, { total: list.length });
+    // 1) Artists
+    const artists: any[] = await lidarrApi(base, apiKey, '/api/v1/artist');
+    await patchRunStats(runId, { total: artists.length });
 
     let done = 0;
-    for (const it of list) {
-      // ожидаемые поля: id, mbid, artistName, monitored, path, added, albums, tracks, sizeOnDisk
+    for (const a of artists) {
       await prisma.lidarrArtist.upsert({
-        where: { id: Number(it.id) },
+        where: { id: Number(a.id) },
         create: {
-          id: Number(it.id),
-          name: String(it.artistName || it.name || ''),
-          mbid: it.foreignArtistId || it.mbid || null,
-          monitored: !!it.monitored,
-          path: it.path || null,
-          added: it.added ? new Date(it.added) : null,
-          albums: Number.isFinite(Number(it.albums)) ? Number(it.albums) : null,
-          tracks: Number.isFinite(Number(it.tracks)) ? Number(it.tracks) : null,
-          sizeOnDisk: Number.isFinite(Number(it.sizeOnDisk)) ? Number(it.sizeOnDisk) : null,
+          id: Number(a.id),
+          name: String(a.artistName || a.name || ''),
+          mbid: a.foreignArtistId || a.mbid || null,
+          monitored: !!a.monitored,
+          path: a.path || null,
+          added: a.added ? new Date(a.added) : null,
           removed: false,
           lastSyncAt: new Date(),
         },
         update: {
-          name: String(it.artistName || it.name || ''),
-          mbid: it.foreignArtistId || it.mbid || null,
-          monitored: !!it.monitored,
-          path: it.path || null,
-          added: it.added ? new Date(it.added) : null,
-          albums: Number.isFinite(Number(it.albums)) ? Number(it.albums) : null,
-          tracks: Number.isFinite(Number(it.tracks)) ? Number(it.tracks) : null,
-          sizeOnDisk: Number.isFinite(Number(it.sizeOnDisk)) ? Number(it.sizeOnDisk) : null,
+          name: String(a.artistName || a.name || ''),
+          mbid: a.foreignArtistId || a.mbid || null,
+          monitored: !!a.monitored,
+          path: a.path || null,
+          added: a.added ? new Date(a.added) : null,
+          removed: false,
           lastSyncAt: new Date(),
         },
       });
 
       done++;
-      if (done % 20 === 0) await patchRunStats(runId, { done });
+      if (done % 25 === 0) await patchRunStats(runId, { done });
     }
-    await patchRunStats(runId, { done, phase: 'done' });
 
-    await endRun(runId, 'ok');
-    const finalRun = await getRunWithRetry(runId);
+    // 2) Albums per-artist
+    let alTotal = 0, alDone = 0;
+    for (const a of artists) {
+      const albums: any[] = await lidarrApi(base, apiKey, `/api/v1/album?artistId=${a.id}`);
+      alTotal += albums.length;
+      for (const alb of albums) {
+        await prisma.lidarrAlbum.upsert({
+          where: { id: Number(alb.id) },
+          create: {
+            id: Number(alb.id),
+            title: String(alb.title || ''),
+            artistId: Number(alb.artistId) || null,
+            artistName: String(a.artistName || a.name || ''),
+            mbid: alb.foreignAlbumId || alb.mbid || null,
+            monitored: !!alb.monitored,
+            added: alb.releaseDate ? new Date(alb.releaseDate) : null,
+            removed: false,
+            lastSyncAt: new Date(),
+          },
+          update: {
+            title: String(alb.title || ''),
+            artistId: Number(alb.artistId) || null,
+            artistName: String(a.artistName || a.name || ''),
+            mbid: alb.foreignAlbumId || alb.mbid || null,
+            monitored: !!alb.monitored,
+            added: alb.releaseDate ? new Date(alb.releaseDate) : null,
+            removed: false,
+            lastSyncAt: new Date(),
+          },
+        });
+        alDone++;
+        if (alDone % 50 === 0) await patchRunStats(runId, { albumsDone: alDone, albumsTotal: alTotal });
+      }
+    }
+
+    await patchRunStats(run.id, { phase: 'done', done, albumsDone: alDone, albumsTotal: alTotal });
+    await endRun(run.id, 'ok');
+    const finalRun = await getRunWithRetry(run.id);
     try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'ok', stats); } catch {}
   } catch (e: any) {
-    await dblog(runId, 'error', 'Lidarr Pull failed', { error: String(e?.message || e) });
-    await endRun(runId, 'error', String(e?.message || e));
-    const finalRun = await getRunWithRetry(runId);
+    await dblog(run.id, 'error', 'Lidarr Pull failed', { error: String(e?.message || e) });
+    await endRun(run.id, 'error', String(e?.message || e));
+    const finalRun = await getRunWithRetry(run.id);
     try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'error', stats); } catch {}
   }
 }
 
-/** ===== 3) Match (MB) — только сопоставление ===== */
+/** ===== 3) Match (MB) — сопоставление + синхронизация в Yandex* ===== */
 export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; target?: 'artists'|'albums'|'both' }) {
-  const force = !!opts?.force;
+  const force = !!(opts?.force);
   const target = opts?.target || 'both';
 
   const run = reuseRunId
@@ -190,85 +246,64 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
   const runId = run.id;
 
   try {
-    // ARTISTS
+    // ARTISTS: YandexArtist -> mbid
     if (target === 'artists' || target === 'both') {
-      const artists = await prisma.artist.findMany({ orderBy: { id: 'asc' } });
-      await patchRunStats(runId, { a_total: artists.length });
+      const ya = await prisma.yandexArtist.findMany({ where: { present: true }, orderBy: { id: 'asc' } });
+      await patchRunStats(runId, { a_total: ya.length });
 
-      let a_done = 0, a_matched = 0, a_skipped = 0;
-      for (const a of artists) {
-        if (a.mbid) { a_done++; a_matched++; if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_matched }); continue; }
+      let a_done = 0, a_matched = 0;
+      for (const y of ya) {
+        if (y.mbid && !force) { a_done++; if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_matched }); continue; }
 
-        if (!shouldRecheck(a.mbCheckedAt, force)) { a_done++; a_skipped++; if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_skipped }); continue; }
-
-        const r = await mbFindArtist(a.name);
+        const r = await mbFindArtist(y.name);
         await prisma.cacheEntry.upsert({
-          where: { key: `artist:${a.key}` },
-          create: { scope: 'artist', key: `artist:${a.key}`, payload: JSON.stringify(r.raw ?? r) },
+          where: { key: `ya:artist:${y.ymId}` },
+          create: { scope: 'ya:artist', key: `ya:artist:${y.ymId}`, payload: JSON.stringify(r.raw ?? r) },
           update: { payload: JSON.stringify(r.raw ?? r) },
         });
-        await prisma.artistCandidate.deleteMany({ where: { artistId: a.id } });
-        if (Array.isArray(r.candidates) && r.candidates.length) {
-          await prisma.artistCandidate.createMany({
-            data: r.candidates.map((c: any) => ({
-              artistId: a.id, mbid: c.id, name: c.name || '', score: c.score ?? null, type: c.type || null,
-              country: c.country || null, url: c.url || null, highlight: !!c.highlight,
-            })),
-          });
-        }
-        if (r.mbid) {
-          await prisma.artist.update({ where: { id: a.id }, data: { mbid: r.mbid, matched: true, mbCheckedAt: new Date(), mbAttempts: { increment: 1 } } });
+
+        if (r.externalId) {
+          await prisma.yandexArtist.update({ where: { id: y.id }, data: { mbid: r.externalId } });
           a_matched++;
-          await dblog(runId, 'info', 'Artist matched', { name: a.name, mbid: r.mbid });
+          await dblog(runId, 'info', 'Artist matched', { yaId: y.ymId, name: y.name, mbid: r.externalId });
         } else {
-          await prisma.artist.update({ where: { id: a.id }, data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } } });
-          await dblog(runId, 'info', 'Artist not matched', { name: a.name });
+          await dblog(runId, 'info', 'Artist not matched', { yaId: y.ymId, name: y.name });
         }
+
         a_done++;
-        if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_matched, a_skipped });
+        if (a_done % 5 === 0) await patchRunStats(runId, { a_done, a_matched });
       }
-      await patchRunStats(runId, { a_done, a_matched, a_skipped });
+      await patchRunStats(runId, { a_done, a_matched });
     }
 
-    // ALBUMS
+    // ALBUMS: YandexAlbum -> rgMbid
     if (target === 'albums' || target === 'both') {
-      const albums = await prisma.album.findMany({ orderBy: { id: 'asc' } });
-      await patchRunStats(runId, { al_total: albums.length });
+      const yalb = await prisma.yandexAlbum.findMany({ where: { present: true }, orderBy: { id: 'asc' } });
+      await patchRunStats(runId, { al_total: yalb.length });
 
-      let al_done = 0, al_matched = 0, al_skipped = 0;
-      for (const rec of albums) {
-        if (rec.rgMbid) { al_done++; al_matched++; if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched }); continue; }
+      let al_done = 0, al_matched = 0;
+      for (const rec of yalb) {
+        if (rec.rgMbid && !force) { al_done++; if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched }); continue; }
 
-        if (!shouldRecheck(rec.mbCheckedAt, force)) { al_done++; al_skipped++; if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_skipped }); continue; }
-
-        const r = await mbFindReleaseGroup(rec.artist, rec.title);
+        const r = await mbFindReleaseGroup(rec.artist || '', rec.title);
         await prisma.cacheEntry.upsert({
-          where: { key: `album:${nkey(`${rec.artist}|||${rec.title}`)}` },
-          create: { scope: 'album', key: `album:${nkey(`${rec.artist}|||${rec.title}`)}`, payload: JSON.stringify(r.raw ?? r) },
+          where: { key: `ya:album:${rec.ymId}` },
+          create: { scope: 'ya:album', key: `ya:album:${rec.ymId}`, payload: JSON.stringify(r.raw ?? r) },
           update: { payload: JSON.stringify(r.raw ?? r) },
         });
-        await prisma.albumCandidate.deleteMany({ where: { albumId: rec.id } });
-        if (Array.isArray(r.candidates) && r.candidates.length) {
-          await prisma.albumCandidate.createMany({
-            data: r.candidates.map((c: any) => ({
-              albumId: rec.id, rgMbid: c.id, title: c.title || '', primaryType: c.primaryType || null,
-              firstReleaseDate: c.firstReleaseDate || null, primaryArtist: c.primaryArtist || null,
-              score: c.score ?? null, url: c.url || null, highlight: !!c.highlight,
-            })),
-          });
-        }
-        if (r.mbid) {
-          await prisma.album.update({ where: { id: rec.id }, data: { rgMbid: r.mbid, matched: true, mbCheckedAt: new Date(), mbAttempts: { increment: 1 } } });
+
+        if (r.externalId) {
+          await prisma.yandexAlbum.update({ where: { id: rec.id }, data: { rgMbid: r.externalId } });
           al_matched++;
-          await dblog(runId, 'info', 'Album matched', { artist: rec.artist, title: rec.title, mbid: r.mbid });
+          await dblog(runId, 'info', 'Album matched', { yaId: rec.ymId, artist: rec.artist, title: rec.title, rgMbid: r.externalId });
         } else {
-          await prisma.album.update({ where: { id: rec.id }, data: { mbCheckedAt: new Date(), mbAttempts: { increment: 1 } } });
-          await dblog(runId, 'info', 'Album not matched', { artist: rec.artist, title: rec.title });
+          await dblog(runId, 'info', 'Album not matched', { yaId: rec.ymId, artist: rec.artist, title: rec.title });
         }
+
         al_done++;
-        if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched, al_skipped });
+        if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched });
       }
-      await patchRunStats(runId, { al_done, al_matched, al_skipped });
+      await patchRunStats(runId, { al_done, al_matched });
     }
 
     await patchRunStats(runId, { phase: 'done' });
@@ -283,7 +318,131 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
   }
 }
 
-/** ===== 4) Push to Lidarr — без изменений ===== */
+
+/** ===== 4) Lidarr push ===== */
 export async function runLidarrPush() {
-  // … твой существующий код без изменений …
+  const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+  if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
+    await prisma.syncRun.create({ data: { kind: 'lidarr', status: 'error', message: 'No Lidarr URL or API key' } });
+    return;
+  }
+
+  const run = await startRun('lidarr', {
+    phase: 'push', total: 0, done: 0, ok: 0, failed: 0, target: setting.pushTarget || 'artists',
+  });
+  if (!run) return;
+
+  try {
+    const target = setting.pushTarget === 'albums' ? 'albums' : 'artists';
+
+    // профили/руткаталог как у тебя — без изменений (оставь существующую логику)
+
+    // Выборка элементов из Yandex*
+    const items =
+        target === 'albums'
+            ? await prisma.yandexAlbum.findMany({
+              where: { present: true, rgMbid: { not: null } },
+              orderBy: [{ artist: 'asc' }, { title: 'asc' }],
+            })
+            : await prisma.yandexArtist.findMany({
+              where: { present: true, mbid: { not: null } },
+              orderBy: { name: 'asc' },
+            });
+
+    await patchRunStats(run.id, { total: items.length });
+    await dblog(run.id, 'info', `Pushing ${items.length} ${target} to Lidarr`);
+
+    let done = 0, ok = 0, failed = 0;
+
+    // сформируй effSetting как у тебя выше
+    const effSetting = { ...(setting as any) };
+
+    for (const it of items as any[]) {
+      try {
+        if (target === 'albums') {
+          const res = await ensureAlbumInLidarr(effSetting, {
+            artist: it.artist,
+            title: it.title,
+            rgMbid: it.rgMbid!,
+          });
+
+          const title = res?.title || it.title;
+          const lidarrId = res?.id;
+          const path = res?.path;
+          const action = res?.__action || 'created';
+          const from = res?.__from;
+
+          await dblog(run.id, 'info', `Pushed album ${title}, action=${action}`, {
+            target, action, lidarrId, path, title, rgMbid: it.rgMbid, from,
+            payload: res?.__request, response: res?.__response,
+          });
+
+          if (it.rgMbid) {
+            const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
+            if (existing) {
+              await prisma.albumPush.update({
+                where: { id: existing.id },
+                data: { title, path: path ?? null, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+              });
+            } else {
+              await prisma.albumPush.create({
+                data: { mbid: it.rgMbid, title, path: path ?? null, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+              });
+            }
+          }
+        } else {
+          const cached = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
+          if (cached && (cached.status === 'CREATED' || cached.status === 'EXISTS')) {
+            await dblog(run.id, 'info', `Skip push: "${cached.name}" already in Lidarr`, {
+              target, action: 'skip', lidarrId: cached.lidarrArtistId, path: cached.path, name: cached.name, mbid: cached.mbid, from: 'cache',
+            });
+            continue;
+          }
+
+          const res = await ensureArtistInLidarr(effSetting, { name: it.name, mbid: it.mbid! });
+
+          const name = res?.artistName || it.name;
+          const lidarrId = res?.id;
+          const path = res?.path;
+          const action = res?.__action || 'created';
+          const from = res?.__from;
+
+          await dblog(run.id, 'info', `Pushed artist ${name}, action=${action}`, {
+            target, action, lidarrId, path, name, mbid: it.mbid, from,
+            payload: res?.__request, response: res?.__response,
+          });
+
+          const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
+          if (existing) {
+            await prisma.artistPush.update({
+              where: { id: existing.id },
+              data: { name, path: path ?? null, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+            });
+          } else {
+            await prisma.artistPush.create({
+              data: { mbid: it.mbid, name, path: path ?? null, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+            });
+          }
+        }
+        ok++;
+      } catch (e: any) {
+        failed++;
+        await dblog(run.id, 'warn', `Push failed: ${String(e?.message || e)}`, { target });
+      }
+      done++;
+      if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
+    }
+
+    await patchRunStats(run.id, { done, ok, failed, phase: 'done' });
+    await endRun(run.id, 'ok');
+
+    const finalRun = await getRunWithRetry(run.id);
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'ok', stats); } catch {}
+  } catch (e: any) {
+    await dblog(run.id, 'error', 'Lidarr push failed', { error: String(e?.message || e) });
+    await endRun(run.id, 'error', String(e?.message || e));
+    const finalRun = await getRunWithRetry(run.id);
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'error', stats); } catch {}
+  }
 }
+

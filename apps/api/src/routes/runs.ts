@@ -1,3 +1,4 @@
+// apps/api/src/routes/sync.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
 
@@ -12,7 +13,11 @@ function toInt(x: any, def: number): number {
 }
 function safeParseJson(s: string | null): any {
   if (!s) return null;
-  try { return JSON.parse(s); } catch { return s; }
+  try {
+    return JSON.parse(s);
+  } catch {
+    return s;
+  }
 }
 function mapRun(run: any) {
   return {
@@ -30,7 +35,10 @@ function mapRun(run: any) {
 // Список последних запусков (для селектора на странице логов)
 for (const p of PREFIXES) {
   router.get(`${p}/runs`, async (req, res) => {
-    const limit = toInt(req.query.limit, 20);
+    const limitRaw = toInt(req.query.limit, 20);
+    // небольшой предохранитель: 1..200
+    const limit = Math.min(200, Math.max(1, limitRaw));
+
     const runs = await prisma.syncRun.findMany({
       orderBy: { id: 'desc' },
       take: limit,
@@ -56,7 +64,8 @@ for (const p of PREFIXES) {
       return res.status(400).json({ ok: false, error: 'bad runId' });
     }
     const after = toInt(req.query.after, 0);
-    const limit = toInt(req.query.limit, 200);
+    const limitRaw = toInt(req.query.limit, 200);
+    const limit = Math.min(500, Math.max(1, limitRaw)); // 1..500
 
     const items = await prisma.syncLog.findMany({
       where: { runId, id: { gt: after } },
