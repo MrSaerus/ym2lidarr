@@ -446,3 +446,123 @@ export async function runLidarrPush() {
   }
 }
 
+
+/** ===== 3b) Custom Artists MB Match (по тем же правилам, с логами и rate-limit) ===== */
+export async function runCustomArtistsMatch(
+    reuseRunId?: number,
+    opts?: { onlyId?: number; force?: boolean }
+) {
+  const force = !!opts?.force;
+
+  // Либо переиспользуем runId, либо создаём новый
+  const run = reuseRunId
+      ? { id: reuseRunId }
+      : await startRun('custom', { phase: 'match', c_total: 0, c_done: 0, c_matched: 0 });
+
+  if (!run) return;
+  const runId = run.id;
+
+  try {
+    // Выбираем набор элементов
+    let items:
+        | { id: number; name: string; mbid: string | null }[]
+        | [] = [];
+
+    if (opts?.onlyId) {
+      const one = await prisma.customArtist.findUnique({
+        where: { id: opts.onlyId },
+        select: { id: true, name: true, mbid: true },
+      });
+      items = one ? [one] : [];
+    } else {
+      items = await prisma.customArtist.findMany({
+        select: { id: true, name: true, mbid: true },
+        orderBy: { id: 'asc' },
+      });
+    }
+
+    await patchRunStats(runId, { c_total: items.length });
+    await dblog(runId, 'info', `Custom match started`, {
+      total: items.length,
+      onlyId: opts?.onlyId ?? null,
+      force,
+    });
+
+    let c_done = 0;
+    let c_matched = 0;
+
+    for (const it of items) {
+      // Пропускаем уже сматченных, если не force
+      if (it.mbid && !force) {
+        await dblog(runId, 'info', 'Skip already matched', {
+          id: it.id,
+          name: it.name,
+          mbid: it.mbid,
+        });
+        c_done++;
+        if (c_done % 5 === 0) await patchRunStats(runId, { c_done, c_matched });
+        continue;
+      }
+
+      // Поиск в MB (лимитер внутри mbFindArtist)
+      try {
+        const r = await mbFindArtist(it.name);
+
+        // Сохраним «сырые» данные в общий кеш, как ты делаешь для ЯМ
+        await prisma.cacheEntry.upsert({
+          where: { key: `custom:artist:${it.id}` },
+          create: {
+            scope: 'custom:artist',
+            key: `custom:artist:${it.id}`,
+            payload: JSON.stringify(r.raw ?? r),
+          },
+          update: { payload: JSON.stringify(r.raw ?? r) },
+        });
+
+        if (r.externalId) {
+          await prisma.customArtist.update({
+            where: { id: it.id },
+            data: { mbid: r.externalId, matchedAt: new Date() },
+          });
+          c_matched++;
+          await dblog(runId, 'info', `Custom artist matched: ${it.name}`, {
+            id: it.id,
+            name: it.name,
+            mbid: r.externalId,
+          });
+        } else {
+          await dblog(runId, 'info', `Custom artist not matched: ${it.name}`, {
+            id: it.id,
+            name: it.name,
+          });
+        }
+      } catch (e: any) {
+        await dblog(runId, 'warn', 'MB lookup failed', {
+          id: it.id,
+          name: it.name,
+          error: String(e?.message || e),
+        });
+      }
+
+      c_done++;
+      if (c_done % 5 === 0) await patchRunStats(runId, { c_done, c_matched });
+    }
+
+    await patchRunStats(runId, { c_done, c_matched, phase: 'done' });
+    await endRun(runId, 'ok');
+    const finalRun = await getRunWithRetry(runId);
+    try {
+      const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+      // Оставляю твой канал уведомлений как в runMbMatch
+      await notify('yandex', 'ok', stats);
+    } catch {}
+  } catch (e: any) {
+    await dblog(runId, 'error', 'Custom match failed', { error: String(e?.message || e) });
+    await endRun(runId, 'error', String(e?.message || e));
+    const finalRun = await getRunWithRetry(runId);
+    try {
+      const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+      await notify('yandex', 'error', stats);
+    } catch {}
+  }
+}

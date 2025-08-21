@@ -80,7 +80,7 @@ r.get('/', async (_req, res) => {
             mbUrl: x.rgMbid ? `https://musicbrainz.org/release-group/${x.rgMbid}` : undefined,
         }));
 
-        // NEW: Топ-5 «последних» артистов из Yandex (по ymId убыв.)
+        // Топ-5 «последних» артистов из Yandex (по ymId убыв.)
         const latestYandexArtistsRaw = await prisma.yandexArtist.findMany({
             where: { present: true },
             orderBy: [{ ymId: 'desc' }],
@@ -121,7 +121,7 @@ r.get('/', async (_req, res) => {
             mbUrl: x.mbid ? `https://musicbrainz.org/release-group/${x.mbid}` : undefined,
         }));
 
-        // NEW: Топ-5 «последних» артистов из Lidarr (по added desc; фолбэк — id desc)
+        // Топ-5 «последних» артистов из Lidarr (по added desc; фолбэк — id desc)
         const latestLidarrArtistsRaw = await prisma.lidarrArtist.findMany({
             where: { removed: false },
             orderBy: [{ added: 'desc' }, { id: 'desc' }],
@@ -133,6 +133,25 @@ r.get('/', async (_req, res) => {
             name: x.name || '',
             added: x.added ? x.added.toISOString() : null,
             lidarrUrl: lidarrBase ? `${lidarrBase}/artist/${x.id}` : undefined,
+            mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
+        }));
+
+        // --- Custom (artists only) ---
+        const [cArtistsTotal, cArtistsMatched] = await Promise.all([
+            prisma.customArtist.count(),
+            prisma.customArtist.count({ where: { mbid: { not: null } } }),
+        ]);
+        const cArtistsUnmatched = Math.max(0, cArtistsTotal - cArtistsMatched);
+
+        const latestCustomArtistsRaw = await prisma.customArtist.findMany({
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 5,
+            select: { id: true, name: true, mbid: true, createdAt: true },
+        });
+        const latestCustomArtists = latestCustomArtistsRaw.map((x) => ({
+            id: x.id,
+            name: x.name || '',
+            createdAt: x.createdAt ? x.createdAt.toISOString() : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
         }));
 
@@ -167,7 +186,6 @@ r.get('/', async (_req, res) => {
                     unmatched: Math.max(0, yAlbumsTotal - yAlbumsMatched),
                 },
                 latestAlbums: latestYandex,
-                /* NEW */
                 latestArtists: latestYandexArtists,
             },
 
@@ -183,8 +201,17 @@ r.get('/', async (_req, res) => {
                     unmatched: Math.max(0, lAlbumsTotal - lAlbumsMatched),
                 },
                 latestAlbums: latestLidarr,
-                /* NEW */
                 latestArtists: latestLidarrArtists,
+            },
+
+            // ⬇️ добавили кастом
+            custom: {
+                artists: {
+                    total: cArtistsTotal,
+                    matched: cArtistsMatched,
+                    unmatched: cArtistsUnmatched,
+                },
+                latestArtists: latestCustomArtists,
             },
 
             runs: { yandex, lidarr, match },

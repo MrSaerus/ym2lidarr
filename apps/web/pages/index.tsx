@@ -38,6 +38,14 @@ type LatestLArtist = {
   mbUrl?: string;
 };
 
+// ⬇️ добавили типы для кастома (артисты)
+type LatestCArtist = {
+  id: number;
+  name: string;
+  mbUrl?: string;
+  createdAt?: string | null;
+};
+
 type StatsResp = {
   yandex?: {
     artists: CountBlock;
@@ -50,6 +58,11 @@ type StatsResp = {
     albums: CountBlock;
     latestAlbums?: LatestLA[];
     latestArtists?: LatestLArtist[];
+  };
+  // ⬇️ добавили секцию кастома
+  custom?: {
+    artists: CountBlock;
+    latestArtists?: LatestCArtist[];
   };
   // backward-compat
   artists?: { total?: number; found?: number; unmatched?: number };
@@ -126,6 +139,13 @@ export default function OverviewPage() {
     return () => clearInterval(t);
   }, [load, loadLatest]);
 
+  // Custom counters (artists only)
+  const cA = {
+    total: toNum(stats?.custom?.artists?.total ?? 0),
+    matched: toNum(stats?.custom?.artists?.matched ?? 0),
+    unmatched: toNum(stats?.custom?.artists?.unmatched ?? 0),
+  };
+
   // Yandex counters (fallback-friendly)
   const yA = {
     total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0),
@@ -160,6 +180,7 @@ export default function OverviewPage() {
     unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0),
   };
 
+  const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA]);
   const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA]);
   const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR]);
   const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
@@ -184,6 +205,43 @@ export default function OverviewPage() {
           <h1 className="h1">Overview</h1>
 
           {msg ? <div className="badge badge-ok">{msg}</div> : null}
+
+          {/* ⬇️ Latest Custom artists — ВЫШЕ блоков Latest Yandex/Lidarr albums */}
+          <section className="panel p-4">
+            <div className="section-title mb-2">Latest Custom artists</div>
+            <div className="space-y-1">
+              {(stats?.custom?.latestArtists || []).length === 0 ? (
+                  <div className="text-sm text-gray-500">No data</div>
+              ) : (
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left w-10">#</th>
+                      <th className="text-left">Artist</th>
+                      <th className="text-right links-col-2">Links</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(stats?.custom?.latestArtists || []).slice(0, 5).map((r, i) => (
+                        <tr key={`c-${r.id}-${i}`} className="border-t border-white/5">
+                          <td className="py-1 pr-2">{i + 1}</td>
+                          <td className="py-1 pr-2">{r.name || '—'}</td>
+                          <td className="py-1 links-col-2">
+                            <div className="link-tray link-tray-2 link-tray-right">
+                              {/* второй чип-плейсхолдер для выравнивания на ширину двух */}
+                              <span className="link-chip placeholder">—</span>
+                              {r.mbUrl
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip placeholder">MusicBrainz</span>}
+                            </div>
+                          </td>
+                        </tr>
+                    ))}
+                    </tbody>
+                  </table>
+              )}
+            </div>
+          </section>
 
           {/* ALBUMS */}
           <section className="grid gap-4 md:grid-cols-2">
@@ -345,6 +403,14 @@ export default function OverviewPage() {
                 )}
               </div>
             </div>
+          </section>
+
+          {/* ⬇️ Custom stats — полноширинный блок, ВЫШЕ Yandex/Lidarr stats */}
+          <section className="panel p-4 space-y-3">
+            <div className="text-sm text-gray-500">Custom artists matched</div>
+            <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
+            <ProgressBar value={cArtistPct} color="accent" />
+            <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
           </section>
 
           {/* Yandex stats */}

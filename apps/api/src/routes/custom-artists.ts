@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
-import { searchArtistMB } from '../services/mb';
+// ⬇️ новый импорт
+import { startRun } from '../log';
+import { runCustomArtistsMatch } from '../workers';
 import type { Prisma } from '@prisma/client';
 
 const r = Router();
 
-function nkey(s: string) {
-    return (s || '').trim().toLowerCase();
-}
+function nkey(s: string) { return (s || '').trim().toLowerCase(); }
 
 function parsePaging(req: any) {
     const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
@@ -26,22 +26,16 @@ r.get('/', async (req, res) => {
     const where: Prisma.CustomArtistWhereInput = q
         ? {
             OR: [
-                // поиск по нормализованному ключу (lowercase)
                 { nkey: { contains: q.toLowerCase() } },
-                // и по mbid
                 { mbid: { contains: q } },
             ],
         }
         : {};
 
     let orderBy: Prisma.CustomArtistOrderByWithRelationInput[] = [];
-    if (sortBy === 'matched') {
-        orderBy = [{ matchedAt: sortDir }, { name: 'asc' }];
-    } else if (sortBy === 'created') {
-        orderBy = [{ createdAt: sortDir }, { name: 'asc' }];
-    } else {
-        orderBy = [{ name: sortDir }];
-    }
+    if (sortBy === 'matched') orderBy = [{ matchedAt: sortDir }, { name: 'asc' }];
+    else if (sortBy === 'created') orderBy = [{ createdAt: sortDir }, { name: 'asc' }];
+    else orderBy = [{ name: sortDir }];
 
     const [total, items] = await Promise.all([
         prisma.customArtist.count({ where }),
@@ -57,7 +51,7 @@ r.get('/', async (req, res) => {
         page,
         pageSize,
         total,
-        items: items.map((a) => ({
+        items: items.map(a => ({
             id: a.id,
             name: a.name,
             mbid: a.mbid,
@@ -75,7 +69,6 @@ r.post('/', async (req, res) => {
     const names = Array.isArray(namesRaw)
         ? [...new Set(namesRaw.map((s) => String(s || '').trim()).filter(Boolean))]
         : [];
-
     if (!names.length) return res.status(400).json({ error: 'No names provided' });
 
     const toCreate: { name: string; nkey: string }[] = [];
@@ -84,13 +77,11 @@ r.post('/', async (req, res) => {
         const exists = await prisma.customArtist.findUnique({ where: { nkey: key } });
         if (!exists) toCreate.push({ name, nkey: key });
     }
-
     if (!toCreate.length) return res.json({ created: 0 });
 
     const created = await prisma.$transaction(
-        toCreate.map((data) => prisma.customArtist.create({ data })),
+        toCreate.map((data) => prisma.customArtist.create({ data }))
     );
-
     res.json({ created: created.length });
 });
 
@@ -123,50 +114,28 @@ r.delete('/:id', async (req, res) => {
     res.json({ ok: true });
 });
 
-// POST /api/custom-artists/:id/match
+/** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ---------- */
+
+// POST /api/custom-artists/:id/match  — матчинг одного артиста (асинхронно, с логами)
 r.post('/:id/match', async (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (!id) return res.status(400).json({ error: 'Bad id' });
+    const force =
+        req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
 
-    const a = await prisma.customArtist.findUnique({ where: { id } });
-    if (!a) return res.status(404).json({ error: 'Not found' });
-
-    try {
-        const mbRes = await searchArtistMB(a.name);
-        if (!mbRes?.id) return res.json({ matched: false });
-
-        await prisma.customArtist.update({
-            where: { id: a.id },
-            data: { mbid: mbRes.id, matchedAt: new Date() },
-        });
-
-        res.json({ matched: true, id: a.id, mbid: mbRes.id });
-    } catch (e) {
-        res.status(500).json({ error: 'MB lookup failed' });
-    }
+    const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
+    runCustomArtistsMatch(run.id, { onlyId: id, force }).catch(() => {});
+    res.json({ started: true, runId: run.id });
 });
 
-// POST /api/custom-artists/match-all
-r.post('/match-all', async (_req, res) => {
-    const items = await prisma.customArtist.findMany({ where: { mbid: null } });
-    let matched = 0;
+// POST /api/custom-artists/match-all  — матчинг всех (асинхронно, с логами)
+r.post('/match-all', async (req, res) => {
+    const force =
+        req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
 
-    for (const a of items) {
-        try {
-            const mbRes = await searchArtistMB(a.name);
-            if (mbRes?.id) {
-                await prisma.customArtist.update({
-                    where: { id: a.id },
-                    data: { mbid: mbRes.id, matchedAt: new Date() },
-                });
-                matched++;
-            }
-        } catch {
-            // пропускаем
-        }
-    }
-
-    res.json({ matched, total: items.length });
+    const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
+    runCustomArtistsMatch(run.id, { force }).catch(() => {});
+    res.json({ started: true, runId: run.id });
 });
 
 export default r;
