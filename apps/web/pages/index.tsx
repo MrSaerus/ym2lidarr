@@ -6,72 +6,20 @@ import { api } from '../lib/api';
 
 type CountBlock = { total: number; matched: number; unmatched: number };
 
-type LatestYA = {
-  id: number;
-  title: string;
-  artistName: string;
-  year?: number | null;
-  yandexUrl?: string;
-  mbUrl?: string;
-};
-
-type LatestLA = {
-  id: number;
-  title: string;
-  artistName: string;
-  added: string | null;
-  lidarrUrl?: string;
-  mbUrl?: string;
-};
-
-type LatestYArtist = {
-  id: number;
-  name: string;
-  yandexUrl?: string;
-  mbUrl?: string;
-};
-type LatestLArtist = {
-  id: number;
-  name: string;
-  added?: string | null;
-  lidarrUrl?: string;
-  mbUrl?: string;
-};
-
-// ⬇️ добавили типы для кастома (артисты)
-type LatestCArtist = {
-  id: number;
-  name: string;
-  mbUrl?: string;
-  createdAt?: string | null;
-};
+type LatestYA = { id: number; title: string; artistName: string; year?: number | null; yandexUrl?: string; mbUrl?: string; };
+type LatestLA = { id: number; title: string; artistName: string; added: string | null; lidarrUrl?: string; mbUrl?: string; };
+type LatestYArtist = { id: number; name: string; yandexUrl?: string; mbUrl?: string; };
+type LatestLArtist = { id: number; name: string; added?: string | null; lidarrUrl?: string; mbUrl?: string; };
+type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; };
 
 type StatsResp = {
-  yandex?: {
-    artists: CountBlock;
-    albums: CountBlock;
-    latestAlbums?: LatestYA[];
-    latestArtists?: LatestYArtist[];
-  };
-  lidarr?: {
-    artists: CountBlock;
-    albums: CountBlock;
-    latestAlbums?: LatestLA[];
-    latestArtists?: LatestLArtist[];
-  };
-  // ⬇️ добавили секцию кастома
-  custom?: {
-    artists: CountBlock;
-    latestArtists?: LatestCArtist[];
-  };
+  yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; };
+  lidarr?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
+  custom?: { artists: CountBlock; latestArtists?: LatestCArtist[]; };
   // backward-compat
   artists?: { total?: number; found?: number; unmatched?: number };
   albums?: { total?: number; found?: number; unmatched?: number };
-  runs?: {
-    yandex?: { active: any; last: any };
-    lidarr?: { active: any; last: any };
-    match?: { active: any; last: any };
-  };
+  runs?: { yandex?: { active: any; last: any }; lidarr?: { active: any; last: any }; match?: { active: any; last: any }; };
 };
 
 type RunShort = {
@@ -83,10 +31,9 @@ type RunShort = {
   kind?: 'yandex' | 'lidarr' | string | null;
 };
 
-const toNum = (v: any) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
+type ApiRunsResp = { ok?: boolean; runs?: RunShort[] };
+
+const toNum = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const pct = (matched: number, total: number) => {
   const t = toNum(total), m = toNum(matched);
   return t > 0 ? m / t : 0;
@@ -116,6 +63,8 @@ async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
 export default function OverviewPage() {
   const [stats, setStats] = useState<StatsResp | null>(null);
   const [latest, setLatest] = useState<RunShort | null>(null);
+  const [runs, setRuns] = useState<RunShort[]>([]);
+  const [stoppingId, setStoppingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -126,59 +75,29 @@ export default function OverviewPage() {
     finally { setLoading(false); }
   }, []);
 
-  const loadLatest = useCallback(async () => {
+  const loadRuns = useCallback(async () => {
     try {
-      const r = await api<{ ok?: boolean; runs?: RunShort[] }>('/api/runs?limit=1');
-      setLatest(r?.runs?.[0] ?? null);
+      const r = await api<ApiRunsResp>('/api/runs?limit=20');
+      const arr = r?.runs ?? [];
+      setRuns(arr.filter((x) => x?.status === 'running'));
+      setLatest(arr[0] ?? null);
     } catch {}
   }, []);
 
   useEffect(() => {
-    load(); loadLatest();
-    const t = setInterval(loadLatest, 5000);
+    load(); loadRuns();
+    const t = setInterval(loadRuns, 5000);
     return () => clearInterval(t);
-  }, [load, loadLatest]);
+  }, [load, loadRuns]);
 
-  // Custom counters (artists only)
-  const cA = {
-    total: toNum(stats?.custom?.artists?.total ?? 0),
-    matched: toNum(stats?.custom?.artists?.matched ?? 0),
-    unmatched: toNum(stats?.custom?.artists?.unmatched ?? 0),
-  };
-
-  // Yandex counters (fallback-friendly)
-  const yA = {
-    total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0),
-    matched: toNum(stats?.yandex?.artists?.matched ?? stats?.artists?.found ?? 0),
-    unmatched: toNum(
-        stats?.yandex?.artists?.unmatched ??
-        (stats?.artists?.total != null && stats?.artists?.found != null
-            ? Number(stats.artists.total) - Number(stats.artists.found)
-            : 0),
-    ),
-  };
-  const yR = {
-    total: toNum(stats?.yandex?.albums?.total ?? stats?.albums?.total ?? 0),
-    matched: toNum(stats?.yandex?.albums?.matched ?? stats?.albums?.found ?? 0),
-    unmatched: toNum(
-        stats?.yandex?.albums?.unmatched ??
-        (stats?.albums?.total != null && stats?.albums?.found != null
-            ? Number(stats.albums.total) - Number(stats.albums.found)
-            : 0),
-    ),
-  };
-
-  // Lidarr counters
-  const lA = {
-    total: toNum(stats?.lidarr?.artists?.total ?? 0),
-    matched: toNum(stats?.lidarr?.artists?.matched ?? 0),
-    unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0),
-  };
-  const lR = {
-    total: toNum(stats?.lidarr?.albums?.total ?? 0),
-    matched: toNum(stats?.lidarr?.albums?.matched ?? 0),
-    unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0),
-  };
+  // counters
+  const cA = { total: toNum(stats?.custom?.artists?.total ?? 0), matched: toNum(stats?.custom?.artists?.matched ?? 0), unmatched: toNum(stats?.custom?.artists?.unmatched ?? 0) };
+  const yA = { total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0), matched: toNum(stats?.yandex?.artists?.matched ?? stats?.artists?.found ?? 0),
+    unmatched: toNum(stats?.yandex?.artists?.unmatched ?? ((stats?.artists?.total != null && stats?.artists?.found != null) ? Number(stats.artists.total) - Number(stats.artists.found) : 0)) };
+  const yR = { total: toNum(stats?.yandex?.albums?.total ?? stats?.albums?.total ?? 0), matched: toNum(stats?.yandex?.albums?.matched ?? stats?.albums?.found ?? 0),
+    unmatched: toNum(stats?.yandex?.albums?.unmatched ?? ((stats?.albums?.total != null && stats?.albums?.found != null) ? Number(stats.albums.total) - Number(stats.albums.found) : 0)) };
+  const lA = { total: toNum(stats?.lidarr?.artists?.total ?? 0), matched: toNum(stats?.lidarr?.artists?.matched ?? 0), unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0) };
+  const lR = { total: toNum(stats?.lidarr?.albums?.total ?? 0), matched: toNum(stats?.lidarr?.albums?.matched ?? 0), unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0) };
 
   const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA]);
   const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA]);
@@ -195,8 +114,21 @@ export default function OverviewPage() {
   async function pullFromYandexAlbums() { setMsg('Pull from Yandex (albums)…'); try { await tryPostMany(['/api/sync/yandex/pull','/api/sync/yandex','/api/yandex/pull'],{target:'albums'}); setMsg('Yandex pull OK'); load(); } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`);} }
   async function matchYandexArtists() { setMsg('Matching Yandex artists…'); try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'artists'} as any}); setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
   async function matchYandexAlbums()  { setMsg('Matching Yandex albums…');  try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'albums'} as any});  setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
-  async function runSyncYandex() { setMsg('Starting Yandex sync…'); try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex','/api/sync/yandex/pull','/api/yandex/pull']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`); setTimeout(loadLatest,400);} else { setMsg(`Sync failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`);} }
-  async function pushToLidarr()   { setMsg('Pushing to Lidarr…');      try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/lidarr','/api/lidarr']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`); setTimeout(loadLatest,400);} else { setMsg(`Push failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`);} }
+  async function runSyncYandex() { setMsg('Starting Yandex sync…'); try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex','/api/sync/yandex/pull','/api/yandex/pull']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Sync failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`);} }
+  async function pushToLidarr()   { setMsg('Pushing to Lidarr…');      try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/lidarr','/api/lidarr']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Push failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`);} }
+
+  async function stopRun(id: number) {
+    try {
+      setStoppingId(id);
+      await api(`/api/runs/${id}/stop`, { method: 'POST' });
+      setMsg(`Stop requested for run #${id}`);
+      await loadRuns();
+    } catch (e: any) {
+      setMsg(`Stop failed: ${e?.message || String(e)}`);
+    } finally {
+      setStoppingId(null);
+    }
+  }
 
   return (
       <>
@@ -206,7 +138,7 @@ export default function OverviewPage() {
 
           {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
-          {/* ⬇️ Latest Custom artists — ВЫШЕ блоков Latest Yandex/Lidarr albums */}
+          {/* Latest Custom artists */}
           <section className="panel p-4">
             <div className="section-title mb-2">Latest Custom artists</div>
             <div className="space-y-1">
@@ -228,7 +160,6 @@ export default function OverviewPage() {
                           <td className="py-1 pr-2">{r.name || '—'}</td>
                           <td className="py-1 links-col-2">
                             <div className="link-tray link-tray-2 link-tray-right">
-                              {/* второй чип-плейсхолдер для выравнивания на ширину двух */}
                               <span className="link-chip placeholder">—</span>
                               {r.mbUrl
                                   ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
@@ -245,7 +176,7 @@ export default function OverviewPage() {
 
           {/* ALBUMS */}
           <section className="grid gap-4 md:grid-cols-2">
-            {/* Yandex albums (2 slots: Yandex + MB) */}
+            {/* Yandex albums */}
             <div className="panel p-4">
               <div className="section-title mb-2">Latest Yandex albums</div>
               <div className="space-y-1">
@@ -285,7 +216,7 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Lidarr albums (2 slots: Lidarr + MB) */}
+            {/* Lidarr albums */}
             <div className="panel p-4">
               <div className="section-title mb-2">Latest Lidarr albums</div>
               <div className="space-y-1">
@@ -405,7 +336,7 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* ⬇️ Custom stats — полноширинный блок, ВЫШЕ Yandex/Lidarr stats */}
+          {/* Custom stats — full width */}
           <section className="panel p-4 space-y-3">
             <div className="text-sm text-gray-500">Custom artists matched</div>
             <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
@@ -448,24 +379,46 @@ export default function OverviewPage() {
           {/* Runner & buttons */}
           <section className="panel p-4">
             <div className="text-sm text-gray-500 mb-1">Runner status</div>
-            {!latest ? (
-                <div className="text-sm text-gray-400">No runs yet.</div>
-            ) : latest.status === 'running' ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge tone="ok">running</Badge>
-                  <span>Job: <b>{latest.kind ?? 'n/a'}</b></span>
-                  <span className="text-gray-400">• started {new Date(latest.startedAt).toLocaleString()}</span>
+
+            {runs.length > 0 ? (
+                <div className="space-y-2">
+                  {runs.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge tone="ok">running</Badge>
+                          <span>#{r.id}</span>
+                          <span>Job: <b>{r.kind ?? 'n/a'}</b></span>
+                          <span className="text-gray-400">• started {new Date(r.startedAt).toLocaleString()}</span>
+                          {r.message ? <span className="text-gray-400">• {r.message}</span> : null}
+                        </div>
+                        <div className="shrink-0">
+                          <button className="btn btn-outline" onClick={() => stopRun(r.id)} disabled={stoppingId === r.id}>
+                            {stoppingId === r.id ? 'Stopping…' : 'Stop'}
+                          </button>
+                        </div>
+                      </div>
+                  ))}
                 </div>
             ) : (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Badge tone="muted">idle</Badge>
-                  <span>Last: #{latest.id} • <b>{latest.kind ?? 'n/a'}</b> • {latest.status}</span>
-                  <span className="text-gray-400">
-                • {new Date(latest.startedAt).toLocaleString()}
-                    {latest.finishedAt ? ` → ${new Date(latest.finishedAt).toLocaleString()}` : ''}
-              </span>
-                  {latest.message ? <span className="text-gray-400">• {latest.message}</span> : null}
-                </div>
+                (!latest ? (
+                    <div className="text-sm text-gray-400">No runs yet.</div>
+                ) : latest.status === 'running' ? (
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone="ok">running</Badge>
+                      <span>Job: <b>{latest.kind ?? 'n/a'}</b></span>
+                      <span className="text-gray-400">• started {new Date(latest.startedAt).toLocaleString()}</span>
+                    </div>
+                ) : (
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge tone="muted">idle</Badge>
+                      <span>Last: #{latest.id} • <b>{latest.kind ?? 'n/a'}</b> • {latest.status}</span>
+                      <span className="text-gray-400">
+                  • {new Date(latest.startedAt).toLocaleString()}
+                        {latest.finishedAt ? ` → ${new Date(latest.finishedAt).toLocaleString()}` : ''}
+                </span>
+                      {latest.message ? <span className="text-gray-400">• {latest.message}</span> : null}
+                    </div>
+                ))
             )}
           </section>
 
@@ -487,35 +440,15 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* local styles */}
           <style jsx>{`
-          :root {
-            --chip-w: 96px;
-            --chip-gap: 6px; /* небольшой зазор между чипами */
-          }
-          /* фиксированная ширина колонки Links на два чипа */
-          .links-col-2 {
-            width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
-          }
-          .link-tray {
-            display: flex;
-            align-items: center;
-            gap: var(--chip-gap);
-            white-space: nowrap;
-          }
+          :root { --chip-w: 96px; --chip-gap: 6px; }
+          .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+          .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
           .link-tray-right { justify-content: flex-end; }
           .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-          .link-tray :global(.link-chip) {
-            display: inline-flex;
-            justify-content: center;
-            width: var(--chip-w);
-          }
-          .link-tray :global(.link-chip.placeholder) {
-            visibility: hidden; /* держим место для отсутствующего слота */
-          }
-          .link-margin-right-5{
-            margin-right: 5px;
-          }
+          .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
+          .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
+          .link-margin-right-5 { margin-right: 5px; }
         `}</style>
         </main>
       </>

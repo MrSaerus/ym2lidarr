@@ -1,4 +1,4 @@
-// apps/api/src/routes/sync.ts
+// apps/api/src/routes/runs.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
 
@@ -13,11 +13,7 @@ function toInt(x: any, def: number): number {
 }
 function safeParseJson(s: string | null): any {
   if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return s;
-  }
+  try { return JSON.parse(s); } catch { return s; }
 }
 function mapRun(run: any) {
   return {
@@ -26,17 +22,16 @@ function mapRun(run: any) {
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
     message: run.message ?? null,
-    kind: (run as any).kind ?? null, // если в схеме есть поле kind
+    kind: (run as any).kind ?? null,
   };
 }
 
 // -------- РОУТЫ --------
 
-// Список последних запусков (для селектора на странице логов)
+// Список последних запусков (?limit=1..200)
 for (const p of PREFIXES) {
   router.get(`${p}/runs`, async (req, res) => {
     const limitRaw = toInt(req.query.limit, 20);
-    // небольшой предохранитель: 1..200
     const limit = Math.min(200, Math.max(1, limitRaw));
 
     const runs = await prisma.syncRun.findMany({
@@ -53,6 +48,16 @@ for (const p of PREFIXES) {
     const run = await prisma.syncRun.findFirst({ orderBy: { id: 'desc' } });
     if (!run) return res.json({ ok: false, reason: 'no-runs' });
     return res.json({ ok: true, run: mapRun(run) });
+  });
+}
+
+// Детали одного запуска
+for (const p of PREFIXES) {
+  router.get(`${p}/runs/:id`, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'bad runId' });
+    const run = await prisma.syncRun.findUnique({ where: { id } });
+    return res.json(run);
   });
 }
 
@@ -85,6 +90,29 @@ for (const p of PREFIXES) {
     const nextAfter = mapped.length ? mapped[mapped.length - 1].id : after;
 
     return res.json({ ok: true, items: mapped, nextAfter });
+  });
+}
+
+// NEW: мягкая остановка ранa — выставляем stats.cancel=true
+for (const p of PREFIXES) {
+  router.post(`${p}/runs/:id/stop`, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'bad runId' });
+
+    const run = await prisma.syncRun.findUnique({ where: { id } });
+    if (!run) return res.status(404).json({ ok: false, error: 'not found' });
+    if (run.status !== 'running') return res.json({ ok: true, alreadyFinished: true });
+
+    let stats: any = {};
+    try { stats = run.stats ? JSON.parse(run.stats) : {}; } catch {}
+    stats.cancel = true;
+
+    await prisma.syncRun.update({
+      where: { id },
+      data: { stats: JSON.stringify(stats), message: 'Cancel requested' },
+    });
+
+    return res.json({ ok: true });
   });
 }
 

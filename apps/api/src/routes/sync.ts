@@ -60,15 +60,41 @@ r.post('/lidarr', async (_req, res) => {
   res.json({ started: true });
 });
 
-// Список последних забегов
+/** NEW: мягкая остановка ранa — выставляем stats.cancel=true */
+r.post('/runs/:id/stop', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'bad runId' });
+
+  const run = await prisma.syncRun.findUnique({ where: { id } });
+  if (!run) return res.status(404).json({ ok: false, error: 'not found' });
+  if (run.status !== 'running') return res.json({ ok: true, alreadyFinished: true });
+
+  let stats: any = {};
+  try { stats = run.stats ? JSON.parse(run.stats) : {}; } catch {}
+  stats.cancel = true;
+
+  await prisma.syncRun.update({
+    where: { id },
+    data: { stats: JSON.stringify(stats), message: 'Cancel requested' },
+  });
+
+  return res.json({ ok: true });
+});
+
+// Список последних забегов (добавлен ?limit=, изменён ответ на { ok, runs })
 r.get('/runs', async (req, res) => {
   const kind = (req.query.kind as string) || undefined;
+  const limitRaw = Number(req.query.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 20;
+
   const items = await prisma.syncRun.findMany({
     where: kind ? { kind } : undefined,
     orderBy: { startedAt: 'desc' },
-    take: 20,
+    take: limit,
   });
-  res.json(items);
+
+  // фронту удобнее единый формат
+  res.json({ ok: true, runs: items });
 });
 
 // Детали одного забега (со stats/message)
