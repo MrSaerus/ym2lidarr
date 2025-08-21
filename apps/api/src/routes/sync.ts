@@ -54,10 +54,16 @@ r.post('/match', async (req, res) => {
   res.json({ started: true, runId: run.id });
 });
 
-r.post('/lidarr', async (_req, res) => {
-  // Воркер сам создаёт Run внутри, поэтому здесь не создаём дубликат
-  runLidarrPush().catch(() => {});
-  res.json({ started: true });
+r.post('/lidarr', async (req, res) => {
+  const t =
+      req.body?.target === 'albums'
+          ? 'albums'
+          : req.body?.target === 'artists'
+              ? 'artists'
+              : undefined;
+  const src = req.body?.source === 'custom' ? 'custom' : 'yandex';
+  runLidarrPush(t, src).catch(() => {});
+  res.json({ started: true, target: t ?? 'from-settings', source: src });
 });
 
 /** NEW: мягкая остановка ранa — выставляем stats.cancel=true */

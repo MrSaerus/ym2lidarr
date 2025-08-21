@@ -444,34 +444,57 @@ export async function runCustomArtistsMatch(
 }
 
 /** ===== 4) Lidarr push ===== */
-export async function runLidarrPush() {
+export async function runLidarrPush(
+    overrideTarget?: 'artists' | 'albums',
+    source?: 'yandex' | 'custom',
+    ) {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+  // target теперь безопасно вычисляем после получения setting
+  const target: 'artists' | 'albums' =
+      overrideTarget ?? (setting?.pushTarget === 'albums' ? 'albums' : 'artists');
+  const src: 'yandex' | 'custom' = source === 'custom' ? 'custom' : 'yandex';
+
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
-    await prisma.syncRun.create({ data: { kind: 'lidarr', status: 'error', message: 'No Lidarr URL or API key' } });
+    await prisma.syncRun.create({
+      data: { kind: 'lidarr', status: 'error', message: 'No Lidarr URL or API key' },
+    });
     return;
   }
 
   const run = await startRun('lidarr', {
-    phase: 'push', total: 0, done: 0, ok: 0, failed: 0, target: setting.pushTarget || 'artists',
+    phase: 'push',
+    total: 0,
+    done: 0,
+    ok: 0,
+    failed: 0,
+    target,
+    source: src,
   });
   if (!run) return;
 
   try {
-    const target = setting.pushTarget === 'albums' ? 'albums' : 'artists';
-
     const items =
         target === 'albums'
             ? await prisma.yandexAlbum.findMany({
               where: { present: true, rgMbid: { not: null } },
               orderBy: [{ artist: 'asc' }, { title: 'asc' }],
             })
-            : await prisma.yandexArtist.findMany({
-              where: { present: true, mbid: { not: null } },
-              orderBy: { name: 'asc' },
-            });
+            : src === 'custom'
+                ? await prisma.customArtist.findMany({
+                  where: { mbid: { not: null } },
+                  orderBy: { name: 'asc' },
+                })
+                : await prisma.yandexArtist.findMany({
+                  where: { present: true, mbid: { not: null } },
+                  orderBy: { name: 'asc' },
+                });
 
     await patchRunStats(run.id, { total: items.length });
-    await dblog(run.id, 'info', `Pushing ${items.length} ${target} to Lidarr`);
+    await dblog(
+        run.id,
+        'info',
+        `Pushing ${items.length} ${target} to Lidarr (source=${src})`,
+    );
 
     let done = 0, ok = 0, failed = 0;
 
@@ -513,14 +536,6 @@ export async function runLidarrPush() {
             }
           }
         } else {
-          const cached = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
-          if (cached && (cached.status === 'CREATED' || cached.status === 'EXISTS')) {
-            await dblog(run.id, 'info', `Skip push: "${cached.name}" already in Lidarr`, {
-              target, action: 'skip', lidarrId: cached.lidarrArtistId, path: cached.path, name: cached.name, mbid: cached.mbid, from: 'cache',
-            });
-            continue;
-          }
-
           const res = await ensureArtistInLidarr(effSetting, { name: it.name, mbid: it.mbid! });
 
           const name = res?.artistName || it.name;
@@ -542,7 +557,14 @@ export async function runLidarrPush() {
             });
           } else {
             await prisma.artistPush.create({
-              data: { mbid: it.mbid, name, path: path ?? null, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+              data: {
+                mbid: it.mbid,
+                name,
+                path: path ?? null,
+                lidarrArtistId: lidarrId ?? null,
+                status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                source: src === 'custom' ? 'custom-push' : 'push',
+              },
             });
           }
         }

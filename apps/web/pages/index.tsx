@@ -131,7 +131,11 @@ export default function OverviewPage() {
   async function pushCustomToLidarr() {
     setMsg('Pushing (custom) to Lidarr…');
     try {
-      await api('/api/sync/lidarr', { method: 'POST' });
+      await api('/api/sync/lidarr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: 'artists', source: 'custom' }),
+      });
       setMsg('Push started');
       setTimeout(loadRuns, 400);
     } catch (e: any) {
@@ -167,7 +171,7 @@ export default function OverviewPage() {
               <div className="section-title">Latest Custom artists</div>
               <div className="ml-auto flex items-center gap-2">
                 <button className="btn btn-outline" onClick={matchCustomAll}>Match MB</button>
-                <button className="btn btn-primary" onClick={pushCustomToLidarr}>Push to Lidarr</button>
+                <button className="btn btn-outline" onClick={pushCustomToLidarr}>Push to Lidarr</button>
               </div>
             </div>
             <div className="space-y-1">
@@ -213,7 +217,7 @@ export default function OverviewPage() {
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexAlbums}>Matching YM</button>
-                  <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
+                  <button className="btn btn-outline" onClick={pushToLidarr}>Push to Lidarr</button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -304,7 +308,7 @@ export default function OverviewPage() {
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexArtists}>Matching YM</button>
-                  <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
+                  <button className="btn btn-outline" onClick={pushToLidarr}>Push to Lidarr</button>
                 </div>
               </div>
               <div className="space-y-1">
