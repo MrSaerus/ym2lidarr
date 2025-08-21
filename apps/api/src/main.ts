@@ -16,6 +16,7 @@ import lidarrArtists from './routes/lidarr-artists';
 import lidarrAlbumsRouter from './routes/lidarr-albums';
 import yandexRouter from './routes/yandex';
 import unifiedRouter from './routes/unified';
+import customArtistsRoute from './routes/custom-artists';
 
 const app = express();
 const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
@@ -38,6 +39,7 @@ app.use('/api/lidarr', lidarrArtists);
 app.use('/api/lidarr', lidarrAlbumsRouter);
 app.use('/api/yandex', yandexRouter);
 app.use('/api/unified', unifiedRouter);
+app.use('/api/custom-artists', customArtistsRoute);
 
 // Runs/logs router (supports /runs and /api/runs internally)
 app.use(runsRouter);

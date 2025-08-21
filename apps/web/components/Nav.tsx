@@ -13,6 +13,7 @@ const tabs = [
   { href: '/', label: 'Overview', Icon: HomeIcon },
   { href: '/lidarr', label: 'Lidarr', Icon: QuestionMarkCircleIcon },
   { href: '/yandex', label: 'Yandex', Icon: QuestionMarkCircleIcon },
+  { href: '/custom', label: 'Custom', Icon: QuestionMarkCircleIcon },
   { href: '/unified', label: 'Unified', Icon: QuestionMarkCircleIcon },
   { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
   { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },

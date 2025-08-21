@@ -153,9 +153,20 @@ export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: str
 
   const typeMed = pickMedian(candidates.map((c) => c.primaryType));
   candidates.forEach((c) => {
-    c.highlight =
-        (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
+    c.highlight = (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
   });
 
   return { externalId: hit?.id ?? null, candidates, raw };
 });
+
+/**
+ * Утилита для маршрутов Custom Artists:
+ * возвращает { id, name } для top-результата или null, чтобы
+ * маршруты могли просто записать MBID.
+ */
+export async function searchArtistMB(
+    name: string,
+): Promise<{ id: string; name: string } | null> {
+  const res = await mbFindArtist(name);
+  return res.externalId ? { id: res.externalId, name } : null;
+}

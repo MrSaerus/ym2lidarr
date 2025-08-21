@@ -107,6 +107,18 @@ model LidarrAlbum {
   @@index([artistId])
 }
 
+// /* ===================== Ingest: Custome ===================== */
+
+model CustomArtist {
+  id        Int       @id @default(autoincrement())
+  name      String
+  nkey      String    @unique // нормализованное имя для дедупа
+  mbid      String?
+  matchedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
 // /* ===================== MB Sync (трекинг) ===================== */
 
 model MbSyncItem {

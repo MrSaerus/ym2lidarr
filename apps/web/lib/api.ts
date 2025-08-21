@@ -125,3 +125,82 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
   // Fallback to text when server didn't send JSON
   return (await res.text()) as unknown as T;
 }
+
+/* =========================
+ * Custom Artists API (new)
+ * ========================= */
+
+function qs(params?: Record<string, any>): string {
+  if (!params) return '';
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  if (!entries.length) return '';
+  const sp = new URLSearchParams();
+  for (const [k, v] of entries) sp.set(k, String(v));
+  return `?${sp.toString()}`;
+}
+
+export type CustomArtist = {
+  id: number;
+  name: string;
+  mbid: string | null;
+  matchedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  mbUrl?: string | null;
+};
+
+export type CustomArtistsResp = {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: CustomArtist[];
+};
+
+export const customArtists = {
+  list: async (params?: {
+    page?: number;
+    pageSize?: number;
+    q?: string;
+    sortBy?: 'name' | 'matched' | 'created';
+    sortDir?: 'asc' | 'desc';
+  }): Promise<CustomArtistsResp> => {
+    return api<CustomArtistsResp>(`/api/custom-artists${qs(params)}`, { method: 'GET' });
+  },
+
+  addMany: async (names: string[]): Promise<{ created: number }> => {
+    return api<{ created: number }>(`/api/custom-artists`, {
+      method: 'POST',
+      json: { names },
+    });
+  },
+
+  patch: async (
+      id: number,
+      body: Partial<Pick<CustomArtist, 'name' | 'mbid'>>,
+  ): Promise<CustomArtist> => {
+    return api<CustomArtist>(`/api/custom-artists/${id}`, {
+      method: 'PATCH',
+      json: body,
+    });
+  },
+
+  remove: async (id: number): Promise<{ ok: boolean }> => {
+    return api<{ ok: boolean }>(`/api/custom-artists/${id}`, { method: 'DELETE' });
+  },
+
+  matchOne: async (
+      id: number,
+  ): Promise<{ matched: boolean; id?: number; mbid?: string }> => {
+    return api<{ matched: boolean; id?: number; mbid?: string }>(
+        `/api/custom-artists/${id}/match`,
+        { method: 'POST', json: {} },
+    );
+  },
+
+  matchAll: async (): Promise<{ matched: number; total: number }> => {
+    return api<{ matched: number; total: number }>(`/api/custom-artists/match-all`, {
+      method: 'POST',
+      json: {},
+    });
+  },
+};
