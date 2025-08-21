@@ -77,8 +77,7 @@ r.get('/artists', async (req, res) => {
             albums: x.albums ?? null,
             tracks: x.tracks ?? null,
             sizeOnDisk: x.sizeOnDisk ?? null,
-            // корректная ссылка только если есть MBID и настроен base
-            lidarrUrl: base && x.mbid ? `${base}/artist/${cleanMbid(x.mbid)}` : null,
+            lidarrUrl: base ? `${base}/artist/${x.id}` : null,
         }));
 
         res.json({ page, pageSize, total, items });

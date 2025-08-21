@@ -5,17 +5,18 @@ import { prisma } from './prisma';
 type Kind = 'yandex' | 'lidarr' | 'export' | 'match';
 type Status = 'ok' | 'error';
 
+function escapeHtml(s: string) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function makeTelegramMessage(kind: Kind, status: Status, stats: any) {
-  const header = `Sync ${kind}: *${status.toUpperCase()}*`;
+  const header = `Sync ${kind}: <b>${status.toUpperCase()}</b>`;
   let payload = '';
   try {
     if (stats != null) {
       const s = typeof stats === 'string' ? stats : JSON.stringify(stats, null, 2);
-      payload = `\n\`\`\`\n${s}\n\`\`\``;
+      payload = `\n<pre>${escapeHtml(s)}</pre>`;
     }
-  } catch {
-    // ignore stringify issues
-  }
+  } catch {}
   return `${header}${payload}`;
 }
 
@@ -34,7 +35,7 @@ export async function notify(kind: Kind, status: Status, stats: any) {
       const body = {
         chat_id: s.telegramChatId,
         text: makeTelegramMessage(kind, status, stats),
-        parse_mode: 'Markdown', // используем Markdown для тройных бэктиков
+        parse_mode: 'HTML',
         disable_web_page_preview: true,
       };
       await request(url, {

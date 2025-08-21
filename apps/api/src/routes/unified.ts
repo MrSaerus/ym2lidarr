@@ -91,9 +91,8 @@ r.get('/artists', async (req, res) => {
     for (const l of la) {
         const row = ensure(l.name);
         row.lidarrId = l.id;
-        if (l.mbid && lidarrUrl) {
-            row.lidarrUrl = `${lidarrUrl}/artist/${l.mbid}`;
-            if (!row.mbUrl) row.mbUrl = `https://musicbrainz.org/artist/${l.mbid}`;
+        if (lidarrUrl && l.id != null) {
+            row.lidarrUrl = `${lidarrUrl}/artist/${l.id}`;
         }
         // если ссылку на Lidarr ещё можно сформировать по MBID из Yandex — сделаем
         if (!row.lidarrUrl && lidarrUrl && row.mbUrl?.includes('/artist/')) {
@@ -200,10 +199,9 @@ r.get('/albums', async (req, res) => {
         const row = ensure(l.artistName || '', l.title);
         row.lidarrAlbumId = l.id;
 
-        if (l.mbid && !row.releaseUrl) row.releaseUrl = `https://musicbrainz.org/release/${l.mbid}`;
-        if (!row.lidarrUrl && lidarrUrl && row.lidarrAlbumId != null && row.rgUrl) {
-            const rg = row.rgUrl.split('/').pop();
-            if (rg) row.lidarrUrl = `${lidarrUrl}/album/${rg}`;
+        if (l.mbid && !row.releaseUrl) row.releaseUrl = `https://musicbrainz.org/release-group/${l.mbid}`;
+        if (!row.lidarrUrl && lidarrUrl && row.lidarrAlbumId != null) {
+            row.lidarrUrl = `${lidarrUrl}/album/${row.lidarrAlbumId}`;
         }
     }
 

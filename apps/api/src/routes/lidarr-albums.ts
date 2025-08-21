@@ -115,7 +115,7 @@ r.get('/albums', async (req, res) => {
             sizeOnDisk: x.sizeOnDisk ?? null,
             tracks: (x as any).tracks ?? null, // если поля нет — будет null
             // корректная ссылка только при наличии RG MBID и base
-            lidarrUrl: base && x.mbid ? `${base}/album/${cleanMbid(x.mbid)}` : null,
+            lidarrUrl: base ? `${base}/album/${x.id}` : null,
         }));
 
         res.json({ page, pageSize, total, items });

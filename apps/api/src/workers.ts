@@ -49,6 +49,11 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   setPyproxyUrl(setting?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
 
+  await prisma.$transaction([
+    prisma.yandexArtist.updateMany({ data: { present: false } }),
+    prisma.yandexAlbum.updateMany({ data: { present: false } }),
+  ]);
+
   const token =
       tokenOverride ||
       setting?.yandexToken ||
@@ -228,7 +233,7 @@ export async function runLidarrPull(reuseRunId?: number) {
             artistName: String(a.artistName || a.name || ''),
             mbid: alb.foreignAlbumId || alb.mbid || null,
             monitored: !!alb.monitored,
-            added: alb.releaseDate ? new Date(alb.releaseDate) : null,
+            added: alb.added ? new Date(alb.added) : null,
             removed: false,
             lastSyncAt: new Date(),
           },
@@ -238,7 +243,7 @@ export async function runLidarrPull(reuseRunId?: number) {
             artistName: String(a.artistName || a.name || ''),
             mbid: alb.foreignAlbumId || alb.mbid || null,
             monitored: !!alb.monitored,
-            added: alb.releaseDate ? new Date(alb.releaseDate) : null,
+            added: alb.added ? new Date(alb.added) : null,
             removed: false,
             lastSyncAt: new Date(),
           },
@@ -340,12 +345,12 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
     await patchRunStats(runId, { phase: 'done' });
     await endRun(runId, 'ok');
     const finalRun = await getRunWithRetry(runId);
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('yandex', 'ok', stats); } catch {}
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('match', 'ok', stats); } catch {}
   } catch (e: any) {
     await dblog(runId, 'error', 'MB Match failed', { error: String(e?.message || e) });
     await endRun(runId, 'error', String(e?.message || e));
     const finalRun = await getRunWithRetry(runId);
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('yandex', 'error', stats); } catch {}
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('match', 'error', stats); } catch {}
   }
 }
 
@@ -429,12 +434,12 @@ export async function runCustomArtistsMatch(
     await patchRunStats(runId, { c_done, c_matched, phase: 'done' });
     await endRun(runId, 'ok');
     const finalRun = await getRunWithRetry(runId);
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('yandex', 'ok', stats); } catch {}
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('match', 'ok', stats);} catch {}
   } catch (e: any) {
     await dblog(runId, 'error', 'Custom match failed', { error: String(e?.message || e) });
     await endRun(runId, 'error', String(e?.message || e));
     const finalRun = await getRunWithRetry(runId);
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('yandex', 'error', stats); } catch {}
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('match', 'error', stats); } catch {}
   }
 }
 

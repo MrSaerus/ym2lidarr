@@ -207,7 +207,15 @@ export default function OverviewPage() {
           <section className="grid gap-4 md:grid-cols-2">
             {/* Yandex albums */}
             <div className="panel p-4">
-              <div className="section-title mb-2">Latest Yandex albums</div>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="section-title">Latest Yandex albums</div>
+                {/* ⬇️ Новые кнопки справа */}
+                <div className="ml-auto flex items-center gap-2">
+                  <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from YM</button>
+                  <button className="btn btn-outline" onClick={matchYandexAlbums}>Matching YM</button>
+                  <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
+                </div>
+              </div>
               <div className="space-y-1">
                 {(stats?.yandex?.latestAlbums || []).length === 0 ? (
                     <div className="text-sm text-gray-500">No data</div>
@@ -290,7 +298,15 @@ export default function OverviewPage() {
           <section className="grid gap-4 md:grid-cols-2">
             {/* Yandex artists */}
             <div className="panel p-4">
-              <div className="section-title mb-2">Latest Yandex artists</div>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="section-title">Latest Yandex artists</div>
+                {/* ⬇️ Новые кнопки справа */}
+                <div className="ml-auto flex items-center gap-2">
+                  <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from YM</button>
+                  <button className="btn btn-outline" onClick={matchYandexArtists}>Matching YM</button>
+                  <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
+                </div>
+              </div>
               <div className="space-y-1">
                 {(stats?.yandex?.latestArtists || []).length === 0 ? (
                     <div className="text-sm text-gray-500">No data</div>

@@ -1,3 +1,4 @@
+// apps/api/src/routes/settings.ts
 import { Router } from 'express';
 
 import { prisma } from '../prisma';

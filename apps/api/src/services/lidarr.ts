@@ -1,6 +1,9 @@
 // apps/api/src/services/lidarr.ts
 import { request } from 'undici';
 
+const DEFAULT_HEADERS_TIMEOUT = 10_000; // 10s
+const DEFAULT_BODY_TIMEOUT = 30_000;    // 30s
+
 export type Setting = {
   lidarrUrl: string;
   lidarrApiKey: string;
@@ -56,7 +59,11 @@ function assertPushSettings(s: Setting) {
 
 async function api<T = any>(s: Setting, path: string, init?: Parameters<typeof request>[1]) {
   const url = `${baseUrl(s)}${path}${path.includes('?') ? '&' : '?'}apikey=${s.lidarrApiKey}`;
-  const res = await request(url, init);
+  const res = await request(url, {
+    headersTimeout: DEFAULT_HEADERS_TIMEOUT,
+    bodyTimeout: DEFAULT_BODY_TIMEOUT,
+    ...init
+  });
   const text = await res.body.text();
   let data: any = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
