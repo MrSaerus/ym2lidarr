@@ -117,10 +117,33 @@ export default function OverviewPage() {
   async function runSyncYandex() { setMsg('Starting Yandex sync…'); try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex','/api/sync/yandex/pull','/api/yandex/pull']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Sync failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`);} }
   async function pushToLidarr()   { setMsg('Pushing to Lidarr…');      try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/lidarr','/api/lidarr']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Push failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`);} }
 
+  // Custom panel actions
+  async function matchCustomAll() {
+    setMsg('Matching Custom artists…');
+    try {
+      await api('/api/custom-artists/match-all', { method: 'POST' });
+      setMsg('Custom match started');
+      setTimeout(loadRuns, 400);
+    } catch (e: any) {
+      setMsg(`Custom match error: ${e?.message || String(e)}`);
+    }
+  }
+  async function pushCustomToLidarr() {
+    setMsg('Pushing (custom) to Lidarr…');
+    try {
+      await api('/api/sync/lidarr', { method: 'POST' });
+      setMsg('Push started');
+      setTimeout(loadRuns, 400);
+    } catch (e: any) {
+      setMsg(`Push error: ${e?.message || String(e)}`);
+    }
+  }
+
   async function stopRun(id: number) {
     try {
       setStoppingId(id);
-      await api(`/api/runs/${id}/stop`, { method: 'POST' });
+      // ⬇️ ВАЖНО: стоп находится в /api/sync
+      await api(`/api/sync/runs/${id}/stop`, { method: 'POST' });
       setMsg(`Stop requested for run #${id}`);
       await loadRuns();
     } catch (e: any) {
@@ -140,7 +163,13 @@ export default function OverviewPage() {
 
           {/* Latest Custom artists */}
           <section className="panel p-4">
-            <div className="section-title mb-2">Latest Custom artists</div>
+            <div className="mb-2 flex items-center gap-3">
+              <div className="section-title">Latest Custom artists</div>
+              <div className="ml-auto flex items-center gap-2">
+                <button className="btn btn-outline" onClick={matchCustomAll}>Match MB</button>
+                <button className="btn btn-primary" onClick={pushCustomToLidarr}>Push to Lidarr</button>
+              </div>
+            </div>
             <div className="space-y-1">
               {(stats?.custom?.latestArtists || []).length === 0 ? (
                   <div className="text-sm text-gray-500">No data</div>
@@ -441,15 +470,15 @@ export default function OverviewPage() {
           </section>
 
           <style jsx>{`
-          :root { --chip-w: 96px; --chip-gap: 6px; }
-          .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-          .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
-          .link-tray-right { justify-content: flex-end; }
-          .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-          .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
-          .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
-          .link-margin-right-5 { margin-right: 5px; }
-        `}</style>
+            :root { --chip-w: 96px; --chip-gap: 6px; }
+            .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+            .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
+            .link-tray-right { justify-content: flex-end; }
+            .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+            .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
+            .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
+            .link-margin-right-5 { margin-right: 5px; }
+          `}</style>
         </main>
       </>
   );
