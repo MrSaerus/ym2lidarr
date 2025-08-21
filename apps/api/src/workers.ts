@@ -5,21 +5,14 @@ import { prisma } from './prisma';
 import {
   ensureArtistInLidarr,
   ensureAlbumInLidarr,
-  getRootFolders,
-  getQualityProfiles,
-  getMetadataProfiles,
 } from './services/lidarr';
 import { mbFindArtist, mbFindReleaseGroup } from './services/mb';
 import { yandexPullLikes, setPyproxyUrl } from './services/yandex';
 import { request } from 'undici';
 
 function nkey(s: string) { return (s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
-const RECHECK_HOURS = parseInt(process.env.MB_RECHECK_HOURS || '168', 10);
-function shouldRecheck(last?: Date | null, force = false) {
-  if (force) return true;
-  if (!last) return true;
-  return (Date.now() - new Date(last).getTime()) >= RECHECK_HOURS * 3600_000;
-}
+
+
 async function getRunWithRetry(id: number, tries = 3, ms = 200) {
   for (let i = 0; i < tries; i++) { try { const r = await prisma.syncRun.findUnique({ where: { id } }); if (r) return r; } catch {} await new Promise(r => setTimeout(r, ms)); }
   return prisma.syncRun.findUnique({ where: { id } });
