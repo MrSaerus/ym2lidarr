@@ -1,11 +1,18 @@
 // apps/api/src/log.ts
 import { prisma } from './prisma';
+import { instanceId } from './instance';
 
 type Json = Record<string, any>;
+const nowIso = () => new Date().toISOString();
 
 export async function startRun(kind: string, initialStats: Json = {}) {
+  const stats = {
+    ...initialStats,
+    instanceId,
+    heartbeatAt: nowIso(),
+  };
   const run = await prisma.syncRun.create({
-    data: { kind, status: 'running', stats: JSON.stringify(initialStats) },
+    data: { kind, status: 'running', stats: JSON.stringify(stats) },
   });
   return run;
 }
@@ -17,7 +24,7 @@ export async function endRun(
     patchStats: Json = {},
 ) {
   const run = await prisma.syncRun.findUnique({ where: { id: runId } });
-  const stats = safeMerge(run?.stats, patchStats);
+  const stats = safeMerge(run?.stats, { ...patchStats, heartbeatAt: nowIso() });
   await prisma.syncRun.update({
     where: { id: runId },
     data: {
@@ -31,7 +38,7 @@ export async function endRun(
 
 export async function patchRunStats(runId: number, patch: Json) {
   const run = await prisma.syncRun.findUnique({ where: { id: runId } });
-  const stats = safeMerge(run?.stats, patch);
+  const stats = safeMerge(run?.stats, { ...patch, heartbeatAt: nowIso() });
   await prisma.syncRun.update({
     where: { id: runId },
     data: { stats: JSON.stringify(stats) },

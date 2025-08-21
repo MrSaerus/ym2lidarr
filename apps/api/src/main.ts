@@ -18,8 +18,44 @@ import yandexRouter from './routes/yandex';
 import unifiedRouter from './routes/unified';
 import customArtistsRoute from './routes/custom-artists';
 
+import { prisma } from './prisma';
+import { instanceId } from './instance';
+
 const app = express();
 const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
+
+// сколько времени считаем «живым» heartbeat (мс)
+const STALE_RUN_MS = Number(process.env.STALE_RUN_MS || 5 * 60 * 1000); // 5 минут
+
+async function recoverStaleRuns() {
+  const running = await prisma.syncRun.findMany({ where: { status: 'running' } });
+  const now = Date.now();
+  let fixed = 0;
+
+  for (const r of running) {
+    let stats: any = {};
+    try { stats = r.stats ? JSON.parse(r.stats) : {}; } catch {}
+    const hbMs = stats?.heartbeatAt ? Date.parse(stats.heartbeatAt) : 0;
+    const sameInstance = stats?.instanceId === instanceId;
+
+    // если это не наш instance (значит процесс перезапускался),
+    // или heartbeat сильно старый — помечаем как error
+    if (!sameInstance || !hbMs || (now - hbMs) > STALE_RUN_MS) {
+      await prisma.syncRun.update({
+        where: { id: r.id },
+        data: {
+          status: 'error',
+          message: 'Orphaned (server restarted or worker died)',
+          finishedAt: new Date(),
+        },
+      });
+      fixed++;
+    }
+  }
+  if (fixed) {
+    console.log(`[recover] marked ${fixed} orphaned run(s) as error`);
+  }
+}
 
 app.disable('x-powered-by');
 app.use(cors());
@@ -53,9 +89,19 @@ app.listen(PORT, async () => {
     console.error('[api] initPrismaPragmas failed:', e);
   }
 
+  // 🔧 починить «висящие» запуски после рестарта контейнера
+  try {
+    await recoverStaleRuns();
+  } catch (e) {
+    console.error('[api] recoverStaleRuns failed:', e);
+  }
+
   try {
     await initScheduler();
   } catch (e) {
     console.error('[api] initScheduler failed:', e);
   }
+
+  // (необязательно) периодический вотчер раз в минуту
+  setInterval(() => recoverStaleRuns().catch(() => {}), 60_000);
 });
