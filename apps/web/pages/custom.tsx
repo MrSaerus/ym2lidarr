@@ -1,3 +1,4 @@
+// apps/web/pages/custom.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
 import { Table, Th, Td } from '../components/Table';
@@ -5,14 +6,53 @@ import { customArtists } from '../lib/api';
 
 type SortDir = 'asc' | 'desc';
 
+type SortField = 'name' | 'matched' | 'created';
+
+/* ==== Fixed link slot (MusicBrainz only) ==== */
+const LINKS_COL_WIDTH = 'w-[7rem]';
+
+function LinkChip({
+                      href,
+                      label,
+                      className,
+                  }: {
+    href?: string | null;
+    label: 'MusicBrainz';
+    className?: string;
+}) {
+    if (!href) {
+        return (
+            <span className={`link-chip link-chip--mb invisible select-none ${className || ''}`} aria-hidden="true">
+        {label}
+      </span>
+        );
+    }
+    return (
+        <a href={href} target="_blank" rel="noreferrer" className={`link-chip link-chip--mb ${className || ''}`}>
+            {label}
+        </a>
+    );
+}
+
+function LinksFixedMBRow({ mbUrl }: { mbUrl?: string | null }) {
+    return (
+        <div className={`grid grid-cols-1 justify-items-center ${LINKS_COL_WIDTH}`}>
+            <LinkChip href={mbUrl} label="MusicBrainz" />
+        </div>
+    );
+}
+/* ============================================ */
+
 export default function CustomArtistsPage() {
     const [loading, setLoading] = useState(false);
-    const [items, setItems] = useState<Awaited<ReturnType<typeof customArtists.list>>['items']>([]);
+    const [items, setItems] =
+        useState<Awaited<ReturnType<typeof customArtists.list>>['items']>([]);
     const [total, setTotal] = useState(0);
+
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
     const [q, setQ] = useState('');
-    const [sortBy, setSortBy] = useState<'name' | 'matched' | 'created'>('name');
+    const [sortBy, setSortBy] = useState<SortField>('name');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
 
     const [bulkText, setBulkText] = useState('');
@@ -72,153 +112,171 @@ export default function CustomArtistsPage() {
 
     const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
 
-    const setSort = (field: 'name' | 'matched' | 'created') => {
+    const setSort = (field: SortField) => {
         if (sortBy === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
         else { setSortBy(field); setSortDir('asc'); }
+        setPage(1);
     };
 
-    return (
-        <div className="min-h-screen">
-            <Nav />
-            <div className="max-w-7xl mx-auto p-4 space-y-6">
-                <h1 className="text-2xl font-semibold">Custom Artists</h1>
+    const headerArrow = (active: boolean) =>
+        active ? <span className="text-xs text-gray-500">{sortDir === 'asc' ? '▲' : '▼'}</span> : null;
 
-                {/* Ввод списка */}
-                <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-          <textarea
-              className="w-full h-28 border rounded-lg p-3"
-              placeholder="Вставьте имена артистов (по одному в строке, либо через запятую/точку с запятой)"
-              value={bulkText}
-              onChange={e => setBulkText(e.target.value)}
-          />
-                    <div className="flex md:flex-col gap-2">
-                        <button
-                            className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
-                            onClick={onAdd}
-                            disabled={adding}
-                            title="Добавить в базу"
-                        >
-                            {adding ? 'Добавляю…' : 'Добавить'}
+    const pageCount = pages;
+
+    return (
+        <>
+            <Nav />
+            <main className="mx-auto max-w-6xl px-4 py-4">
+                <h1 className="h1">Custom Artists</h1>
+
+                {/* Toolbar */}
+                <div className="toolbar">
+                    <div className="flex items-center gap-2">
+                        <input
+                            className="input w-80"
+                            placeholder="Search by name…"
+                            value={q}
+                            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+                        />
+                        <button className="btn btn-outline" onClick={load} disabled={loading}>
+                            {loading ? 'Refreshing…' : 'Refresh'}
                         </button>
                         <button
-                            className="px-4 py-2 rounded-lg bg-purple-600 text-white disabled:opacity-50"
+                            className="btn btn-outline"
                             onClick={onMatchAll}
                             disabled={matching}
                             title="Сопоставить всех с MusicBrainz"
                         >
-                            {matching ? 'Матчу…' : 'Match all (MB)'}
+                            {matching ? 'Matching…' : 'Match all (MB)'}
                         </button>
+                    </div>
+
+                    <div className="ml-auto flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Rows per page:</span>
+                        <select
+                            className="select"
+                            value={pageSize}
+                            onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1); }}
+                        >
+                            {[25, 50, 100, 200].map((n) => (
+                                <option key={n} value={n}>{n}</option>
+                            ))}
+                        </select>
+
+                        <span className="text-xs text-gray-500">
+              {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
+            </span>
+                        <div className="flex items-center gap-1">
+                            <button className="btn btn-outline" onClick={() => setPage(1)} disabled={page <= 1}>{'«'}</button>
+                            <button className="btn btn-outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>{'‹'}</button>
+                            <span className="text-xs text-gray-500 px-2">Page {page}/{pageCount}</span>
+                            <button className="btn btn-outline" onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>{'›'}</button>
+                            <button className="btn btn-outline" onClick={() => setPage(pageCount)} disabled={page >= pageCount}>{'»'}</button>
+                        </div>
                     </div>
                 </div>
 
-                {/* Фильтры/поиск */}
-                <div className="flex flex-wrap items-center gap-2">
-                    <input
-                        className="border rounded-lg px-3 py-2"
-                        placeholder="Поиск…"
-                        value={q}
-                        onChange={e => { setQ(e.target.value); setPage(1); }}
-                    />
-                    <select
-                        className="border rounded-lg px-3 py-2"
-                        value={pageSize}
-                        onChange={e => { setPageSize(parseInt(e.target.value, 10)); setPage(1); }}
-                    >
-                        {[25, 50, 100].map(s => <option key={s} value={s}>{s}/page</option>)}
-                    </select>
-
-                    <div className="ml-auto text-sm opacity-70">{loading ? 'Loading…' : `${total} total`}</div>
+                {/* Bulk add panel */}
+                <div className="panel p-3">
+                    <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <textarea
+                className="input h-28"
+                placeholder="Вставьте имена артистов (по одному в строке, либо через запятую/точку с запятой)"
+                value={bulkText}
+                onChange={e => setBulkText(e.target.value)}
+            />
+                        <div className="flex md:flex-col gap-2">
+                            <button
+                                className="btn btn-primary"
+                                onClick={onAdd}
+                                disabled={adding}
+                                title="Добавить в базу"
+                            >
+                                {adding ? 'Добавляю…' : 'Добавить'}
+                            </button>
+                            <button
+                                className="btn btn-outline"
+                                onClick={onMatchAll}
+                                disabled={matching}
+                                title="Сопоставить всех с MusicBrainz"
+                            >
+                                {matching ? 'Матчу…' : 'Match all (MB)'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                {/* Таблица */}
-                <div className="overflow-x-auto">
-                    <Table>
+                {/* Table */}
+                <div className="panel overflow-x-auto">
+                    <Table className="table-default">
                         <thead>
                         <tr>
-                            <Th>
+                            <Th className="select-none">
                                 <button
                                     type="button"
                                     onClick={() => setSort('name')}
-                                    className="flex items-center gap-1"
-                                    aria-label="Sort by name"
+                                    className="inline-flex items-center gap-1 hover:underline"
                                 >
-                                    Name
-                                    <span className="opacity-60 text-xs">
-                                  {sortBy === 'name' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-                                </span>
+                                    Name {headerArrow(sortBy === 'name')}
                                 </button>
                             </Th>
-                            <Th>
+                            <Th className="select-none">
                                 <button
                                     type="button"
                                     onClick={() => setSort('matched')}
-                                    className="flex items-center gap-1"
-                                    aria-label="Sort by matched"
+                                    className="inline-flex items-center gap-1 hover:underline"
                                 >
-                                    Matched
-                                    <span className="opacity-60 text-xs">
-                                  {sortBy === 'matched' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-                                </span>
+                                    Matched {headerArrow(sortBy === 'matched')}
                                 </button>
                             </Th>
-                            <Th>
+                            <Th className="select-none">
                                 <button
                                     type="button"
                                     onClick={() => setSort('created')}
-                                    className="flex items-center gap-1"
-                                    aria-label="Sort by created"
+                                    className="inline-flex items-center gap-1 hover:underline"
                                 >
-                                    Created
-                                    <span className="opacity-60 text-xs">
-                                  {sortBy === 'created' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-                                </span>
+                                    Created {headerArrow(sortBy === 'created')}
                                 </button>
                             </Th>
-                            <Th>MusicBrainz</Th>
+                            <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
                             <Th className="text-right">Actions</Th>
                         </tr>
                         </thead>
                         <tbody>
-                        {items.map(a => (
+                        {(!items || items.length === 0) ? (
+                            <tr>
+                                <Td colSpan={5}>
+                                    <div className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
+                                </Td>
+                            </tr>
+                        ) : items.map(a => (
                             <tr key={a.id}>
                                 <Td>{a.name}</Td>
                                 <Td>{a.mbid ? 'Yes' : 'No'}</Td>
                                 <Td>{a.createdAt ? new Date(a.createdAt).toLocaleString() : '-'}</Td>
-                                <Td>
-                                    {a.mbid ? (
-                                        <a className="text-blue-600 underline" href={`https://musicbrainz.org/artist/${a.mbid}`} target="_blank" rel="noreferrer">
-                                            {a.mbid}
-                                        </a>
-                                    ) : '—'}
+                                <Td className="text-center">
+                                    <LinksFixedMBRow
+                                        mbUrl={a.mbid ? `https://musicbrainz.org/artist/${a.mbid}` : undefined}
+                                    />
                                 </Td>
                                 <Td className="text-right">
                                     <div className="inline-flex gap-2">
                                         {!a.mbid && (
-                                            <button className="px-3 py-1 rounded bg-purple-600 text-white" onClick={() => onMatchOne(a.id)}>
+                                            <button className="btn btn-outline" onClick={() => onMatchOne(a.id)}>
                                                 Match (MB)
                                             </button>
                                         )}
-                                        <button className="px-3 py-1 rounded bg-red-600 text-white" onClick={() => onDelete(a.id)}>
+                                        <button className="btn btn-outline danger" onClick={() => onDelete(a.id)}>
                                             Delete
                                         </button>
                                     </div>
                                 </Td>
                             </tr>
                         ))}
-                        {!items.length && !loading && (
-                            <tr><Td colSpan={5} className="text-center opacity-70">Пусто</Td></tr>
-                        )}
                         </tbody>
                     </Table>
                 </div>
-
-                {/* Пагинация */}
-                <div className="flex items-center gap-2">
-                    <button className="px-3 py-1 border rounded" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Prev</button>
-                    <span className="text-sm">Page {page} / {pages}</span>
-                    <button className="px-3 py-1 border rounded" disabled={page >= pages} onClick={() => setPage(p => Math.min(pages, p + 1))}>Next</button>
-                </div>
-            </div>
-        </div>
+            </main>
+        </>
     );
 }
