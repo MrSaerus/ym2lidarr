@@ -213,7 +213,6 @@ export default function OverviewPage() {
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex albums</div>
-                {/* ⬇️ Новые кнопки справа */}
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexAlbums}>Matching YM</button>
@@ -259,7 +258,12 @@ export default function OverviewPage() {
 
             {/* Lidarr albums */}
             <div className="panel p-4">
-              <div className="section-title mb-2">Latest Lidarr albums</div>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="section-title">Latest Lidarr albums</div>
+                <div className="ml-auto flex items-center gap-2">
+                  <button className="btn btn-outline" onClick={pullFromLidarrAlbums}>Pull from Lidarr</button>
+                </div>
+              </div>
               <div className="space-y-1">
                 {(stats?.lidarr?.latestAlbums || []).length === 0 ? (
                     <div className="text-sm text-gray-500">No data</div>
@@ -282,10 +286,12 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.lidarrUrl
-                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
                                     : <span className="link-chip placeholder">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
                               </div>
                             </td>
@@ -304,7 +310,6 @@ export default function OverviewPage() {
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex artists</div>
-                {/* ⬇️ Новые кнопки справа */}
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexArtists}>Matching YM</button>
@@ -348,7 +353,12 @@ export default function OverviewPage() {
 
             {/* Lidarr artists */}
             <div className="panel p-4">
-              <div className="section-title mb-2">Latest Lidarr artists</div>
+              <div className="mb-2 flex items-center gap-3">
+                <div className="section-title">Latest Lidarr artists</div>
+                <div className="ml-auto flex items-center gap-2">
+                  <button className="btn btn-outline" onClick={pullFromLidarrArtists}>Pull from Lidarr</button>
+                </div>
+              </div>
               <div className="space-y-1">
                 {(stats?.lidarr?.latestArtists || []).length === 0 ? (
                     <div className="text-sm text-gray-500">No data</div>
@@ -369,10 +379,12 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.lidarrUrl
-                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
                                     : <span className="link-chip placeholder">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
                               </div>
                             </td>
@@ -389,7 +401,7 @@ export default function OverviewPage() {
           <section className="panel p-4 space-y-3">
             <div className="text-sm text-gray-500">Custom artists matched</div>
             <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
-            <ProgressBar value={cArtistPct} color="accent" />
+            <ProgressBar value={cArtistPct} color="accent"/>
             <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
           </section>
 
