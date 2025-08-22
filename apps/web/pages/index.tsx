@@ -28,7 +28,7 @@ type RunShort = {
   startedAt: string;
   finishedAt: string | null;
   message?: string | null;
-  kind?: 'yandex' | 'lidarr' | string | null;
+  kind?: string | null;
 };
 
 type ApiRunsResp = { ok?: boolean; runs?: RunShort[] };
@@ -54,8 +54,13 @@ function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?:
 async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
   let lastErr: any;
   for (const p of paths) {
-    try { return await api<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined }); }
-    catch (e) { lastErr = e; }
+    try {
+      return await api<T>(p, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) { lastErr = e; }
   }
   throw lastErr || new Error('All endpoints failed');
 }
@@ -90,7 +95,6 @@ export default function OverviewPage() {
     return () => clearInterval(t);
   }, [load, loadRuns]);
 
-  // counters
   const cA = { total: toNum(stats?.custom?.artists?.total ?? 0), matched: toNum(stats?.custom?.artists?.matched ?? 0), unmatched: toNum(stats?.custom?.artists?.unmatched ?? 0) };
   const yA = { total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0), matched: toNum(stats?.yandex?.artists?.matched ?? stats?.artists?.found ?? 0),
     unmatched: toNum(stats?.yandex?.artists?.unmatched ?? ((stats?.artists?.total != null && stats?.artists?.found != null) ? Number(stats.artists.total) - Number(stats.artists.found) : 0)) };
@@ -105,25 +109,77 @@ export default function OverviewPage() {
   const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
   const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
 
-  // actions
-  async function resyncCacheLidarrArtists() { setMsg('Resyncing Lidarr cache (artists)…'); try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); } catch(e:any){ setMsg(`Lidarr resync error: ${e?.message||String(e)}`);} }
+  async function resyncCacheLidarrArtists() {
+    setMsg('Resyncing Lidarr cache (artists)…');
+    try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); }
+    catch(e:any){ setMsg(`Lidarr resync error: ${e?.message||String(e)}`); }
+  }
   async function resyncCacheYandexAlbums() { return pullFromYandexAlbums(); }
-  async function pullFromLidarrArtists() { setMsg('Pull from Lidarr (artists)…'); try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr pull OK'); load(); } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`);} }
-  async function pullFromLidarrAlbums() { return pullFromLidarrArtists(); }
-  async function pullFromYandexArtists() { setMsg('Pull from Yandex (artists)…'); try { await tryPostMany(['/api/sync/yandex/pull','/api/sync/yandex','/api/yandex/pull'],{target:'artists'}); setMsg('Yandex pull OK'); load(); } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`);} }
-  async function pullFromYandexAlbums() { setMsg('Pull from Yandex (albums)…'); try { await tryPostMany(['/api/sync/yandex/pull','/api/sync/yandex','/api/yandex/pull'],{target:'albums'}); setMsg('Yandex pull OK'); load(); } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`);} }
-  async function matchYandexArtists() { setMsg('Matching Yandex artists…'); try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'artists'} as any}); setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
-  async function matchYandexAlbums()  { setMsg('Matching Yandex albums…');  try { await api('/api/sync/match',{method:'POST',headers:{'Content-Type':'application/json'},body:{force:true,target:'albums'} as any});  setMsg('Match started'); } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`);} }
-  async function runSyncYandex() { setMsg('Starting Yandex sync…'); try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex','/api/sync/yandex/pull','/api/yandex/pull']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Yandex sync started (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Sync failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`);} }
-  async function pushToLidarr()   { setMsg('Pushing to Lidarr…');      try { const r=await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/lidarr','/api/lidarr']); const ok=r?.ok===true||typeof r?.runId==='number'; if(ok){ setMsg(`Pushed to Lidarr (run ${r?.runId ?? 'n/a'})`); setTimeout(loadRuns,400);} else { setMsg(`Push failed${r?.error?`: ${r.error}`:''}`);} } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`);} }
 
-  // Custom panel actions
+  async function pullFromLidarrArtists() {
+    setMsg('Pull from Lidarr (artists)…');
+    try {
+      await tryPostMany(['api/sync/lidarr/pull'], { target: 'artists' });
+      setMsg('Lidarr pull (artists) started'); setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`); }
+  }
+  async function pullFromLidarrAlbums() {
+    setMsg('Pull from Lidarr (albums)…');
+    try {
+      await tryPostMany(['api/sync/lidarr/pull'], { target: 'albums' });
+      setMsg('Lidarr pull (albums) started'); setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`); }
+  }
+
+  async function pullFromYandexArtists() {
+    setMsg('Pull from Yandex (all)…');
+    try {
+      await tryPostMany(['api/sync/yandex/pull']);
+      setMsg('Yandex pull started'); setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`); }
+  }
+  async function pullFromYandexAlbums() { return pullFromYandexArtists(); }
+
+  async function matchYandexArtists() {
+    setMsg('Matching Yandex artists…');
+    try {
+      await tryPostMany(['api/sync/yandex/match'], { force: true, target: 'artists' });
+      setMsg('Match started'); setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
+  }
+  async function matchYandexAlbums()  {
+    setMsg('Matching Yandex albums…');
+    try {
+      await tryPostMany(['api/sync/yandex/match'], { force: true, target: 'albums' });
+      setMsg('Match started'); setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
+  }
+
+  async function pushYandexToLidarr(target: 'artists'|'albums'|'both') {
+    setMsg(`Pushing Yandex ${target} to Lidarr…`);
+    try {
+      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['api/sync/yandex/push'], { target });
+      const ok = r?.ok===true || typeof r?.runId==='number';
+      setMsg(ok ? `Push started (run ${r?.runId ?? 'n/a'})` : `Push failed${r?.error?`: ${r.error}`:''}`);
+      setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`); }
+  }
+
+  async function runSyncYandex() {
+    setMsg('Starting Yandex pull-all…');
+    try {
+      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['api/sync/yandex/pull-all']);
+      const ok = r?.ok===true || typeof r?.runId==='number';
+      setMsg(ok ? `Yandex pull started (run ${r?.runId ?? 'n/a'})` : `Sync failed${r?.error?`: ${r.error}`:''}`);
+      setTimeout(loadRuns, 400);
+    } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`); }
+  }
+
   async function matchCustomAll() {
     setMsg('Matching Custom artists…');
     try {
-      await api('/api/custom-artists/match-all', { method: 'POST' });
-      setMsg('Custom match started');
-      setTimeout(loadRuns, 400);
+      await tryPostMany(['api/sync/custom/match'], { force: false });
+      setMsg('Custom match started'); setTimeout(loadRuns, 400);
     } catch (e: any) {
       setMsg(`Custom match error: ${e?.message || String(e)}`);
     }
@@ -131,13 +187,8 @@ export default function OverviewPage() {
   async function pushCustomToLidarr() {
     setMsg('Pushing (custom) to Lidarr…');
     try {
-      await api('/api/sync/lidarr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: 'artists', source: 'custom' }),
-      });
-      setMsg('Push started');
-      setTimeout(loadRuns, 400);
+      await tryPostMany(['api/sync/custom/push']);
+      setMsg('Push started'); setTimeout(loadRuns, 400);
     } catch (e: any) {
       setMsg(`Push error: ${e?.message || String(e)}`);
     }
@@ -146,7 +197,7 @@ export default function OverviewPage() {
   async function stopRun(id: number) {
     try {
       setStoppingId(id);
-      await api(`/api/sync/runs/${id}/stop`, { method: 'POST' });
+      await tryPostMany([`/api/runs/${id}/stop`, `/runs/${id}/stop`, `/api/sync/runs/${id}/stop`]);
       setMsg(`Stop requested for run #${id}`);
       await loadRuns();
     } catch (e: any) {
@@ -194,11 +245,9 @@ export default function OverviewPage() {
                             <td className="py-1 pr-2">{r.name || '—'}</td>
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
-                                {/* NEW: Lidarr chip (conditionally visible) */}
                                 {lidarrHref
                                     ? <a href={lidarrHref} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr">Lidarr</a>
                                     : <span className="link-chip placeholder">Lidarr</span>}
-                                {/* MusicBrainz chip */}
                                 {r.mbUrl
                                     ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
@@ -222,7 +271,7 @@ export default function OverviewPage() {
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexAlbums}>Matching YM</button>
-                  <button className="btn btn-outline" onClick={pushToLidarr}>Push to Lidarr</button>
+                  <button className="btn btn-outline" onClick={() => pushYandexToLidarr('albums')}>Push to Lidarr</button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -319,7 +368,7 @@ export default function OverviewPage() {
                 <div className="ml-auto flex items-center gap-2">
                   <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from YM</button>
                   <button className="btn btn-outline" onClick={matchYandexArtists}>Matching YM</button>
-                  <button className="btn btn-outline" onClick={pushToLidarr}>Push to Lidarr</button>
+                  <button className="btn btn-outline" onClick={() => pushYandexToLidarr('artists')}>Push to Lidarr</button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -489,6 +538,7 @@ export default function OverviewPage() {
             )}
           </section>
 
+          {/* Global actions */}
           <section className="panel p-4">
             <div className="flex flex-wrap items-center gap-2">
               <button className="btn btn-outline" onClick={load} disabled={loading}>
@@ -498,12 +548,11 @@ export default function OverviewPage() {
               <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
               <button className="btn btn-outline" onClick={pullFromLidarrArtists}>Pull from Lidarr Artists</button>
               <button className="btn btn-outline" onClick={pullFromLidarrAlbums}>Pull from Lidarr Albums</button>
-              <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from Yandex Artists</button>
-              <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from Yandex Albums</button>
+              <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from Yandex (All)</button>
               <button className="btn btn-outline" onClick={matchYandexArtists}>Match Yandex Artists</button>
               <button className="btn btn-outline" onClick={matchYandexAlbums}>Match Yandex Albums</button>
-              <button className="btn btn-primary" onClick={runSyncYandex}>Sync Yandex</button>
-              <button className="btn btn-primary" onClick={pushToLidarr}>Push to Lidarr</button>
+              <button className="btn btn-primary" onClick={runSyncYandex}>Pull-all (Yandex)</button>
+              <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>Push Yandex (Both)</button>
             </div>
           </section>
 
