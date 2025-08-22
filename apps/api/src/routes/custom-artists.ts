@@ -1,7 +1,5 @@
-// apps/api/src/routes/custom-artists.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
-// ⬇️ новый импорт
 import { startRun } from '../log';
 import { runCustomArtistsMatch } from '../workers';
 import type { Prisma } from '@prisma/client';
@@ -25,12 +23,7 @@ r.get('/', async (req, res) => {
     const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
 
     const where: Prisma.CustomArtistWhereInput = q
-        ? {
-            OR: [
-                { nkey: { contains: q.toLowerCase() } },
-                { mbid: { contains: q } },
-            ],
-        }
+        ? { OR: [{ nkey: { contains: q.toLowerCase() } }, { mbid: { contains: q } }] }
         : {};
 
     let orderBy: Prisma.CustomArtistOrderByWithRelationInput[] = [];
@@ -48,19 +41,49 @@ r.get('/', async (req, res) => {
         }),
     ]);
 
+    // --- NEW: наличие в Lidarr по MBID + опциональный прямой URL
+    const mbids = items.map(a => a.mbid).filter((x): x is string => !!x);
+    let lidarrSet = new Set<string>();
+    const lidarrIdByMbid = new Map<string, number>();
+
+    if (mbids.length) {
+        const rows = await prisma.lidarrArtist.findMany({
+            where: { mbid: { in: mbids } },
+            select: { id: true, mbid: true },
+        });
+        for (const row of rows) {
+            if (row.mbid) {
+                lidarrSet.add(row.mbid);
+                lidarrIdByMbid.set(row.mbid, row.id);
+            }
+        }
+    }
+
+    // Если задан base URL Лидара в настройках — сформируем прямую ссылку
+    const setting = await prisma.setting.findUnique({ where: { id: 1 } });
+    const lidarrBase = (setting?.lidarrUrl || '').replace(/\/+$/, ''); // обрежем хвостовые /
+
     res.json({
         page,
         pageSize,
         total,
-        items: items.map(a => ({
-            id: a.id,
-            name: a.name,
-            mbid: a.mbid,
-            matchedAt: a.matchedAt,
-            createdAt: a.createdAt,
-            updatedAt: a.updatedAt,
-            mbUrl: a.mbid ? `https://musicbrainz.org/artist/${a.mbid}` : null,
-        })),
+        items: items.map((a) => {
+            const has = !!(a.mbid && lidarrSet.has(a.mbid));
+            const lidarrId = a.mbid ? lidarrIdByMbid.get(a.mbid) : undefined;
+            const lidarrUrl = has && lidarrBase && lidarrId ? `${lidarrBase}/artist/${lidarrId}` : null;
+
+            return {
+                id: a.id,
+                name: a.name,
+                mbid: a.mbid,
+                matchedAt: a.matchedAt,
+                createdAt: a.createdAt,
+                updatedAt: a.updatedAt,
+                mbUrl: a.mbid ? `https://musicbrainz.org/artist/${a.mbid}` : null,
+                hasLidarr: has,
+                lidarrUrl,
+            };
+        }),
     });
 });
 
@@ -117,7 +140,7 @@ r.delete('/:id', async (req, res) => {
 
 /** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ---------- */
 
-// POST /api/custom-artists/:id/match  — матчинг одного артиста (асинхронно, с логами)
+// POST /api/custom-artists/:id/match
 r.post('/:id/match', async (req, res) => {
     const id = parseInt(String(req.params.id), 10);
     if (!id) return res.status(400).json({ error: 'Bad id' });
@@ -129,7 +152,7 @@ r.post('/:id/match', async (req, res) => {
     res.json({ started: true, runId: run.id });
 });
 
-// POST /api/custom-artists/match-all  — матчинг всех (асинхронно, с логами)
+// POST /api/custom-artists/match-all
 r.post('/match-all', async (req, res) => {
     const force =
         req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';

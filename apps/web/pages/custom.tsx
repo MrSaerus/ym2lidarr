@@ -5,43 +5,57 @@ import { Table, Th, Td } from '../components/Table';
 import { customArtists } from '../lib/api';
 
 type SortDir = 'asc' | 'desc';
-
 type SortField = 'name' | 'matched' | 'created';
+type Item = Awaited<ReturnType<typeof customArtists.list>>['items'][number];
 
-/* ==== Fixed link slot (MusicBrainz only) ==== */
-const LINKS_COL_WIDTH = 'w-[7rem]';
+/* ==== Fixed link slots (Lidarr | MusicBrainz) ==== */
+const LINKS_COL_WIDTH = 'w-[14rem]';
 
-function LinkChip({
+function LinkSlot({
                       href,
                       label,
                       className,
                   }: {
     href?: string | null;
-    label: 'MusicBrainz';
+    label: 'Lidarr' | 'MusicBrainz';
     className?: string;
 }) {
     if (!href) {
         return (
-            <span className={`link-chip link-chip--mb invisible select-none ${className || ''}`} aria-hidden="true">
+            <span className={`link-chip ${className ?? ''} invisible select-none`} aria-hidden="true">
         {label}
       </span>
         );
     }
     return (
-        <a href={href} target="_blank" rel="noreferrer" className={`link-chip link-chip--mb ${className || ''}`}>
+        <a href={href} target="_blank" rel="noreferrer" className={`link-chip ${className ?? ''}`}>
             {label}
         </a>
     );
 }
 
-function LinksFixedMBRow({ mbUrl }: { mbUrl?: string | null }) {
+function LinksFixedRow({
+                           name,
+                           mbUrl,
+                           hasLidarr,
+                           lidarrUrl,
+                       }: {
+    name: string;
+    mbUrl?: string | null;
+    hasLidarr?: boolean;
+    lidarrUrl?: string | null;
+}) {
+    // если прямой URL из API отсутствует — ведём на внутреннюю страницу с поиском
+    const hrefLidarr = hasLidarr ? (lidarrUrl || `/lidarr?q=${encodeURIComponent(name)}`) : undefined;
+
     return (
-        <div className={`grid grid-cols-1 justify-items-center ${LINKS_COL_WIDTH}`}>
-            <LinkChip href={mbUrl} label="MusicBrainz" />
+        <div className={`grid grid-cols-2 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
+            <LinkSlot href={hrefLidarr} label="Lidarr" className="link-chip--lidarr" />
+            <LinkSlot href={mbUrl || undefined} label="MusicBrainz" className="link-chip--mb" />
         </div>
     );
 }
-/* ============================================ */
+/* ================================================ */
 
 export default function CustomArtistsPage() {
     const [loading, setLoading] = useState(false);
@@ -249,14 +263,17 @@ export default function CustomArtistsPage() {
                                     <div className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
                                 </Td>
                             </tr>
-                        ) : items.map(a => (
+                        ) : items.map((a: Item & { hasLidarr?: boolean; lidarrUrl?: string | null }) => (
                             <tr key={a.id}>
                                 <Td>{a.name}</Td>
                                 <Td>{a.mbid ? 'Yes' : 'No'}</Td>
                                 <Td>{a.createdAt ? new Date(a.createdAt).toLocaleString() : '-'}</Td>
                                 <Td className="text-center">
-                                    <LinksFixedMBRow
+                                    <LinksFixedRow
+                                        name={a.name}
                                         mbUrl={a.mbid ? `https://musicbrainz.org/artist/${a.mbid}` : undefined}
+                                        hasLidarr={a.hasLidarr}
+                                        lidarrUrl={a.lidarrUrl}
                                     />
                                 </Td>
                                 <Td className="text-right">

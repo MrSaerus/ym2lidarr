@@ -53,18 +53,22 @@
 
     .btn {
         @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm;
-        border: 1px solid var(--panel-border);
+        border: 1px solid rgba(42, 49, 85, 1);
         background: transparent;
     }
-    .btn:hover { @apply opacity-90; }
+    .btn:hover {
+        @apply opacity-90;
+        color: rgba(251, 233, 158, 1);
+        border: 1px solid rgba(81, 85, 42, 1);
+    }
     .btn-primary {
         background: var(--primary);
-        border-color: var(--primary-600);
+        border-color: rgba(44, 54, 91, 1);
         color: white;
     }
     .btn-outline {
         @apply bg-transparent;
-        color: var(--fg);
+        color: rgb(221, 219, 211);
     }
 
     .badge {

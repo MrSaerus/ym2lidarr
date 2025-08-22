@@ -10,7 +10,7 @@ type LatestYA = { id: number; title: string; artistName: string; year?: number |
 type LatestLA = { id: number; title: string; artistName: string; added: string | null; lidarrUrl?: string; mbUrl?: string; };
 type LatestYArtist = { id: number; name: string; yandexUrl?: string; mbUrl?: string; };
 type LatestLArtist = { id: number; name: string; added?: string | null; lidarrUrl?: string; mbUrl?: string; };
-type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; };
+type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; hasLidarr?: boolean; lidarrUrl?: string | null; };
 
 type StatsResp = {
   yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; };
@@ -146,7 +146,6 @@ export default function OverviewPage() {
   async function stopRun(id: number) {
     try {
       setStoppingId(id);
-      // ⬇️ ВАЖНО: стоп находится в /api/sync
       await api(`/api/sync/runs/${id}/stop`, { method: 'POST' });
       setMsg(`Stop requested for run #${id}`);
       await loadRuns();
@@ -187,20 +186,27 @@ export default function OverviewPage() {
                     </tr>
                     </thead>
                     <tbody>
-                    {(stats?.custom?.latestArtists || []).slice(0, 5).map((r, i) => (
-                        <tr key={`c-${r.id}-${i}`} className="border-t border-white/5">
-                          <td className="py-1 pr-2">{i + 1}</td>
-                          <td className="py-1 pr-2">{r.name || '—'}</td>
-                          <td className="py-1 links-col-2">
-                            <div className="link-tray link-tray-2 link-tray-right">
-                              <span className="link-chip placeholder">—</span>
-                              {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip placeholder">MusicBrainz</span>}
-                            </div>
-                          </td>
-                        </tr>
-                    ))}
+                    {(stats?.custom?.latestArtists || []).slice(0, 5).map((r, i) => {
+                      const lidarrHref = r.hasLidarr ? (r.lidarrUrl || `/lidarr?q=${encodeURIComponent(r.name)}`) : undefined;
+                      return (
+                          <tr key={`c-${r.id}-${i}`} className="border-t border-white/5">
+                            <td className="py-1 pr-2">{i + 1}</td>
+                            <td className="py-1 pr-2">{r.name || '—'}</td>
+                            <td className="py-1 links-col-2">
+                              <div className="link-tray link-tray-2 link-tray-right">
+                                {/* NEW: Lidarr chip (conditionally visible) */}
+                                {lidarrHref
+                                    ? <a href={lidarrHref} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr">Lidarr</a>
+                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                {/* MusicBrainz chip */}
+                                {r.mbUrl
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                              </div>
+                            </td>
+                          </tr>
+                      );
+                    })}
                     </tbody>
                   </table>
               )}
@@ -502,15 +508,15 @@ export default function OverviewPage() {
           </section>
 
           <style jsx>{`
-            :root { --chip-w: 96px; --chip-gap: 6px; }
-            .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-            .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
-            .link-tray-right { justify-content: flex-end; }
-            .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-            .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
-            .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
-            .link-margin-right-5 { margin-right: 5px; }
-          `}</style>
+          :root { --chip-w: 96px; --chip-gap: 6px; }
+          .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+          .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
+          .link-tray-right { justify-content: flex-end; }
+          .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
+          .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
+          .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
+          .link-margin-right-5 { margin-right: 5px; }
+        `}</style>
         </main>
       </>
   );

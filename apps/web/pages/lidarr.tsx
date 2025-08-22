@@ -613,7 +613,7 @@ export default function LidarrPage() {
             <main className="mx-auto max-w-6xl px-4 py-4">
                 <h1 className="h1">Lidarr</h1>
 
-                <div className="mb-3 flex gap-2 border-b border-gray-200">
+                <div className="mb-3 flex gap-2">
                     <button
                         className={`tab ${tab === 'artists' ? 'tab--active' : ''}`}
                         onClick={() => setTab('artists')}
