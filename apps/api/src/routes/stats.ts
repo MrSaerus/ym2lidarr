@@ -117,7 +117,7 @@ r.get('/', async (_req, res) => {
             title: x.title || '',
             artistName: x.artistName || '',
             added: x.added ? x.added.toISOString() : null,
-            lidarrUrl: lidarrBase ? `${lidarrBase}/album/${x.id}` : undefined,
+            lidarrUrl: lidarrBase ? `${lidarrBase}/album/${x.mbid}` : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/release-group/${x.mbid}` : undefined,
         }));
 
@@ -132,7 +132,7 @@ r.get('/', async (_req, res) => {
             id: x.id,
             name: x.name || '',
             added: x.added ? x.added.toISOString() : null,
-            lidarrUrl: lidarrBase ? `${lidarrBase}/artist/${x.id}` : undefined,
+            lidarrUrl: lidarrBase ? `${lidarrBase}/artist/${x.mbid}` : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
         }));
 
