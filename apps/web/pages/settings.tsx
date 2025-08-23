@@ -1,3 +1,4 @@
+// apps/web/pages/settings.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
@@ -9,11 +10,16 @@ type Settings = {
   yandexToken?: string | null;
   pyproxyUrl?: string | null;
 
-  // Расписания + таргеты (НОВОЕ)
+  // Расписания + таргеты + enable
   cronYandexPull?: string | null;
+  enableCronYandexPull?: boolean | null;
+
   cronYandexMatch?: string | null;
-  cronYandexPush?: string | null;
+  enableCronYandexMatch?: boolean | null;
   yandexMatchTarget?: 'both'|'artists'|'albums';
+
+  cronYandexPush?: string | null;
+  enableCronYandexPush?: boolean | null;
   yandexPushTarget?: 'both'|'artists'|'albums';
 
   // Lidarr
@@ -21,22 +27,26 @@ type Settings = {
   lidarrApiKey?: string | null;
   lidarrAllowNoMetadata?: boolean | null;
 
-  // Lidarr pull (НОВОЕ)
+  // Lidarr pull + enable
   cronLidarrPull?: string | null;
+  enableCronLidarrPull?: boolean | null;
   lidarrPullTarget?: 'both'|'artists'|'albums';
 
-  // Параметр для ручного Push (оставляем)
+  // Manual push
   pushTarget: 'artists' | 'albums';
 
-  // Lidarr defaults
+  // Defaults
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
   monitor?: string | null;
 
-  // Custom (НОВОЕ)
+  // Custom + enable
   cronCustomMatch?: string | null;
+  enableCronCustomMatch?: boolean | null;
+
   cronCustomPush?: string | null;
+  enableCronCustomPush?: boolean | null;
 
   // Backup
   backupEnabled: boolean;
@@ -51,48 +61,51 @@ type Settings = {
   webhookUrl?: string | null;
 };
 
+
 function withDefaults(x: Partial<Settings> | null | undefined): Settings {
   const s = x || {};
   return {
-    // Yandex
     yandexDriver: (s.yandexDriver as any) || 'pyproxy',
     yandexToken: s.yandexToken ?? '',
     pyproxyUrl: s.pyproxyUrl ?? 'http://pyproxy:8080',
+
     cronYandexPull:  s.cronYandexPull  ?? '0 */6 * * *',
+    enableCronYandexPull: s.enableCronYandexPull ?? true,
+
     cronYandexMatch: s.cronYandexMatch ?? '10 */6 * * *',
-    cronYandexPush:  s.cronYandexPush  ?? '45 */6 * * *',
+    enableCronYandexMatch: s.enableCronYandexMatch ?? false,
     yandexMatchTarget: (s.yandexMatchTarget as any) || 'both',
+
+    cronYandexPush:  s.cronYandexPush  ?? '45 */6 * * *',
+    enableCronYandexPush: s.enableCronYandexPush ?? false,
     yandexPushTarget:  (s.yandexPushTarget  as any) || 'both',
 
-    // Lidarr
     lidarrUrl: s.lidarrUrl ?? 'http://localhost:8686',
     lidarrApiKey: s.lidarrApiKey ?? '',
     lidarrAllowNoMetadata: !!s.lidarrAllowNoMetadata,
 
-    // Lidarr pull
     cronLidarrPull:  s.cronLidarrPull ?? '35 */6 * * *',
+    enableCronLidarrPull: s.enableCronLidarrPull ?? true,
     lidarrPullTarget: (s.lidarrPullTarget as any) || 'both',
 
-    // Ручной push по кнопке
     pushTarget: (s.pushTarget as any) || 'artists',
 
-    // Дефолты добавления
     rootFolderPath: s.rootFolderPath ?? '/music',
     qualityProfileId: s.qualityProfileId ?? 1,
     metadataProfileId: s.metadataProfileId ?? 1,
     monitor: s.monitor ?? 'all',
 
-    // Custom
     cronCustomMatch: s.cronCustomMatch ?? '0 0 * * *',
-    cronCustomPush:  s.cronCustomPush  ?? '0 12 * * *',
+    enableCronCustomMatch: s.enableCronCustomMatch ?? false,
 
-    // Backup
+    cronCustomPush:  s.cronCustomPush  ?? '0 12 * * *',
+    enableCronCustomPush: s.enableCronCustomPush ?? false,
+
     backupEnabled: !!s.backupEnabled,
     backupCron: s.backupCron ?? '0 3 * * *',
     backupDir: s.backupDir ?? '/app/data/backups',
     backupRetention: s.backupRetention ?? 14,
 
-    // Уведомления
     notifyType: (s.notifyType as any) || 'disabled',
     telegramBot: s.telegramBot ?? '',
     telegramChatId: s.telegramChatId ?? '',
@@ -193,28 +206,42 @@ export default function SettingsPage() {
             </FormRow>
 
             <FormRow label="Yandex pull cron" help={<><code>0 */6 * * *</code> — каждые 6 часов</>}>
-              <input className="input" value={settings.cronYandexPull || ''} onChange={(e) => setSettings({ ...settings, cronYandexPull: e.target.value })} placeholder="0 */6 * * *" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-2" value={settings.cronYandexPull || ''} onChange={(e) => setSettings({ ...settings, cronYandexPull: e.target.value })} placeholder="0 */6 * * *" />
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronYandexPull} onChange={(e) => setSettings({ ...settings, enableCronYandexPull: e.target.checked })}/>
+                  Enabled
+                </label>
+              </div>
             </FormRow>
 
             <FormRow label="Yandex match cron" help={<><code>10 */6 * * *</code> — каждые 6 часов</>}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input className="input" value={settings.cronYandexMatch || ''} onChange={(e) => setSettings({ ...settings, cronYandexMatch: e.target.value })} placeholder="10 */6 * * *" />
-                <select className="select" value={settings.yandexMatchTarget || 'both'} onChange={(e) => setSettings({ ...settings, yandexMatchTarget: e.target.value as any })}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-1" value={settings.cronYandexMatch || ''} onChange={(e) => setSettings({ ...settings, cronYandexMatch: e.target.value })} placeholder="10 */6 * * *" />
+                <select className="select md:col-span-1" value={settings.yandexMatchTarget || 'both'} onChange={(e) => setSettings({ ...settings, yandexMatchTarget: e.target.value as any })}>
                   <option value="both">both</option>
                   <option value="artists">artists</option>
                   <option value="albums">albums</option>
                 </select>
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronYandexMatch} onChange={(e) => setSettings({ ...settings, enableCronYandexMatch: e.target.checked })}/>
+                  Enabled
+                </label>
               </div>
             </FormRow>
 
             <FormRow label="Yandex push cron" help={<><code>45 */6 * * *</code> — каждые 6 часов</>}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input className="input" value={settings.cronYandexPush || ''} onChange={(e) => setSettings({ ...settings, cronYandexPush: e.target.value })} placeholder="45 */6 * * *" />
-                <select className="select" value={settings.yandexPushTarget || 'both'} onChange={(e) => setSettings({ ...settings, yandexPushTarget: e.target.value as any })}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-1" value={settings.cronYandexPush || ''} onChange={(e) => setSettings({ ...settings, cronYandexPush: e.target.value })} placeholder="45 */6 * * *" />
+                <select className="select md:col-span-1" value={settings.yandexPushTarget || 'both'} onChange={(e) => setSettings({ ...settings, yandexPushTarget: e.target.value as any })}>
                   <option value="both">both</option>
                   <option value="artists">artists</option>
                   <option value="albums">albums</option>
                 </select>
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronYandexPush} onChange={(e) => setSettings({ ...settings, enableCronYandexPush: e.target.checked })}/>
+                  Enabled
+                </label>
               </div>
             </FormRow>
 
@@ -241,13 +268,17 @@ export default function SettingsPage() {
             </FormRow>
 
             <FormRow label="Lidarr pull cron" help={<><code>35 */6 * * *</code> — каждые 6 часов</>}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input className="input" value={settings.cronLidarrPull || ''} onChange={(e) => setSettings({ ...settings, cronLidarrPull: e.target.value })} placeholder="35 */6 * * *" />
-                <select className="select" value={settings.lidarrPullTarget || 'both'} onChange={(e) => setSettings({ ...settings, lidarrPullTarget: e.target.value as any })}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-1" value={settings.cronLidarrPull || ''} onChange={(e) => setSettings({ ...settings, cronLidarrPull: e.target.value })} placeholder="35 */6 * * *" />
+                <select className="select md:col-span-1" value={settings.lidarrPullTarget || 'both'} onChange={(e) => setSettings({ ...settings, lidarrPullTarget: e.target.value as any })}>
                   <option value="both">both</option>
                   <option value="artists">artists</option>
                   <option value="albums">albums</option>
                 </select>
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronLidarrPull} onChange={(e) => setSettings({ ...settings, enableCronLidarrPull: e.target.checked })}/>
+                  Enabled
+                </label>
               </div>
             </FormRow>
 
@@ -315,10 +346,22 @@ export default function SettingsPage() {
           <section className="panel p-4 space-y-3">
             <div className="section-title">Custom</div>
             <FormRow label="Custom match cron"  help={<><code>0 0 * * *</code> — Раз в день в 00:00 </>}>
-              <input className="input" value={settings.cronCustomMatch || ''} onChange={(e) => setSettings({ ...settings, cronCustomMatch: e.target.value })} placeholder="0 0 * * *" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-2" value={settings.cronCustomMatch || ''} onChange={(e) => setSettings({ ...settings, cronCustomMatch: e.target.value })} placeholder="0 0 * * *" />
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronCustomMatch} onChange={(e) => setSettings({ ...settings, enableCronCustomMatch: e.target.checked })}/>
+                  Enabled
+                </label>
+              </div>
             </FormRow>
             <FormRow label="Custom push cron"  help={<><code>0 12 * * *</code> — Раз в день в 12:00 </>}>
-              <input className="input" value={settings.cronCustomPush || ''} onChange={(e) => setSettings({ ...settings, cronCustomPush: e.target.value })} placeholder="0 12 * * *" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input className="input md:col-span-2" value={settings.cronCustomPush || ''} onChange={(e) => setSettings({ ...settings, cronCustomPush: e.target.value })} placeholder="0 12 * * *" />
+                <label className="flex items-center gap-2 text-sm text-gray-400">
+                  <input type="checkbox" checked={!!settings.enableCronCustomPush} onChange={(e) => setSettings({ ...settings, enableCronCustomPush: e.target.checked })}/>
+                  Enabled
+                </label>
+              </div>
             </FormRow>
           </section>
 

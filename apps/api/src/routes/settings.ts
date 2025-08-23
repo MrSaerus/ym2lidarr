@@ -2,7 +2,7 @@
 import { Router } from 'express';
 
 import { prisma } from '../prisma';
-import { reloadJobs } from '../scheduler';
+import { reloadJobs, getCronStatuses } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
 
@@ -15,10 +15,13 @@ const ALLOWED_FIELDS = new Set([
   'yandexDriver',
   'pyproxyUrl',
 
-  // НОВОЕ: расписание по частям
+  // расписания и флаги
   'cronYandexPull',
+  'enableCronYandexPull',
   'cronYandexMatch',
+  'enableCronYandexMatch',
   'cronYandexPush',
+  'enableCronYandexPush',
   'yandexMatchTarget',
   'yandexPushTarget',
 
@@ -28,15 +31,18 @@ const ALLOWED_FIELDS = new Set([
   'pushTarget',
   'lidarrAllowNoMetadata',
 
-  // НОВОЕ: lidarr pull
+  // lidarr pull
   'cronLidarrPull',
+  'enableCronLidarrPull',
   'lidarrPullTarget',
 
   // custom
   'cronCustomMatch',
+  'enableCronCustomMatch',
   'cronCustomPush',
+  'enableCronCustomPush',
 
-  // СТАРОЕ (совместимость — можно заполнять, но планировщик уже не использует)
+  // СТАРОЕ (совместимость)
   'cronYandex',
   'cronLidarr',
   'yandexCron',
@@ -67,6 +73,7 @@ const ALLOWED_FIELDS = new Set([
   'webhookUrl',
   'webhookSecret',
 ]);
+
 
 
 function pickSettings(input: any) {
@@ -102,12 +109,18 @@ function pickSettings(input: any) {
     const v = String(out.mode || '').toLowerCase();
     out.mode = v === 'albums' ? 'albums' : 'artists';
   }
-  if ('lidarrAllowNoMetadata' in out) {
-    out.lidarrAllowNoMetadata = !!out.lidarrAllowNoMetadata;
-  }
-  if ('backupEnabled' in out) {
-    out.backupEnabled = !!out.backupEnabled;
-  }
+  // bools
+  [
+    'lidarrAllowNoMetadata',
+    'backupEnabled',
+    'enableCronYandexPull',
+    'enableCronYandexMatch',
+    'enableCronYandexPush',
+    'enableCronCustomMatch',
+    'enableCronCustomPush',
+    'enableCronLidarrPull',
+  ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
+
   if ('backupRetention' in out && out.backupRetention != null) {
     const n = parseInt(String(out.backupRetention), 10);
     if (!Number.isFinite(n) || n < 1) delete out.backupRetention;
@@ -208,6 +221,16 @@ async function saveSettingsHandler(req: any, res: any) {
 r.get('/', async (_req, res) => {
   const s: any = await prisma.setting.findFirst({ where: { id: 1 } });
   res.json(s || {});
+});
+
+// GET /api/settings/scheduler
+r.get('/scheduler', async (_req, res) => {
+  try {
+    const jobs = await getCronStatuses();
+    res.json({ ok: true, jobs });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
 });
 
 // POST /api/settings/test/yandex  { token?: string }

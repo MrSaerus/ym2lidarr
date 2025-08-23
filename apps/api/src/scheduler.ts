@@ -1,6 +1,8 @@
+// apps/api/src/scheduler.ts
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
+import cronParserDefault from 'cron-parser';
 
 import { prisma } from './prisma';
 import {
@@ -11,7 +13,8 @@ import {
   runYandexPush,
   runLidarrPullEx,
 } from './workers';
-
+const cronParse: (expr: string, opts?: any) => { next: () => Date } =
+    (cronParserDefault as any).default ?? (cronParserDefault as any);
 /* ====================== JOBS REGISTRY ====================== */
 
 let jobs: {
@@ -98,6 +101,7 @@ export async function initScheduler() { await reloadJobs(); }
 
 /** true, если есть активный ран, kind начинается с любого из префиксов */
 async function hasActiveRunWithPrefixes(prefixes: string[]): Promise<boolean> {
+  if (!prefixes.length) return false;
   const or = prefixes.map((p) => ({ kind: { startsWith: p } as any }));
   const r = await prisma.syncRun.findFirst({ where: { status: 'running', OR: or }, orderBy: { startedAt: 'desc' } });
   return !!r;
@@ -114,7 +118,7 @@ export async function reloadJobs() {
   if (!s) { console.log('[scheduler] no settings'); return; }
 
   /* ---------- CUSTOM: match all ---------- */
-  if (s.cronCustomMatch && cron.validate(s.cronCustomMatch)) {
+  if (s.enableCronCustomMatch && s.cronCustomMatch && cron.validate(s.cronCustomMatch)) {
     jobs.customMatch = cron.schedule(s.cronCustomMatch, async () => {
       if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.match: skip (busy)'); return; }
       try {
@@ -125,7 +129,7 @@ export async function reloadJobs() {
   }
 
   /* ---------- CUSTOM: push all ---------- */
-  if (s.cronCustomPush && cron.validate(s.cronCustomPush)) {
+  if (s.enableCronCustomPush && s.cronCustomPush && cron.validate(s.cronCustomPush)) {
     jobs.customPush = cron.schedule(s.cronCustomPush, async () => {
       if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.push: skip (busy)'); return; }
       try {
@@ -136,7 +140,7 @@ export async function reloadJobs() {
   }
 
   /* ---------- YANDEX: pull all ---------- */
-  if ( s.cronYandexPull && cron.validate(s.cronYandexPull) ) {
+  if ( s.enableCronYandexPull && s.cronYandexPull && cron.validate(s.cronYandexPull) ) {
     jobs.yandexPull = cron.schedule(s.cronYandexPull, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.pull: skip (busy)'); return; }
       try {
@@ -147,7 +151,7 @@ export async function reloadJobs() {
   }
 
   /* ---------- YANDEX: match (artists|albums|both) ---------- */
-  if ( s.cronYandexMatch && cron.validate(s.cronYandexMatch) ) {
+  if ( s.enableCronYandexMatch && s.cronYandexMatch && cron.validate(s.cronYandexMatch) ) {
     const target = (s.yandexMatchTarget as 'artists'|'albums'|'both') || 'both';
     jobs.yandexMatch = cron.schedule(s.cronYandexMatch, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.match: skip (busy)'); return; }
@@ -159,7 +163,7 @@ export async function reloadJobs() {
   }
 
   /* ---------- YANDEX: push (artists|albums|both) ---------- */
-  if ( s.cronYandexPush && cron.validate(s.cronYandexPush) ) {
+  if ( s.enableCronYandexPush && s.cronYandexPush && cron.validate(s.cronYandexPush) ) {
     const target = (s.yandexPushTarget as 'artists'|'albums'|'both') || 'both';
     jobs.yandexPush = cron.schedule(s.cronYandexPush, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.push: skip (busy)'); return; }
@@ -171,7 +175,7 @@ export async function reloadJobs() {
   }
 
   /* ---------- LIDARR: pull (artists|albums|both) ---------- */
-  if ( s.cronLidarrPull && cron.validate(s.cronLidarrPull) ) {
+  if ( s.enableCronLidarrPull && s.cronLidarrPull && cron.validate(s.cronLidarrPull) ) {
     const target = (s.lidarrPullTarget as 'artists'|'albums'|'both') || 'both';
     jobs.lidarrPull = cron.schedule(s.cronLidarrPull, async () => {
       if (await hasActiveRunWithPrefixes(['lidarr.pull.'])) { console.log('[cron] lidarr.pull: skip (busy)'); return; }
@@ -194,3 +198,74 @@ export async function reloadJobs() {
 
   console.log('[scheduler] jobs reloaded');
 }
+
+/* ====================== STATUS (для фронта) ====================== */
+
+type JobKey =
+    | 'yandexPull'
+    | 'yandexMatch'
+    | 'yandexPush'
+    | 'lidarrPull'
+    | 'customMatch'
+    | 'customPush'
+    | 'backup';
+
+const JOB_META: Record<JobKey, { title: string; settingCron: string; enabledFlag?: string; prefixes: string[]; }> = {
+  yandexPull:  { title: 'Yandex: Pull all',       settingCron: 'cronYandexPull',    enabledFlag: 'enableCronYandexPull',  prefixes: ['yandex.pull.', 'yandex.'] },
+  yandexMatch: { title: 'Yandex: Match',          settingCron: 'cronYandexMatch',   enabledFlag: 'enableCronYandexMatch', prefixes: ['yandex.match.', 'yandex.'] },
+  yandexPush:  { title: 'Yandex: Push',           settingCron: 'cronYandexPush',    enabledFlag: 'enableCronYandexPush',  prefixes: ['yandex.push.', 'yandex.'] },
+  lidarrPull:  { title: 'Lidarr: Pull',           settingCron: 'cronLidarrPull',    enabledFlag: 'enableCronLidarrPull',  prefixes: ['lidarr.pull.'] },
+  customMatch: { title: 'Custom: Match MB',       settingCron: 'cronCustomMatch',   enabledFlag: 'enableCronCustomMatch', prefixes: ['custom.match.', 'custom.'] },
+  customPush:  { title: 'Custom: Push to Lidarr', settingCron: 'cronCustomPush',    enabledFlag: 'enableCronCustomPush',  prefixes: ['custom.push.', 'custom.'] },
+  backup:      { title: 'Backup',                 settingCron: 'backupCron',        enabledFlag: 'backupEnabled',         prefixes: [] },
+};
+
+export async function getCronStatuses() {
+  const s = await prisma.setting.findFirst();
+  const now = new Date();
+
+  const out: Array<{
+    key: JobKey;
+    title: string;
+    enabled: boolean;
+    cron?: string | null;
+    valid: boolean;
+    nextRun?: Date | null;
+    running: boolean;
+  }> = [];
+
+  for (const key of Object.keys(JOB_META) as JobKey[]) {
+    const meta = JOB_META[key];
+    const cronExpr = (s as any)?.[meta.settingCron] as string | undefined | null;
+    const enabled = !!((s as any)?.[meta.enabledFlag as string]);
+    const valid = !!cronExpr && cron.validate(cronExpr);
+    let nextRun: Date | null = null;
+
+    if (enabled && valid) {
+      try {
+        const it = cronParse(cronExpr, { currentDate: new Date() });
+        nextRun = it.next();
+      } catch {
+        nextRun = null;
+      }
+    }
+
+    let running = false;
+    try {
+      running = await hasActiveRunWithPrefixes(meta.prefixes);
+    } catch {}
+
+    out.push({
+      key,
+      title: meta.title,
+      enabled,
+      cron: cronExpr || null,
+      valid,
+      nextRun,
+      running,
+    });
+  }
+
+  return out;
+}
+

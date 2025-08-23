@@ -1,7 +1,18 @@
+// apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
+
+type CronItem = {
+  key: 'yandexPull'|'yandexMatch'|'yandexPush'|'lidarrPull'|'customMatch'|'customPush'|'backup';
+  title: string;
+  enabled: boolean;
+  cron?: string | null;
+  valid: boolean;
+  nextRun?: string | null; // ISO
+  running: boolean;
+};
 
 type CountBlock = { total: number; matched: number; unmatched: number };
 
@@ -102,6 +113,40 @@ export default function OverviewPage() {
   // оптимистичные busy-флаги (моментально после клика)
   const [optimisticBusy, setOptimisticBusy] = useState<Partial<Record<BusyKey, boolean>>>({});
   const busyTimers = useRef<Record<BusyKey, any>>({} as any);
+
+  const [cronJobs, setCronJobs] = useState<CronItem[]>([]);
+  const [now, setNow] = useState<number>(Date.now());
+
+  const loadScheduler = useCallback(async () => {
+    try {
+      const r = await api<{ok:boolean;jobs:CronItem[]}>('/api/settings/scheduler');
+      if (r?.ok && Array.isArray(r.jobs)) setCronJobs(r.jobs);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    loadScheduler();
+    const t1 = setInterval(() => setNow(Date.now()), 1000);
+    const t2 = setInterval(loadScheduler, 30000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, [loadScheduler]);
+
+  const humanCountdown = (iso?: string | null) => {
+    if (!iso) return '—';
+    const ms = new Date(iso).getTime() - now;
+    if (ms <= 0) return 'soon';
+    const sec = Math.floor(ms / 1000);
+    const d = Math.floor(sec / 86400);
+    const h = Math.floor((sec % 86400) / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const parts = [];
+    if (d) parts.push(`${d}d`);
+    if (h || d) parts.push(`${h}h`);
+    if (m || h || d) parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(' ');
+  };
 
   const markBusy = useCallback((key: BusyKey) => {
     setOptimisticBusy(prev => ({ ...prev, [key]: true }));
@@ -356,10 +401,12 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {lidarrHref
-                                    ? <a href={lidarrHref} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr">Lidarr</a>
+                                    ? <a href={lidarrHref} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--lidarr">Lidarr</a>
                                     : <span className="link-chip placeholder">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
                               </div>
                             </td>
@@ -424,10 +471,12 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.yandexUrl
-                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
                                     : <span className="link-chip placeholder">Yandex</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
                               </div>
                             </td>
@@ -543,10 +592,12 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.yandexUrl
-                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
                                     : <span className="link-chip placeholder">Yandex</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                         className="link-chip link-chip--mb">MusicBrainz</a>
                                     : <span className="link-chip placeholder">MusicBrainz</span>}
                               </div>
                             </td>
@@ -623,13 +674,13 @@ export default function OverviewPage() {
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
               <div className="text-2xl font-bold">{yA.matched}/{yA.total}</div>
-              <ProgressBar value={yArtistPct} color="accent" />
+              <ProgressBar value={yArtistPct} color="accent"/>
               <div className="text-xs text-gray-500">Unmatched: {yA.unmatched}</div>
             </div>
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Albums matched (Yandex)</div>
               <div className="text-2xl font-bold">{yR.matched}/{yR.total}</div>
-              <ProgressBar value={yAlbumPct} color="primary" />
+              <ProgressBar value={yAlbumPct} color="primary"/>
               <div className="text-xs text-gray-500">Unmatched: {yR.unmatched}</div>
             </div>
           </section>
@@ -639,13 +690,13 @@ export default function OverviewPage() {
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
               <div className="text-2xl font-bold">{lA.matched}/{lA.total}</div>
-              <ProgressBar value={lArtistPct} color="accent" />
+              <ProgressBar value={lArtistPct} color="accent"/>
               <div className="text-xs text-gray-500">Without MBID: {lA.unmatched}</div>
             </div>
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Albums (Lidarr, with RG MBID)</div>
               <div className="text-2xl font-bold">{lR.matched}/{lR.total}</div>
-              <ProgressBar value={lAlbumPct} color="primary" />
+              <ProgressBar value={lAlbumPct} color="primary"/>
               <div className="text-xs text-gray-500">Without RG MBID: {lR.unmatched}</div>
             </div>
           </section>
@@ -666,7 +717,8 @@ export default function OverviewPage() {
                           {r.message ? <span className="text-gray-400">• {r.message}</span> : null}
                         </div>
                         <div className="shrink-0">
-                          <button className="btn btn-outline" onClick={() => stopRun(r.id)} disabled={stoppingId === r.id}>
+                          <button className="btn btn-outline" onClick={() => stopRun(r.id)}
+                                  disabled={stoppingId === r.id}>
                             {stoppingId === r.id ? 'Stopping…' : 'Stop'}
                           </button>
                         </div>
@@ -695,16 +747,58 @@ export default function OverviewPage() {
                 ))
             )}
           </section>
+          <section className="panel p-4">
+            <div className="mb-2 flex items-center gap-3">
+              <div className="section-title">Scheduler</div>
+              <div className="ml-auto text-xs text-gray-400">updates every 30s</div>
+            </div>
 
+            {cronJobs.length === 0 ? (
+                <div className="text-sm text-gray-400">No jobs configured.</div>
+            ) : (
+                <table className="w-full text-sm">
+                  <thead className="text-gray-400">
+                  <tr>
+                    <th className="text-left">Job</th>
+                    <th className="text-left">Cron</th>
+                    <th className="text-left">Enabled</th>
+                    <th className="text-left">Valid</th>
+                    <th className="text-left">Next run</th>
+                    <th className="text-left">In</th>
+                    <th className="text-left">State</th>
+                  </tr>
+                  </thead>
+                  <tbody>
+                  {cronJobs.map((j) => (
+                      <tr key={j.key} className="border-t border-white/5">
+                        <td className="py-1 pr-2">{j.title}</td>
+                        <td className="py-1 pr-2 font-mono text-xs">{j.cron || '—'}</td>
+                        <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> :
+                            <Badge tone="muted">off</Badge>}</td>
+                        <td className="py-1 pr-2">{j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> :
+                            <Badge tone="err">invalid</Badge>) : <span className="text-gray-500">—</span>}</td>
+                        <td className="py-1 pr-2">{j.nextRun ? new Date(j.nextRun).toLocaleString() : '—'}</td>
+                        <td className="py-1 pr-2">{humanCountdown(j.nextRun)}</td>
+                        <td className="py-1 pr-2">
+                          {j.running ? <Badge tone="ok">running</Badge> : <Badge tone="muted">idle</Badge>}
+                        </td>
+                      </tr>
+                  ))}
+                  </tbody>
+                </table>
+            )}
+          </section>
           {/* Global actions */}
           <section className="panel p-4">
             <div className="flex flex-wrap items-center gap-2">
               <button className="btn btn-outline" onClick={load} disabled={loading}>
                 {loading ? 'Refreshing…' : 'Refresh'}
               </button>
-              <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists</button>
+              <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists
+              </button>
               <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
-              <button className="btn btn-outline" onClick={pullFromLidarrArtists} disabled={isBusy('lidarrPullArtists')}>
+              <button className="btn btn-outline" onClick={pullFromLidarrArtists}
+                      disabled={isBusy('lidarrPullArtists')}>
                 {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}
               </button>
               <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
@@ -729,16 +823,49 @@ export default function OverviewPage() {
           </section>
 
           <style jsx>{`
-          :root { --chip-w: 96px; --chip-gap: 6px; }
-          .links-col-2 { width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-          .link-tray { display: flex; align-items: center; gap: var(--chip-gap); white-space: nowrap; }
-          .link-tray-right { justify-content: flex-end; }
-          .link-tray-2 { min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap)); }
-          .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
-          .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
-          .link-margin-right-5 { margin-right: 5px; }
-          .btn[disabled] { opacity: .6; cursor: not-allowed; }
-        `}</style>
+            :root {
+              --chip-w: 96px;
+              --chip-gap: 6px;
+            }
+
+            .links-col-2 {
+              width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
+            }
+
+            .link-tray {
+              display: flex;
+              align-items: center;
+              gap: var(--chip-gap);
+              white-space: nowrap;
+            }
+
+            .link-tray-right {
+              justify-content: flex-end;
+            }
+
+            .link-tray-2 {
+              min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
+            }
+
+            .link-tray :global(.link-chip) {
+              display: inline-flex;
+              justify-content: center;
+              width: var(--chip-w);
+            }
+
+            .link-tray :global(.link-chip.placeholder) {
+              visibility: hidden;
+            }
+
+            .link-margin-right-5 {
+              margin-right: 5px;
+            }
+
+            .btn[disabled] {
+              opacity: .6;
+              cursor: not-allowed;
+            }
+          `}</style>
         </main>
       </>
   );
