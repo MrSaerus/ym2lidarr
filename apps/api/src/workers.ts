@@ -310,9 +310,9 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
         if (r.externalId) {
           await prisma.yandexArtist.update({ where: { id: y.id }, data: { mbid: r.externalId } });
           a_matched++;
-          await dblog(runId, 'info', 'Artist matched', { yaId: y.ymId, name: y.name, mbid: r.externalId });
+          await dblog(runId, 'info', `✔ Artist matched: ${y.name}`, { yaId: y.ymId, name: y.name, mbid: r.externalId });
         } else {
-          await dblog(runId, 'info', 'Artist not matched', { yaId: y.ymId, name: y.name });
+          await dblog(runId, 'info', `✖ Artist not matched: ${y.name}`, { yaId: y.ymId, name: y.name });
         }
 
         a_done++;
@@ -342,9 +342,9 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
         if (r.externalId) {
           await prisma.yandexAlbum.update({ where: { id: rec.id }, data: { rgMbid: r.externalId } });
           al_matched++;
-          await dblog(runId, 'info', 'Album matched', { yaId: rec.ymId, artist: rec.artist, title: rec.title, rgMbid: r.externalId });
+          await dblog(runId, 'info', `✔ Album matched: ${rec.artist} - ${rec.title}`, { yaId: rec.ymId, artist: rec.artist, title: rec.title, rgMbid: r.externalId });
         } else {
-          await dblog(runId, 'info', 'Album not matched', { yaId: rec.ymId, artist: rec.artist, title: rec.title });
+          await dblog(runId, 'info', `✖ Album not matched: ${rec.artist} - ${rec.title}`, { yaId: rec.ymId, artist: rec.artist, title: rec.title });
         }
 
         al_done++;

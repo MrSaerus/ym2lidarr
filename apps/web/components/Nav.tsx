@@ -5,15 +5,15 @@ import {
   QuestionMarkCircleIcon,
   Cog6ToothIcon,
   ArchiveBoxArrowDownIcon,
-  QueueListIcon,
+  QueueListIcon, MusicalNoteIcon, InboxStackIcon, PlayIcon, ServerStackIcon,
 } from '@heroicons/react/24/outline';
 
 const tabs = [
   { href: '/', label: 'Overview', Icon: HomeIcon },
-  { href: '/lidarr', label: 'Lidarr', Icon: QuestionMarkCircleIcon },
-  { href: '/yandex', label: 'Yandex', Icon: QuestionMarkCircleIcon },
-  { href: '/custom', label: 'Custom', Icon: QuestionMarkCircleIcon },
-  { href: '/unified', label: 'Unified', Icon: QuestionMarkCircleIcon },
+  { href: '/lidarr', label: 'Lidarr', Icon: ServerStackIcon },
+  { href: '/yandex', label: 'Yandex', Icon: MusicalNoteIcon },
+  { href: '/custom', label: 'Custom', Icon: PlayIcon },
+  { href: '/unified', label: 'Unified', Icon: InboxStackIcon },
   { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
   { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },
   { href: '/logs', label: 'Live Logs', Icon: QueueListIcon },

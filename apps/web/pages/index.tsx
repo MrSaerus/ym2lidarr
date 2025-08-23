@@ -1,5 +1,5 @@
 // apps/web/pages/index.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
@@ -51,6 +51,8 @@ function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?:
   return <span className={`inline-flex items-center rounded px-2 py-[2px] text-xs ${cls}`}>{children}</span>;
 }
 
+/* ---------------- helpers ---------------- */
+
 async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
   let lastErr: any;
   for (const p of paths) {
@@ -65,6 +67,31 @@ async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
   throw lastErr || new Error('All endpoints failed');
 }
 
+/** Ключи busy-состояний под конкретные кнопки */
+type BusyKey =
+    | 'customMatch'
+    | 'customPush'
+    | 'yandexPull'
+    | 'yandexMatchArtists'
+    | 'yandexMatchAlbums'
+    | 'yandexPushArtists'
+    | 'yandexPushAlbums'
+    | 'lidarrPullArtists'
+    | 'lidarrPullAlbums';
+
+/** Какие kind из бекенда соответствуют какой кнопке */
+const KIND_MAP: Record<BusyKey, string[]> = {
+  customMatch:        ['custom.match.all'],
+  customPush:         ['custom.push.all'],
+  yandexPull:         ['yandex.pull.all'],
+  yandexMatchArtists: ['yandex.match.artists'],
+  yandexMatchAlbums:  ['yandex.match.albums'],
+  yandexPushArtists:  ['yandex.push.artists','yandex.push.all'],
+  yandexPushAlbums:   ['yandex.push.albums','yandex.push.all'],
+  lidarrPullArtists:  ['lidarr.pull.artists','lidarr.pull.all','lidarr'], // 'lidarr' — на случай старых раннов
+  lidarrPullAlbums:   ['lidarr.pull.albums','lidarr.pull.all','lidarr'],
+};
+
 export default function OverviewPage() {
   const [stats, setStats] = useState<StatsResp | null>(null);
   const [latest, setLatest] = useState<RunShort | null>(null);
@@ -72,6 +99,34 @@ export default function OverviewPage() {
   const [stoppingId, setStoppingId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+
+  // оптимистичные busy-флаги (моментально после клика)
+  const [optimisticBusy, setOptimisticBusy] = useState<Partial<Record<BusyKey, boolean>>>({});
+  const busyTimers = useRef<Record<BusyKey, any>>({} as any);
+
+  const markBusy = useCallback((key: BusyKey) => {
+    setOptimisticBusy(prev => ({ ...prev, [key]: true }));
+    // фоллбек: снимем оптимизм через 30с, если ран не появился/не отслеживается
+    if (busyTimers.current[key]) {
+      clearTimeout(busyTimers.current[key]);
+    }
+    busyTimers.current[key] = setTimeout(() => {
+      setOptimisticBusy(prev => ({ ...prev, [key]: false }));
+      busyTimers.current[key] = null;
+    }, 30000);
+  }, []);
+
+  const clearBusy = useCallback((key: BusyKey) => {
+    if (busyTimers.current[key]) {
+      clearTimeout(busyTimers.current[key]);
+      busyTimers.current[key] = null;
+    }
+    setOptimisticBusy(prev => ({ ...prev, [key]: false }));
+  }, []);
+
+  const clearManyBusy = useCallback((keys: BusyKey[]) => {
+    keys.forEach(clearBusy);
+  }, [clearBusy]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,6 +150,33 @@ export default function OverviewPage() {
     return () => clearInterval(t);
   }, [load, loadRuns]);
 
+  // серверные busy-флаги (по real running runs)
+  const serverBusySet = useMemo(() => {
+    const set = new Set<BusyKey>();
+    for (const run of runs) {
+      const kind = (run.kind || '').toString();
+      (Object.keys(KIND_MAP) as BusyKey[]).forEach((key) => {
+        if (KIND_MAP[key].includes(kind)) set.add(key);
+      });
+    }
+    return set;
+  }, [runs]);
+
+  // объединяем оптимизм + сервер
+  const isBusy = useCallback((key: BusyKey) => {
+    return !!optimisticBusy[key] || serverBusySet.has(key);
+  }, [optimisticBusy, serverBusySet]);
+
+  // как только сервер подтвердил ран — снимаем оптимистичный флаг (чтобы не завис).
+  useEffect(() => {
+    (Object.keys(KIND_MAP) as BusyKey[]).forEach((key) => {
+      if (serverBusySet.has(key) && optimisticBusy[key]) {
+        clearBusy(key);
+      }
+    });
+  }, [serverBusySet, optimisticBusy, clearBusy]);
+
+  // counters
   const cA = { total: toNum(stats?.custom?.artists?.total ?? 0), matched: toNum(stats?.custom?.artists?.matched ?? 0), unmatched: toNum(stats?.custom?.artists?.unmatched ?? 0) };
   const yA = { total: toNum(stats?.yandex?.artists?.total ?? stats?.artists?.total ?? 0), matched: toNum(stats?.yandex?.artists?.matched ?? stats?.artists?.found ?? 0),
     unmatched: toNum(stats?.yandex?.artists?.unmatched ?? ((stats?.artists?.total != null && stats?.artists?.found != null) ? Number(stats.artists.total) - Number(stats.artists.found) : 0)) };
@@ -109,6 +191,9 @@ export default function OverviewPage() {
   const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
   const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
 
+  /* ----------------------- actions ----------------------- */
+
+  // Lidarr cache helpers
   async function resyncCacheLidarrArtists() {
     setMsg('Resyncing Lidarr cache (artists)…');
     try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); }
@@ -116,88 +201,105 @@ export default function OverviewPage() {
   }
   async function resyncCacheYandexAlbums() { return pullFromYandexAlbums(); }
 
+  // Lidarr PULL
   async function pullFromLidarrArtists() {
     setMsg('Pull from Lidarr (artists)…');
+    markBusy('lidarrPullArtists');
     try {
-      await tryPostMany(['api/sync/lidarr/pull'], { target: 'artists' });
-      setMsg('Lidarr pull (artists) started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/lidarr/pull'], { target: 'artists' });
+      setMsg('Lidarr pull (artists) started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`); }
   }
   async function pullFromLidarrAlbums() {
     setMsg('Pull from Lidarr (albums)…');
+    markBusy('lidarrPullAlbums');
     try {
-      await tryPostMany(['api/sync/lidarr/pull'], { target: 'albums' });
-      setMsg('Lidarr pull (albums) started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/lidarr/pull'], { target: 'albums' });
+      setMsg('Lidarr pull (albums) started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Lidarr pull error: ${e?.message||String(e)}`); }
   }
 
+  // Yandex PULL — один воркер для обоих блоков
   async function pullFromYandexArtists() {
     setMsg('Pull from Yandex (all)…');
+    markBusy('yandexPull');
     try {
-      await tryPostMany(['api/sync/yandex/pull']);
-      setMsg('Yandex pull started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/yandex/pull-all']);
+      setMsg('Yandex pull started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Yandex pull error: ${e?.message||String(e)}`); }
   }
   async function pullFromYandexAlbums() { return pullFromYandexArtists(); }
 
+  // Yandex MATCH
   async function matchYandexArtists() {
     setMsg('Matching Yandex artists…');
+    markBusy('yandexMatchArtists');
     try {
-      await tryPostMany(['api/sync/yandex/match'], { force: true, target: 'artists' });
-      setMsg('Match started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'artists' });
+      setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
   async function matchYandexAlbums()  {
     setMsg('Matching Yandex albums…');
+    markBusy('yandexMatchAlbums');
     try {
-      await tryPostMany(['api/sync/yandex/match'], { force: true, target: 'albums' });
-      setMsg('Match started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'albums' });
+      setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
 
+  // Yandex PUSH
   async function pushYandexToLidarr(target: 'artists'|'albums'|'both') {
     setMsg(`Pushing Yandex ${target} to Lidarr…`);
+    if (target === 'artists') markBusy('yandexPushArtists');
+    if (target === 'albums')  markBusy('yandexPushAlbums');
     try {
-      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['api/sync/yandex/push'], { target });
+      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex/push'], { target });
       const ok = r?.ok===true || typeof r?.runId==='number';
       setMsg(ok ? `Push started (run ${r?.runId ?? 'n/a'})` : `Push failed${r?.error?`: ${r.error}`:''}`);
-      setTimeout(loadRuns, 400);
+      setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`); }
   }
 
+  // One-click Yandex pull-all
   async function runSyncYandex() {
     setMsg('Starting Yandex pull-all…');
+    markBusy('yandexPull');
     try {
-      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['api/sync/yandex/pull-all']);
+      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex/pull-all']);
       const ok = r?.ok===true || typeof r?.runId==='number';
       setMsg(ok ? `Yandex pull started (run ${r?.runId ?? 'n/a'})` : `Sync failed${r?.error?`: ${r.error}`:''}`);
-      setTimeout(loadRuns, 400);
+      setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`); }
   }
 
+  // Custom panel
   async function matchCustomAll() {
     setMsg('Matching Custom artists…');
+    markBusy('customMatch');
     try {
-      await tryPostMany(['api/sync/custom/match'], { force: false });
-      setMsg('Custom match started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/custom/match'], { force: false });
+      setMsg('Custom match started'); setTimeout(loadRuns, 300);
     } catch (e: any) {
       setMsg(`Custom match error: ${e?.message || String(e)}`);
     }
   }
   async function pushCustomToLidarr() {
     setMsg('Pushing (custom) to Lidarr…');
+    markBusy('customPush');
     try {
-      await tryPostMany(['api/sync/custom/push']);
-      setMsg('Push started'); setTimeout(loadRuns, 400);
+      await tryPostMany(['/api/sync/custom/push']);
+      setMsg('Push started'); setTimeout(loadRuns, 300);
     } catch (e: any) {
       setMsg(`Push error: ${e?.message || String(e)}`);
     }
   }
 
+  // Soft-cancel run
   async function stopRun(id: number) {
     try {
       setStoppingId(id);
-      await tryPostMany([`/api/runs/${id}/stop`, `/runs/${id}/stop`, `/api/sync/runs/${id}/stop`]);
+      await tryPostMany([`/api/sync/runs/${id}/stop`, `/api/runs/${id}/stop`, `/runs/${id}/stop`]);
       setMsg(`Stop requested for run #${id}`);
       await loadRuns();
     } catch (e: any) {
@@ -220,8 +322,20 @@ export default function OverviewPage() {
             <div className="mb-2 flex items-center gap-3">
               <div className="section-title">Latest Custom artists</div>
               <div className="ml-auto flex items-center gap-2">
-                <button className="btn btn-outline" onClick={matchCustomAll}>Match MB</button>
-                <button className="btn btn-outline" onClick={pushCustomToLidarr}>Push to Lidarr</button>
+                <button
+                    className="btn btn-outline"
+                    onClick={matchCustomAll}
+                    disabled={isBusy('customMatch')}
+                >
+                  {isBusy('customMatch') ? 'Matching…' : 'Match MB'}
+                </button>
+                <button
+                    className="btn btn-outline"
+                    onClick={pushCustomToLidarr}
+                    disabled={isBusy('customPush')}
+                >
+                  {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr'}
+                </button>
               </div>
             </div>
             <div className="space-y-1">
@@ -269,9 +383,27 @@ export default function OverviewPage() {
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex albums</div>
                 <div className="ml-auto flex items-center gap-2">
-                  <button className="btn btn-outline" onClick={pullFromYandexAlbums}>Pull from YM</button>
-                  <button className="btn btn-outline" onClick={matchYandexAlbums}>Matching YM</button>
-                  <button className="btn btn-outline" onClick={() => pushYandexToLidarr('albums')}>Push to Lidarr</button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={pullFromYandexAlbums}
+                      disabled={isBusy('yandexPull')}
+                  >
+                    {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
+                  </button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={matchYandexAlbums}
+                      disabled={isBusy('yandexMatchAlbums')}
+                  >
+                    {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Matching YM'}
+                  </button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={() => pushYandexToLidarr('albums')}
+                      disabled={isBusy('yandexPushAlbums')}
+                  >
+                    {isBusy('yandexPushAlbums') ? 'Pushing…' : 'Push to Lidarr'}
+                  </button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -316,7 +448,13 @@ export default function OverviewPage() {
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr albums</div>
                 <div className="ml-auto flex items-center gap-2">
-                  <button className="btn btn-outline" onClick={pullFromLidarrAlbums}>Pull from Lidarr</button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={pullFromLidarrAlbums}
+                      disabled={isBusy('lidarrPullAlbums')}
+                  >
+                    {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr'}
+                  </button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -366,9 +504,27 @@ export default function OverviewPage() {
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex artists</div>
                 <div className="ml-auto flex items-center gap-2">
-                  <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from YM</button>
-                  <button className="btn btn-outline" onClick={matchYandexArtists}>Matching YM</button>
-                  <button className="btn btn-outline" onClick={() => pushYandexToLidarr('artists')}>Push to Lidarr</button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={pullFromYandexArtists}
+                      disabled={isBusy('yandexPull')}
+                  >
+                    {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
+                  </button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={matchYandexArtists}
+                      disabled={isBusy('yandexMatchArtists')}
+                  >
+                    {isBusy('yandexMatchArtists') ? 'Matching…' : 'Matching YM'}
+                  </button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={() => pushYandexToLidarr('artists')}
+                      disabled={isBusy('yandexPushArtists')}
+                  >
+                    {isBusy('yandexPushArtists') ? 'Pushing…' : 'Push to Lidarr'}
+                  </button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -411,7 +567,13 @@ export default function OverviewPage() {
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr artists</div>
                 <div className="ml-auto flex items-center gap-2">
-                  <button className="btn btn-outline" onClick={pullFromLidarrArtists}>Pull from Lidarr</button>
+                  <button
+                      className="btn btn-outline"
+                      onClick={pullFromLidarrArtists}
+                      disabled={isBusy('lidarrPullArtists')}
+                  >
+                    {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr'}
+                  </button>
                 </div>
               </div>
               <div className="space-y-1">
@@ -546,13 +708,27 @@ export default function OverviewPage() {
               </button>
               <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists</button>
               <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
-              <button className="btn btn-outline" onClick={pullFromLidarrArtists}>Pull from Lidarr Artists</button>
-              <button className="btn btn-outline" onClick={pullFromLidarrAlbums}>Pull from Lidarr Albums</button>
-              <button className="btn btn-outline" onClick={pullFromYandexArtists}>Pull from Yandex (All)</button>
-              <button className="btn btn-outline" onClick={matchYandexArtists}>Match Yandex Artists</button>
-              <button className="btn btn-outline" onClick={matchYandexAlbums}>Match Yandex Albums</button>
-              <button className="btn btn-primary" onClick={runSyncYandex}>Pull-all (Yandex)</button>
-              <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>Push Yandex (Both)</button>
+              <button className="btn btn-outline" onClick={pullFromLidarrArtists} disabled={isBusy('lidarrPullArtists')}>
+                {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}
+              </button>
+              <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
+                {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr Albums'}
+              </button>
+              <button className="btn btn-outline" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>
+                {isBusy('yandexPull') ? 'Pulling…' : 'Pull from Yandex (All)'}
+              </button>
+              <button className="btn btn-outline" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>
+                {isBusy('yandexMatchArtists') ? 'Matching…' : 'Match Yandex Artists'}
+              </button>
+              <button className="btn btn-outline" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>
+                {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Match Yandex Albums'}
+              </button>
+              <button className="btn btn-primary" onClick={runSyncYandex} disabled={isBusy('yandexPull')}>
+                {isBusy('yandexPull') ? 'Pulling…' : 'Pull-all (Yandex)'}
+              </button>
+              <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>
+                Push Yandex (Both)
+              </button>
             </div>
           </section>
 
@@ -565,6 +741,7 @@ export default function OverviewPage() {
           .link-tray :global(.link-chip) { display: inline-flex; justify-content: center; width: var(--chip-w); }
           .link-tray :global(.link-chip.placeholder) { visibility: hidden; }
           .link-margin-right-5 { margin-right: 5px; }
+          .btn[disabled] { opacity: .6; cursor: not-allowed; }
         `}</style>
         </main>
       </>
