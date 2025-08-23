@@ -229,21 +229,21 @@ model Setting {
   backupRetention Int?    @default(14)
   backupDir       String?
 
-  notifyType     String  @default("none") // 'none' | 'telegram' | 'webhook'
+  notifyType     String  @default("none")
   telegramBot    String?
   telegramChatId String?
   webhookUrl     String?
   webhookSecret  String?
 
-  yandexDriver String  @default("pyproxy") // 'pyproxy' | 'native'
+  yandexDriver String  @default("pyproxy")
   pyproxyUrl   String?
 
   yandexToken  String?
   lidarrUrl    String?
   lidarrApiKey String?
 
-  mode         String  @default("artists") // 'artists' | 'albums'
-  pushTarget   String  @default("artists") // 'artists' | 'albums'
+  mode         String  @default("artists")
+  pushTarget   String  @default("artists")
   enableExport Boolean @default(true)
   enablePush   Boolean @default(false)
   exportPath   String?
@@ -251,14 +251,26 @@ model Setting {
   rootFolderPath    String?
   qualityProfileId  Int?
   metadataProfileId Int?
-  monitor           String? // 'all' | 'future' | 'none'
+  monitor           String?
 
-  cronYandex String @default("0 */6 * * *")
-  cronLidarr String @default("0 3 * * *")
-
-  // deprecated
+  // СТАРЫЕ (оставляем для совместимости UI/миграций)
+  cronYandex String  @default("0 */6 * * *")
+  cronLidarr String  @default("0 3 * * *")
   yandexCron String?
   lidarrCron String?
+
+  // НОВОЕ: расписания и таргеты
+  cronCustomMatch String @default("0 0 * * *")
+  cronCustomPush  String @default("0 12 * * *")
+
+  cronYandexPull    String @default("0 */6 * * *")
+  cronYandexMatch   String @default("10 */6 * * *")
+  cronYandexPush    String @default("45 */6 * * *")
+  yandexMatchTarget String @default("both") // 'both' | 'artists' | 'albums'
+  yandexPushTarget  String @default("both") // 'both' | 'artists' | 'albums'
+
+  cronLidarrPull   String @default("0 3 * * *")
+  lidarrPullTarget String @default("both") // 'both' | 'artists' | 'albums'
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

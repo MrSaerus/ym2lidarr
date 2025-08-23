@@ -1,4 +1,3 @@
-// apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import ProgressBar from '../components/ProgressBar';
@@ -84,8 +83,8 @@ const KIND_MAP: Record<BusyKey, string[]> = {
   customMatch:        ['custom.match.all'],
   customPush:         ['custom.push.all'],
   yandexPull:         ['yandex.pull.all'],
-  yandexMatchArtists: ['yandex.match.artists'],
-  yandexMatchAlbums:  ['yandex.match.albums'],
+  yandexMatchArtists: ['yandex.match.artists', 'yandex.match.all'],
+  yandexMatchAlbums:  ['yandex.match.albums', 'yandex.match.all'],
   yandexPushArtists:  ['yandex.push.artists','yandex.push.all'],
   yandexPushAlbums:   ['yandex.push.albums','yandex.push.all'],
   lidarrPullArtists:  ['lidarr.pull.artists','lidarr.pull.all','lidarr'], // 'lidarr' — на случай старых раннов
@@ -106,10 +105,7 @@ export default function OverviewPage() {
 
   const markBusy = useCallback((key: BusyKey) => {
     setOptimisticBusy(prev => ({ ...prev, [key]: true }));
-    // фоллбек: снимем оптимизм через 30с, если ран не появился/не отслеживается
-    if (busyTimers.current[key]) {
-      clearTimeout(busyTimers.current[key]);
-    }
+    if (busyTimers.current[key]) clearTimeout(busyTimers.current[key]);
     busyTimers.current[key] = setTimeout(() => {
       setOptimisticBusy(prev => ({ ...prev, [key]: false }));
       busyTimers.current[key] = null;

@@ -14,14 +14,33 @@ const ALLOWED_FIELDS = new Set([
   'yandexToken',
   'yandexDriver',
   'pyproxyUrl',
-  'cronYandex',
+
+  // НОВОЕ: расписание по частям
+  'cronYandexPull',
+  'cronYandexMatch',
+  'cronYandexPush',
+  'yandexMatchTarget',
+  'yandexPushTarget',
 
   // lidarr
   'lidarrUrl',
   'lidarrApiKey',
   'pushTarget',
-  'cronLidarr',
   'lidarrAllowNoMetadata',
+
+  // НОВОЕ: lidarr pull
+  'cronLidarrPull',
+  'lidarrPullTarget',
+
+  // custom
+  'cronCustomMatch',
+  'cronCustomPush',
+
+  // СТАРОЕ (совместимость — можно заполнять, но планировщик уже не использует)
+  'cronYandex',
+  'cronLidarr',
+  'yandexCron',
+  'lidarrCron',
 
   // lidarr defaults
   'rootFolderPath',
@@ -49,6 +68,7 @@ const ALLOWED_FIELDS = new Set([
   'webhookSecret',
 ]);
 
+
 function pickSettings(input: any) {
   const out: any = {};
   if (!input || typeof input !== 'object') return out;
@@ -58,6 +78,18 @@ function pickSettings(input: any) {
   }
 
   // нормализации
+  if ('yandexMatchTarget' in out) {
+    const v = String(out.yandexMatchTarget || '').toLowerCase();
+    out.yandexMatchTarget = ['artists','albums','both'].includes(v) ? v : 'both';
+  }
+  if ('yandexPushTarget' in out) {
+    const v = String(out.yandexPushTarget || '').toLowerCase();
+    out.yandexPushTarget = ['artists','albums','both'].includes(v) ? v : 'both';
+  }
+  if ('lidarrPullTarget' in out) {
+    const v = String(out.lidarrPullTarget || '').toLowerCase();
+    out.lidarrPullTarget = ['artists','albums','both'].includes(v) ? v : 'both';
+  }
   if ('yandexDriver' in out) {
     const v = String(out.yandexDriver || '').toLowerCase();
     out.yandexDriver = v === 'native' ? 'native' : 'pyproxy';
