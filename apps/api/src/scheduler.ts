@@ -2,7 +2,7 @@
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
-import cronParserDefault from 'cron-parser';
+import * as cronParser from 'cron-parser';
 
 import { prisma } from './prisma';
 import {
@@ -13,8 +13,95 @@ import {
   runYandexPush,
   runLidarrPullEx,
 } from './workers';
-const cronParse: (expr: string, opts?: any) => { next: () => Date } =
-    (cronParserDefault as any).default ?? (cronParserDefault as any);
+
+/* ====================== CRON-PARSER ADAPTER ====================== */
+
+// Один раз выведем форму модуля, чтобы понять, что именно у нас установлено
+let loggedModuleShape = false;
+
+function coerceDate(res: any): Date | null {
+  if (!res) return null;
+  if (res instanceof Date) return res;
+  if (typeof res.toDate === 'function') {
+    try { return res.toDate(); } catch { /* ignore */ }
+  }
+  // иногда могут вернуть milliseconds
+  if (typeof res === 'number' && Number.isFinite(res)) return new Date(res);
+  if (typeof res.valueOf === 'function') {
+    const v = res.valueOf();
+    if (typeof v === 'number' && Number.isFinite(v)) return new Date(v);
+  }
+  return null;
+}
+
+/**
+ * Универсально достаём следующий запуск из cron-выражения.
+ * Поддерживаем и v4 (parseExpression().next().toDate()), и v5 (Parser/CronExpression классы).
+ */
+function safeNext(exprRaw: string, now = new Date()): Date | null {
+  const expr = (exprRaw || '').trim().replace(/\s+/g, ' ');
+  const mod: any = cronParser as any;
+  const def: any = (mod && mod.default) ? mod.default : undefined;
+
+  if (!loggedModuleShape) {
+    loggedModuleShape = true;
+    const modKeys = Object.keys(mod || {});
+    const defKeys = Object.keys(def || {});
+    console.log('[scheduler] cron-parser shape:', modKeys);
+    if (defKeys.length) console.log('[scheduler] cron-parser default shape:', defKeys);
+  }
+
+  const candidates: Array<{ holder: any; parseName: 'parseExpression'|'parse' }> = [];
+  if (mod.CronExpressionParser) {
+    candidates.push({ holder: mod.CronExpressionParser, parseName: 'parseExpression' });
+    candidates.push({ holder: mod.CronExpressionParser, parseName: 'parse' });
+  }
+  if (def?.CronExpressionParser) {
+    candidates.push({ holder: def.CronExpressionParser, parseName: 'parseExpression' });
+    candidates.push({ holder: def.CronExpressionParser, parseName: 'parse' });
+  }
+
+  if (mod.CronExpression) {
+    candidates.push({ holder: mod.CronExpression, parseName: 'parse' });
+  }
+  if (def?.CronExpression) {
+    candidates.push({ holder: def.CronExpression, parseName: 'parse' });
+  }
+
+  for (const c of candidates) {
+    try {
+      const parseFn = c.holder?.[c.parseName];
+      if (typeof parseFn !== 'function') continue;
+
+      const parsed = parseFn.call(c.holder, expr, { currentDate: now });
+      if (!parsed) continue;
+
+      // Ищем подходящий метод получения следующей даты на инстансе
+      const methodNames = ['getNextDate', 'nextDate', 'getNext', 'next'];
+      for (const m of methodNames) {
+        const fn = parsed[m];
+        if (typeof fn === 'function') {
+          try {
+            const res = fn.call(parsed);
+            const d = coerceDate(res);
+            if (!d) {
+              console.warn(`[scheduler] safeNext: unsupported ${m}() result for expr=${expr}`, res);
+            }
+            if (d) return d;
+          } catch (e) {
+            console.warn(`[scheduler] safeNext: call ${m}() failed for expr=${expr}`, e);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[scheduler] safeNext: parse via ${c.holder?.name || '<?>'}#${c.parseName} failed for expr="${expr}"`, e);
+    }
+  }
+
+  console.warn('[scheduler] safeNext: unable to compute next date for expr=', expr);
+  return null;
+}
+
 /* ====================== JOBS REGISTRY ====================== */
 
 let jobs: {
@@ -30,7 +117,7 @@ let jobs: {
   backup?: cron.ScheduledTask;
 } = {};
 
-/* ====================== BACKUP HELPERS (без изменений) ====================== */
+/* ====================== BACKUP HELPERS ====================== */
 
 function ts() {
   const d = new Date();
@@ -222,7 +309,6 @@ const JOB_META: Record<JobKey, { title: string; settingCron: string; enabledFlag
 
 export async function getCronStatuses() {
   const s = await prisma.setting.findFirst();
-  const now = new Date();
 
   const out: Array<{
     key: JobKey;
@@ -236,18 +322,22 @@ export async function getCronStatuses() {
 
   for (const key of Object.keys(JOB_META) as JobKey[]) {
     const meta = JOB_META[key];
-    const cronExpr = (s as any)?.[meta.settingCron] as string | undefined | null;
+    const rawExpr = (s as any)?.[meta.settingCron] as string | undefined | null;
+    const cronExpr = (rawExpr || '').trim().replace(/\s+/g, ' ') || undefined;
+
     const enabled = !!((s as any)?.[meta.enabledFlag as string]);
     const valid = !!cronExpr && cron.validate(cronExpr);
-    let nextRun: Date | null = null;
 
-    if (enabled && valid) {
+    let nextRun: Date | null = null;
+    if (enabled && valid && cronExpr) {
       try {
-        const it = cronParse(cronExpr, { currentDate: new Date() });
-        nextRun = it.next();
-      } catch {
+        nextRun = safeNext(cronExpr, new Date());
+      } catch (e) {
+        console.warn(`[scheduler] getCronStatuses: parse failed (key=${key}) expr="${cronExpr}" raw="${rawExpr}"`, e);
         nextRun = null;
       }
+    } else if (enabled && rawExpr && !valid) {
+      console.warn(`[scheduler] getCronStatuses: invalid cron (key=${key}) expr="${rawExpr}"`);
     }
 
     let running = false;
@@ -268,4 +358,3 @@ export async function getCronStatuses() {
 
   return out;
 }
-
