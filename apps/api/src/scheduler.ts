@@ -1,4 +1,5 @@
 // apps/api/src/scheduler.ts
+// apps/api/src/scheduler.ts
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
@@ -15,29 +16,39 @@ import {
 } from './workers';
 
 /* ====================== CRON-PARSER SAFE NEXT ====================== */
-
+/** Универсальный вызов cron-parser для v2…v5 */
 function nextFromCron(expr: string, opts?: any): Date | null {
   try {
-    // v4: parseExpression; v5: CronExpression.parse
-    if (typeof (cronParser as any).parseExpression === 'function') {
-      const it = (cronParser as any).parseExpression(expr, opts);
-      const n = it.next();
-      if (n?.toDate) return n.toDate();
-      if (n instanceof Date) return n;
+    const m: any = cronParser;
+
+    // Подбираем доступную функцию парсинга в порядке приоритета
+    const parseFn =
+        (typeof m?.parseExpression === 'function' && m.parseExpression) ||
+        (typeof m?.default?.parseExpression === 'function' && m.default.parseExpression) ||
+        (typeof m?.CronExpression?.parse === 'function' && m.CronExpression.parse) ||
+        (typeof m?.CronExpressionParser?.parse === 'function' && m.CronExpressionParser.parse) ||
+        null;
+
+    if (!parseFn) {
+      // подробный одноразовый лог (на всякий)
+      console.warn('[scheduler] safeNext: cron-parser API not found; keys=', Object.keys(m || {}));
       return null;
     }
-    const CE = (cronParser as any).CronExpression;
-    if (CE && typeof CE.parse === 'function') {
-      const it = CE.parse(expr, opts);
-      const n = it.next();
-      if (n?.toDate) return n.toDate();
-      if (n instanceof Date) return n;
-      return null;
-    }
-    console.warn('[scheduler] safeNext: cron-parser API not found; keys=', Object.keys(cronParser));
+
+    const it = parseFn(expr, opts);
+    if (!it || typeof it.next !== 'function') return null;
+
+    const n = it.next();
+    if (!n) return null;
+
+    // v2/v3/v5: next() -> CronDate { toDate() }, иногда возвращают сам Date
+    if (typeof n.toDate === 'function') return n.toDate();
+    if (n instanceof Date) return n;
+    if (typeof n.valueOf === 'function') return new Date(n.valueOf());
+
     return null;
-  } catch (e) {
-    // не шумим на каждую секунду — короткий лог и null
+  } catch {
+    // тихо возвращаем null (UI сам покажет "—")
     return null;
   }
 }
@@ -305,7 +316,7 @@ export async function getCronStatuses() {
     cron?: string | null;
     valid: boolean;
     nextRun?: Date | null;
-    running: boolean; // ВАЖНО: теперь это "крон запущен"
+    running: boolean; // показываем только «крон сейчас выполняет»
   }> = [];
 
   for (const key of Object.keys(JOB_META) as JobKey[]) {
@@ -319,7 +330,6 @@ export async function getCronStatuses() {
       nextRun = nextFromCron(cronExpr, { currentDate: now });
     }
 
-    // ВАЖНО: показываем running ТОЛЬКО по памяти (то, что запущено кроном)
     const running = !!cronActivity[key];
 
     out.push({
