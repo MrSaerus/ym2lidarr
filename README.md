@@ -1,5 +1,12 @@
 **YM → Lidarr**
 
+[![Release](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml/badge.svg)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml)
+[![CI (tests)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/ci.yml/badge.svg)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/ci.yml)
+[![Docker ym2lidarr-api](https://badgen.net/docker/size/saerus/ym2lidarr-api?icon=docker&label=Docker%20ym2lidarr-api)](https://hub.docker.com/r/saerus/ym2lidarr-api/)
+[![Docker ym2lidarr-web](https://badgen.net/docker/size/saerus/ym2lidarr-web?icon=docker&label=Docker%20ym2lidarr-web)](https://hub.docker.com/r/saerus/ym2lidarr-web/)
+[![Docker ym2lidarr-pyproxy](https://badgen.net/docker/size/saerus/ym2lidarr-pyproxy?icon=docker&label=Docker%20ym2lidarr-pyproxy)](https://hub.docker.com/r/saerus/ym2lidarr-pyproxy/)
+[![Docker ym2lidarr-single](https://badgen.net/docker/size/saerus/ym2lidarr-single?icon=docker&label=Docker%20ym2lidarr-single)](https://hub.docker.com/r/saerus/ym2lidarr-single/)
+
 Сервис, забирает **лайки из Яндекс.Музыки** и отправляет их в **Lidarr** (кастом-лист артистов или релиз-группы альбомов).
 
 ## Screenshots

@@ -1,4 +1,4 @@
-name: Release (build all & push to Docker Hub)
+name: Release
 
 on:
   release:
