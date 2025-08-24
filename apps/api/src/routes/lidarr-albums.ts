@@ -4,6 +4,9 @@ import { prisma } from '../prisma';
 import { request } from 'undici';
 import { getLidarrCreds } from '../utils/lidarr-creds';
 
+// NEW: взаимная блокировка с кроном/другими ручными раннами
+import { ensureNotBusyOrThrow } from '../scheduler';
+
 const r = Router();
 
 type SortField = 'title' | 'artistName' | 'tracks' | 'size' | 'path' | 'added' | 'monitored';
@@ -123,9 +126,13 @@ r.get('/albums', async (req, res) => {
     }
 });
 
-/** ===== refresh одного альбома в кэше БД ===== */
+/** ===== refresh одного альбома в кэше БД =====
+ * Блокируем, если идёт любой lidarr.pull.* (крон/ручной)
+ */
 r.post('/album/:id/refresh', async (req, res) => {
     try {
+        await ensureNotBusyOrThrow(['lidarr.pull.'], ['lidarrPull'] as any);
+
         const id = parseInt(String(req.params.id), 10);
         if (!Number.isFinite(id)) return res.status(400).json({ message: 'Bad album id' });
 
@@ -174,6 +181,7 @@ r.post('/album/:id/refresh', async (req, res) => {
 
         res.json({ ok: true });
     } catch (e: any) {
+        if (e?.status === 409) return res.status(409).json({ message: e?.message || 'Busy' });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
