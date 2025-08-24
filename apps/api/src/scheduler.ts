@@ -14,92 +14,32 @@ import {
   runLidarrPullEx,
 } from './workers';
 
-/* ====================== CRON-PARSER ADAPTER ====================== */
+/* ====================== CRON-PARSER SAFE NEXT ====================== */
 
-// Один раз выведем форму модуля, чтобы понять, что именно у нас установлено
-let loggedModuleShape = false;
-
-function coerceDate(res: any): Date | null {
-  if (!res) return null;
-  if (res instanceof Date) return res;
-  if (typeof res.toDate === 'function') {
-    try { return res.toDate(); } catch { /* ignore */ }
-  }
-  // иногда могут вернуть milliseconds
-  if (typeof res === 'number' && Number.isFinite(res)) return new Date(res);
-  if (typeof res.valueOf === 'function') {
-    const v = res.valueOf();
-    if (typeof v === 'number' && Number.isFinite(v)) return new Date(v);
-  }
-  return null;
-}
-
-/**
- * Универсально достаём следующий запуск из cron-выражения.
- * Поддерживаем и v4 (parseExpression().next().toDate()), и v5 (Parser/CronExpression классы).
- */
-function safeNext(exprRaw: string, now = new Date()): Date | null {
-  const expr = (exprRaw || '').trim().replace(/\s+/g, ' ');
-  const mod: any = cronParser as any;
-  const def: any = (mod && mod.default) ? mod.default : undefined;
-
-  if (!loggedModuleShape) {
-    loggedModuleShape = true;
-    const modKeys = Object.keys(mod || {});
-    const defKeys = Object.keys(def || {});
-    console.log('[scheduler] cron-parser shape:', modKeys);
-    if (defKeys.length) console.log('[scheduler] cron-parser default shape:', defKeys);
-  }
-
-  const candidates: Array<{ holder: any; parseName: 'parseExpression'|'parse' }> = [];
-  if (mod.CronExpressionParser) {
-    candidates.push({ holder: mod.CronExpressionParser, parseName: 'parseExpression' });
-    candidates.push({ holder: mod.CronExpressionParser, parseName: 'parse' });
-  }
-  if (def?.CronExpressionParser) {
-    candidates.push({ holder: def.CronExpressionParser, parseName: 'parseExpression' });
-    candidates.push({ holder: def.CronExpressionParser, parseName: 'parse' });
-  }
-
-  if (mod.CronExpression) {
-    candidates.push({ holder: mod.CronExpression, parseName: 'parse' });
-  }
-  if (def?.CronExpression) {
-    candidates.push({ holder: def.CronExpression, parseName: 'parse' });
-  }
-
-  for (const c of candidates) {
-    try {
-      const parseFn = c.holder?.[c.parseName];
-      if (typeof parseFn !== 'function') continue;
-
-      const parsed = parseFn.call(c.holder, expr, { currentDate: now });
-      if (!parsed) continue;
-
-      // Ищем подходящий метод получения следующей даты на инстансе
-      const methodNames = ['getNextDate', 'nextDate', 'getNext', 'next'];
-      for (const m of methodNames) {
-        const fn = parsed[m];
-        if (typeof fn === 'function') {
-          try {
-            const res = fn.call(parsed);
-            const d = coerceDate(res);
-            if (!d) {
-              console.warn(`[scheduler] safeNext: unsupported ${m}() result for expr=${expr}`, res);
-            }
-            if (d) return d;
-          } catch (e) {
-            console.warn(`[scheduler] safeNext: call ${m}() failed for expr=${expr}`, e);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[scheduler] safeNext: parse via ${c.holder?.name || '<?>'}#${c.parseName} failed for expr="${expr}"`, e);
+function nextFromCron(expr: string, opts?: any): Date | null {
+  try {
+    // v4: parseExpression; v5: CronExpression.parse
+    if (typeof (cronParser as any).parseExpression === 'function') {
+      const it = (cronParser as any).parseExpression(expr, opts);
+      const n = it.next();
+      if (n?.toDate) return n.toDate();
+      if (n instanceof Date) return n;
+      return null;
     }
+    const CE = (cronParser as any).CronExpression;
+    if (CE && typeof CE.parse === 'function') {
+      const it = CE.parse(expr, opts);
+      const n = it.next();
+      if (n?.toDate) return n.toDate();
+      if (n instanceof Date) return n;
+      return null;
+    }
+    console.warn('[scheduler] safeNext: cron-parser API not found; keys=', Object.keys(cronParser));
+    return null;
+  } catch (e) {
+    // не шумим на каждую секунду — короткий лог и null
+    return null;
   }
-
-  console.warn('[scheduler] safeNext: unable to compute next date for expr=', expr);
-  return null;
 }
 
 /* ====================== JOBS REGISTRY ====================== */
@@ -117,7 +57,19 @@ let jobs: {
   backup?: cron.ScheduledTask;
 } = {};
 
-/* ====================== BACKUP HELPERS ====================== */
+// Памятка: какие jobKeys сейчас запущены ИМЕННО кроном (для UI "State")
+type JobKey =
+    | 'yandexPull'
+    | 'yandexMatch'
+    | 'yandexPush'
+    | 'lidarrPull'
+    | 'customMatch'
+    | 'customPush'
+    | 'backup';
+
+const cronActivity: Partial<Record<JobKey, boolean>> = {};
+
+/* ====================== BACKUP HELPERS (как было) ====================== */
 
 function ts() {
   const d = new Date();
@@ -182,7 +134,7 @@ export function listBackups(dir: string): { file: string; size: number; mtime: n
   } catch { return []; }
 }
 
-/* ====================== SCHEDULER ====================== */
+/* ====================== COMMON ====================== */
 
 export async function initScheduler() { await reloadJobs(); }
 
@@ -193,6 +145,15 @@ async function hasActiveRunWithPrefixes(prefixes: string[]): Promise<boolean> {
   const r = await prisma.syncRun.findFirst({ where: { status: 'running', OR: or }, orderBy: { startedAt: 'desc' } });
   return !!r;
 }
+
+/** Проверка «занятости» с учётом памяти (крон уже стартанул, но ран ещё не создался) */
+async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<boolean> {
+  const dbBusy = await hasActiveRunWithPrefixes(prefixes);
+  const cronBusy = relatedJobKeys.some((k) => !!cronActivity[k]);
+  return dbBusy || cronBusy;
+}
+
+/* ====================== RELOAD JOBS ====================== */
 
 export async function reloadJobs() {
   // стоп старые
@@ -208,10 +169,15 @@ export async function reloadJobs() {
   if (s.enableCronCustomMatch && s.cronCustomMatch && cron.validate(s.cronCustomMatch)) {
     jobs.customMatch = cron.schedule(s.cronCustomMatch, async () => {
       if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.match: skip (busy)'); return; }
+      cronActivity.customMatch = true;
       try {
         console.log('[cron] custom.match.start');
-        await runCustomMatchAll(); // kind: custom.match.all
-      } catch (e) { console.error('[cron] custom.match.failed:', (e as Error).message); }
+        await runCustomMatchAll();
+      } catch (e) {
+        console.error('[cron] custom.match.failed:', (e as Error).message);
+      } finally {
+        cronActivity.customMatch = false;
+      }
     });
   }
 
@@ -219,10 +185,15 @@ export async function reloadJobs() {
   if (s.enableCronCustomPush && s.cronCustomPush && cron.validate(s.cronCustomPush)) {
     jobs.customPush = cron.schedule(s.cronCustomPush, async () => {
       if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.push: skip (busy)'); return; }
+      cronActivity.customPush = true;
       try {
         console.log('[cron] custom.push.start');
-        await runCustomPushAll(); // kind: custom.push.all
-      } catch (e) { console.error('[cron] custom.push.failed:', (e as Error).message); }
+        await runCustomPushAll();
+      } catch (e) {
+        console.error('[cron] custom.push.failed:', (e as Error).message);
+      } finally {
+        cronActivity.customPush = false;
+      }
     });
   }
 
@@ -230,56 +201,81 @@ export async function reloadJobs() {
   if ( s.enableCronYandexPull && s.cronYandexPull && cron.validate(s.cronYandexPull) ) {
     jobs.yandexPull = cron.schedule(s.cronYandexPull, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.pull: skip (busy)'); return; }
+      cronActivity.yandexPull = true;
       try {
         console.log('[cron] yandex.pull.start');
-        await runYandexPullAll(); // kind: yandex.pull.all
-      } catch (e) { console.error('[cron] yandex.pull.failed:', (e as Error).message); }
+        await runYandexPullAll();
+      } catch (e) {
+        console.error('[cron] yandex.pull.failed:', (e as Error).message);
+      } finally {
+        cronActivity.yandexPull = false;
+      }
     });
   }
 
-  /* ---------- YANDEX: match (artists|albums|both) ---------- */
+  /* ---------- YANDEX: match ---------- */
   if ( s.enableCronYandexMatch && s.cronYandexMatch && cron.validate(s.cronYandexMatch) ) {
     const target = (s.yandexMatchTarget as 'artists'|'albums'|'both') || 'both';
     jobs.yandexMatch = cron.schedule(s.cronYandexMatch, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.match: skip (busy)'); return; }
+      cronActivity.yandexMatch = true;
       try {
         console.log('[cron] yandex.match.start', target);
         await runYandexMatch(target, { force: false });
-      } catch (e) { console.error('[cron] yandex.match.failed:', (e as Error).message); }
+      } catch (e) {
+        console.error('[cron] yandex.match.failed:', (e as Error).message);
+      } finally {
+        cronActivity.yandexMatch = false;
+      }
     });
   }
 
-  /* ---------- YANDEX: push (artists|albums|both) ---------- */
+  /* ---------- YANDEX: push ---------- */
   if ( s.enableCronYandexPush && s.cronYandexPush && cron.validate(s.cronYandexPush) ) {
     const target = (s.yandexPushTarget as 'artists'|'albums'|'both') || 'both';
     jobs.yandexPush = cron.schedule(s.cronYandexPush, async () => {
       if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.push: skip (busy)'); return; }
+      cronActivity.yandexPush = true;
       try {
         console.log('[cron] yandex.push.start', target);
         await runYandexPush(target);
-      } catch (e) { console.error('[cron] yandex.push.failed:', (e as Error).message); }
+      } catch (e) {
+        console.error('[cron] yandex.push.failed:', (e as Error).message);
+      } finally {
+        cronActivity.yandexPush = false;
+      }
     });
   }
 
-  /* ---------- LIDARR: pull (artists|albums|both) ---------- */
+  /* ---------- LIDARR: pull ---------- */
   if ( s.enableCronLidarrPull && s.cronLidarrPull && cron.validate(s.cronLidarrPull) ) {
     const target = (s.lidarrPullTarget as 'artists'|'albums'|'both') || 'both';
     jobs.lidarrPull = cron.schedule(s.cronLidarrPull, async () => {
       if (await hasActiveRunWithPrefixes(['lidarr.pull.'])) { console.log('[cron] lidarr.pull: skip (busy)'); return; }
+      cronActivity.lidarrPull = true;
       try {
         console.log('[cron] lidarr.pull.start', target);
         await runLidarrPullEx(target);
-      } catch (e) { console.error('[cron] lidarr.pull.failed:', (e as Error).message); }
+      } catch (e) {
+        console.error('[cron] lidarr.pull.failed:', (e as Error).message);
+      } finally {
+        cronActivity.lidarrPull = false;
+      }
     });
   }
 
   /* ---------- BACKUP ---------- */
   if (s.backupEnabled && s.backupCron && cron.validate(s.backupCron)) {
     jobs.backup = cron.schedule(s.backupCron, async () => {
+      cronActivity.backup = true;
       try {
         console.log('[cron] backup.run');
         await runBackupNow();
-      } catch (e) { console.error('[cron] backup.failed:', (e as Error).message); }
+      } catch (e) {
+        console.error('[cron] backup.failed:', (e as Error).message);
+      } finally {
+        cronActivity.backup = false;
+      }
     });
   }
 
@@ -287,15 +283,6 @@ export async function reloadJobs() {
 }
 
 /* ====================== STATUS (для фронта) ====================== */
-
-type JobKey =
-    | 'yandexPull'
-    | 'yandexMatch'
-    | 'yandexPush'
-    | 'lidarrPull'
-    | 'customMatch'
-    | 'customPush'
-    | 'backup';
 
 const JOB_META: Record<JobKey, { title: string; settingCron: string; enabledFlag?: string; prefixes: string[]; }> = {
   yandexPull:  { title: 'Yandex: Pull all',       settingCron: 'cronYandexPull',    enabledFlag: 'enableCronYandexPull',  prefixes: ['yandex.pull.', 'yandex.'] },
@@ -309,6 +296,7 @@ const JOB_META: Record<JobKey, { title: string; settingCron: string; enabledFlag
 
 export async function getCronStatuses() {
   const s = await prisma.setting.findFirst();
+  const now = new Date();
 
   const out: Array<{
     key: JobKey;
@@ -317,33 +305,22 @@ export async function getCronStatuses() {
     cron?: string | null;
     valid: boolean;
     nextRun?: Date | null;
-    running: boolean;
+    running: boolean; // ВАЖНО: теперь это "крон запущен"
   }> = [];
 
   for (const key of Object.keys(JOB_META) as JobKey[]) {
     const meta = JOB_META[key];
-    const rawExpr = (s as any)?.[meta.settingCron] as string | undefined | null;
-    const cronExpr = (rawExpr || '').trim().replace(/\s+/g, ' ') || undefined;
-
+    const cronExpr = (s as any)?.[meta.settingCron] as string | undefined | null;
     const enabled = !!((s as any)?.[meta.enabledFlag as string]);
     const valid = !!cronExpr && cron.validate(cronExpr);
-
     let nextRun: Date | null = null;
+
     if (enabled && valid && cronExpr) {
-      try {
-        nextRun = safeNext(cronExpr, new Date());
-      } catch (e) {
-        console.warn(`[scheduler] getCronStatuses: parse failed (key=${key}) expr="${cronExpr}" raw="${rawExpr}"`, e);
-        nextRun = null;
-      }
-    } else if (enabled && rawExpr && !valid) {
-      console.warn(`[scheduler] getCronStatuses: invalid cron (key=${key}) expr="${rawExpr}"`);
+      nextRun = nextFromCron(cronExpr, { currentDate: now });
     }
 
-    let running = false;
-    try {
-      running = await hasActiveRunWithPrefixes(meta.prefixes);
-    } catch {}
+    // ВАЖНО: показываем running ТОЛЬКО по памяти (то, что запущено кроном)
+    const running = !!cronActivity[key];
 
     out.push({
       key,
@@ -357,4 +334,14 @@ export async function getCronStatuses() {
   }
 
   return out;
+}
+
+/* ====================== ХЕЛПЕР для ручных эндпоинтов ====================== */
+/** Зови это из ручных роутов, чтобы отдавать 409, если занято */
+export async function ensureNotBusyOrThrow(prefixes: string[], relatedJobKeys: JobKey[]) {
+  const busy = await isBusyNow(prefixes, relatedJobKeys);
+  if (busy) {
+    const p = prefixes.join(', ');
+    throw Object.assign(new Error(`Busy: active run for prefixes [${p}]`), { status: 409 });
+  }
 }

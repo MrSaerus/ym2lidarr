@@ -1,8 +1,12 @@
+// apps/api/src/routes/custom-artists.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { startRun } from '../log';
 import { runCustomArtistsMatch } from '../workers';
 import type { Prisma } from '@prisma/client';
+
+// НОВОЕ: взаимная блокировка с кроном custom.*
+import { ensureNotBusyOrThrow } from '../scheduler';
 
 const r = Router();
 
@@ -138,28 +142,44 @@ r.delete('/:id', async (req, res) => {
     res.json({ ok: true });
 });
 
-/** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ---------- */
+/** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ----------
+ *  БЛОКИРУЕМ, если идёт любой custom.match.* / custom.push.* (крон/ручной)
+ */
 
 // POST /api/custom-artists/:id/match
 r.post('/:id/match', async (req, res) => {
-    const id = parseInt(String(req.params.id), 10);
-    if (!id) return res.status(400).json({ error: 'Bad id' });
-    const force =
-        req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
+    try {
+        await ensureNotBusyOrThrow(['custom.'], ['customMatch', 'customPush'] as any);
 
-    const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
-    runCustomArtistsMatch(run.id, { onlyId: id, force }).catch(() => {});
-    res.json({ started: true, runId: run.id });
+        const id = parseInt(String(req.params.id), 10);
+        if (!id) return res.status(400).json({ error: 'Bad id' });
+        const force =
+            req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
+
+        const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
+        runCustomArtistsMatch(run.id, { onlyId: id, force }).catch(() => {});
+        res.json({ ok: true, started: true, runId: run.id });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
 });
 
 // POST /api/custom-artists/match-all
 r.post('/match-all', async (req, res) => {
-    const force =
-        req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
+    try {
+        await ensureNotBusyOrThrow(['custom.'], ['customMatch', 'customPush'] as any);
 
-    const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
-    runCustomArtistsMatch(run.id, { force }).catch(() => {});
-    res.json({ started: true, runId: run.id });
+        const force =
+            req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
+
+        const run = await startRun('custom', { phase: 'start', c_total: 0, c_done: 0, c_matched: 0 });
+        runCustomArtistsMatch(run.id, { force }).catch(() => {});
+        res.json({ ok: true, started: true, runId: run.id });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
 });
 
 export default r;

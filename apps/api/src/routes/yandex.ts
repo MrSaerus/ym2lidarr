@@ -2,9 +2,22 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 
+// НОВОЕ: взаимная блокировка ручных запусков с кроном
+import { ensureNotBusyOrThrow } from '../scheduler';
+
+// НОВОЕ: реальные запускатели воркеров
+import {
+    runYandexPullAll,
+    runYandexMatch,
+    runYandexPush,
+} from '../workers';
+
 const r = Router();
 
-// ===== helpers =====
+/* ------------------------------------------------------------- */
+/* helpers                                                       */
+/* ------------------------------------------------------------- */
+
 function num(v: any, def: number) {
     const n = parseInt(String(v ?? ''), 10);
     return Number.isFinite(n) && n > 0 ? n : def;
@@ -22,10 +35,62 @@ function parsePaging(req: any) {
     return { page, pageSize, q, sortBy, sortDir };
 }
 
-/**
- * НОВЫЕ эндпоинты: читаем напрямую из YandexArtist/YandexAlbum.
- * MusicBrainz-поля можно игнорить на фронте; ссылки на Яндекс строим ТОЛЬКО из числового ymId.
- */
+// НОВОЕ: общие константы для busy-проверок
+const Y_PREFIXES = ['yandex.'];
+const Y_JOB_KEYS = ['yandexPull', 'yandexMatch', 'yandexPush'] as const;
+
+/* ------------------------------------------------------------- */
+/* РУЧНЫЕ ЗАПУСКИ (manual endpoints с взаимной блокировкой)      */
+/* ------------------------------------------------------------- */
+
+// Pull-all (Яндекс → кэш)
+r.post('/pull-all', async (req, res) => {
+    try {
+        await ensureNotBusyOrThrow(Y_PREFIXES, Y_JOB_KEYS as any);
+        const result: any = await runYandexPullAll();
+        res.json({ ok: true, runId: result?.runId ?? null });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
+
+// Match (artists|albums|both)
+r.post('/match', async (req, res) => {
+    try {
+        await ensureNotBusyOrThrow(Y_PREFIXES, Y_JOB_KEYS as any);
+        const targetRaw = String(req.body?.target ?? 'both');
+        const target: 'artists' | 'albums' | 'both' =
+            targetRaw === 'artists' || targetRaw === 'albums' ? (targetRaw as any) : 'both';
+        const force = !!req.body?.force;
+
+        const result: any = await runYandexMatch(target, { force });
+        res.json({ ok: true, runId: result?.runId ?? null });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
+
+// Push (artists|albums|both) → Lidarr
+r.post('/push', async (req, res) => {
+    try {
+        await ensureNotBusyOrThrow(Y_PREFIXES, Y_JOB_KEYS as any);
+        const targetRaw = String(req.body?.target ?? 'both');
+        const target: 'artists' | 'albums' | 'both' =
+            targetRaw === 'artists' || targetRaw === 'albums' ? (targetRaw as any) : 'both';
+
+        const result: any = await runYandexPush(target);
+        res.json({ ok: true, runId: result?.runId ?? null });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
+
+/* ------------------------------------------------------------- */
+/* ЧТЕНИЕ СПИСКОВ (как было)                                     */
+/* ------------------------------------------------------------- */
 
 // ===== ARTISTS =====
 r.get('/artists', async (req, res) => {

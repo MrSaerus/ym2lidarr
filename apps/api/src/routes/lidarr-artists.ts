@@ -5,6 +5,9 @@ import { request } from 'undici';
 import { getLidarrCreds } from '../utils/lidarr-creds';
 import { syncLidarrArtists, syncLidarrAlbums } from '../services/lidarr-cache';
 
+// НОВОЕ: взаимная блокировка с кроном/другими ручными раннами
+import { ensureNotBusyOrThrow } from '../scheduler';
+
 const r = Router();
 
 /** ===== list artists from DB with filters/sort/paging ===== */
@@ -141,14 +144,19 @@ r.post('/artist/:id/refresh', async (req, res) => {
     }
 });
 
-/** ===== unified resync: artists + albums ===== */
+/** ===== unified resync: artists + albums =====
+ * БЛОКИРУЕМ, если идёт любой lidarr.pull.* ран (крон/ручной)
+ */
 r.post('/resync', async (req, res) => {
     try {
+        await ensureNotBusyOrThrow(['lidarr.pull.'], ['lidarrPull'] as any);
+
         const artists = await syncLidarrArtists();
         const albums  = await syncLidarrAlbums();
-        res.json({ artists, albums });
+        res.json({ ok: true, artists, albums });
     } catch (e: any) {
-        res.status(500).json({ message: e?.message || String(e) });
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
     }
 });
 
