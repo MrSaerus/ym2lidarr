@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM node:20-alpine AS builder
+FROM node:20-alpine@sha256:df02558528d3d3d0d621f112e232611aecfee7cbc654f6b375765f72bb262799 AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
@@ -13,7 +13,7 @@ COPY apps/web ./apps/web
 RUN npm --workspace apps/web run build
 
 # ---------- runner ----------
-FROM node:20-alpine AS web
+FROM node:20-alpine@sha256:df02558528d3d3d0d621f112e232611aecfee7cbc654f6b375765f72bb262799 AS web
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

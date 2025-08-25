@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM node:20 AS builder
+FROM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
@@ -25,7 +25,7 @@ RUN npm --workspace apps/api run build
 RUN npm --workspace apps/web run build
 
 # ---------- runner ----------
-FROM node:20 AS api_web
+FROM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS api_web
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -35,8 +35,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3.11 pyth
 COPY package*.json ./
 COPY apps/api/package.json ./apps/api/package.json
 RUN npm ci --omit=dev
-
-RUN npm i prisma@5.22.0 --no-save
 
 COPY apps/pyproxy/requirements.txt .
 
