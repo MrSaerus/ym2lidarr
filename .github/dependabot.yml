@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /apps/api
+    schedule:
+      interval: daily
+
+  - package-ecosystem: pip
+    directory: /apps/pyproxy
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
