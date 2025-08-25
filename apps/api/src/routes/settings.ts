@@ -1,5 +1,6 @@
 // apps/api/src/routes/settings.ts
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 
 import { prisma } from '../prisma';
 import { reloadJobs, getCronStatuses } from '../scheduler';
@@ -8,6 +9,12 @@ import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../serv
 
 const r = Router();
 
+// Rate limiter: limit /test/yandex to 5 requests per minute per IP
+const testYandexLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,              // limit each IP to 5 requests per windowMs
+  message: { ok: false, error: 'Too many requests, please try again later.' },
+});
 // Разрешённые поля настроек (только новые имена)
 const ALLOWED_FIELDS = new Set([
   // yandex
@@ -234,7 +241,7 @@ r.get('/scheduler', async (_req, res) => {
 });
 
 // POST /api/settings/test/yandex  { token?: string }
-r.post('/test/yandex', async (req, res) => {
+r.post('/test/yandex', testYandexLimiter, async (req, res) => {
   try {
     const body = req.body || {};
     let token: string | undefined =

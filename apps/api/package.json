@@ -17,7 +17,8 @@
     "node-cron": "^3.0.3",
     "undici": "^6.19.8",
     "undici-proxy": "^0.3.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "express-rate-limit": "^8.0.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
