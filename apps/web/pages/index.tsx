@@ -165,10 +165,6 @@ export default function OverviewPage() {
     setOptimisticBusy(prev => ({ ...prev, [key]: false }));
   }, []);
 
-  const clearManyBusy = useCallback((keys: BusyKey[]) => {
-    keys.forEach(clearBusy);
-  }, [clearBusy]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try { setStats(await api<StatsResp>('/api/stats')); setMsg(''); }

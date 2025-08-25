@@ -2,7 +2,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
   HomeIcon,
-  QuestionMarkCircleIcon,
   Cog6ToothIcon,
   ArchiveBoxArrowDownIcon,
   QueueListIcon, MusicalNoteIcon, InboxStackIcon, PlayIcon, ServerStackIcon,

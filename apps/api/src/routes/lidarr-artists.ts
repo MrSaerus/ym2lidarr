@@ -99,7 +99,6 @@ r.post('/artist/:id/refresh', async (req, res) => {
         const id = parseInt(String(req.params.id), 10);
         if (!Number.isFinite(id)) return res.status(400).json({ message: 'Bad artist id' });
 
-        const { get } = request as any;
         const { lidarrUrl, lidarrApiKey } = await getLidarrCreds();
         const base = String(lidarrUrl || '').replace(/\/+$/, '');
         const url = `${base}/api/v1/artist/${id}?apikey=${encodeURIComponent(lidarrApiKey || '')}`;

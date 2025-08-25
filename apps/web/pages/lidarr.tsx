@@ -191,7 +191,6 @@ function ArtistsTab() {
         updateUrl({ tab: 'artists', page: '1', pageSize: String(pageSize), q, monitored, sortBy: field, sortDir: dir });
     }
 
-    const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const headerArrow = (f: ArtistSortField) =>
         sortBy === f ? <span className="text-xs text-gray-500">{sortDir === 'asc' ? '▲' : '▼'}</span> : null;
 
@@ -453,8 +452,6 @@ function AlbumsTab() {
     }
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
-    const headerArrow = (f: AlbumSortField) =>
-        sortBy === f ? <span className="text-xs text-gray-500">{sortDir === 'asc' ? '▲' : '▼'}</span> : null;
 
     return (
         <>
