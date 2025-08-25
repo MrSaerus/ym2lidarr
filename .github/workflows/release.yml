@@ -10,7 +10,6 @@ env:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: release-${{ github.event.release.tag_name || github.ref }}
@@ -52,6 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: ym2lidarr
     needs: build_all
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:

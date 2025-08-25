@@ -1,5 +1,8 @@
 name: CI (tests)
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: ["**"]
