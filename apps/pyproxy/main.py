@@ -2,10 +2,12 @@
 import asyncio
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, Body
+import logging
 from pydantic import BaseModel
 from yandex_music import ClientAsync
 
 app = FastAPI(title="YA PyProxy")
+logger = logging.getLogger("pyproxy")
 
 # ====== Schemas ======
 class ArtistOut(BaseModel):
@@ -76,7 +78,8 @@ async def verify(token: str = Body(..., embed=True)):
 
         return {"ok": True, "uid": uid, "login": login}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        logger.exception("Exception occurred during token verification")
+        return {"ok": False, "error": "An internal error occurred"}
 
 @app.post("/likes", response_model=LikesResponse)
 async def likes(token: str = Body(..., embed=True)):
