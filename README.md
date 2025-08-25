@@ -1,12 +1,17 @@
 **YM → Lidarr**
 
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/11085/badge)](https://bestpractices.coreinfrastructure.org/projects/11085)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/MrSaerus/ym2lidarr/badge)](https://securityscorecards.dev/viewer/?uri=github.com/MrSaerus/ym2lidarr)
+![GitHub Release](https://img.shields.io/github/v/release/MrSaerus/ym2lidarr?sort=semver&label=Release%20latest)
 [![Release](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml/badge.svg)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml)
-[![CI (tests)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/ci.yml/badge.svg)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/ci.yml)
-[![Docker ym2lidarr-api](https://badgen.net/docker/size/saerus/ym2lidarr-api?icon=docker&label=Docker%20ym2lidarr-api)](https://hub.docker.com/r/saerus/ym2lidarr-api/)
-[![Docker ym2lidarr-web](https://badgen.net/docker/size/saerus/ym2lidarr-web?icon=docker&label=Docker%20ym2lidarr-web)](https://hub.docker.com/r/saerus/ym2lidarr-web/)
-[![Docker ym2lidarr-pyproxy](https://badgen.net/docker/size/saerus/ym2lidarr-pyproxy?icon=docker&label=Docker%20ym2lidarr-pyproxy)](https://hub.docker.com/r/saerus/ym2lidarr-pyproxy/)
-[![Docker ym2lidarr-single](https://badgen.net/docker/size/saerus/ym2lidarr-single?icon=docker&label=Docker%20ym2lidarr-single)](https://hub.docker.com/r/saerus/ym2lidarr-single/)
 
+## Docker
+[![YM2LIDARR-API](https://badgen.net/docker/size/saerus/ym2lidarr-api?icon=docker&label=API)](https://hub.docker.com/r/saerus/ym2lidarr-api/)
+[![YM2LIDARR-WEB](https://badgen.net/docker/size/saerus/ym2lidarr-web?icon=docker&label=WEB)](https://hub.docker.com/r/saerus/ym2lidarr-web/)
+[![YM2LIDARR-PyPROXY](https://badgen.net/docker/size/saerus/ym2lidarr-pyproxy?icon=docker&label=PyPROXY)](https://hub.docker.com/r/saerus/ym2lidarr-pyproxy/)
+[![YM2LIDARR-SINGLE](https://badgen.net/docker/size/saerus/ym2lidarr-single?icon=docker&label=SINGLE)](https://hub.docker.com/r/saerus/ym2lidarr-single/)
+
+## Описание
 Сервис, забирает **лайки из Яндекс.Музыки** и отправляет их в **Lidarr** (кастом-лист артистов или релиз-группы альбомов).
 
 ## Screenshots
