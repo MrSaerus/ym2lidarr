@@ -9,12 +9,30 @@ import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../serv
 
 const r = Router();
 
+function stripTrailingSlashes(s?: string | null): string {
+  const str = String(s ?? '');
+  let i = str.length;
+  while (i > 0 && str.charCodeAt(i - 1) === 47 /* '/' */) i--;
+  return str.slice(0, i);
+}
+
+function withTrailingSlash(s: string): string {
+  const base = stripTrailingSlashes(s);
+  return base ? base + '/' : '/';
+}
+
+function joinUrl(base: string, path: string): string {
+  // path ожидаем без ведущего слэша
+  return new URL(path, withTrailingSlash(base)).toString();
+}
+
 // Rate limiter: limit /test/yandex to 5 requests per minute per IP
 const testYandexLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,              // limit each IP to 5 requests per windowMs
   message: { ok: false, error: 'Too many requests, please try again later.' },
 });
+
 // Разрешённые поля настроек (только новые имена)
 const ALLOWED_FIELDS = new Set([
   // yandex
@@ -81,8 +99,6 @@ const ALLOWED_FIELDS = new Set([
   'webhookSecret',
 ]);
 
-
-
 function pickSettings(input: any) {
   const out: any = {};
   if (!input || typeof input !== 'object') return out;
@@ -137,15 +153,17 @@ function pickSettings(input: any) {
     const v = String(out.notifyType || '').toLowerCase();
     out.notifyType = ['telegram', 'webhook', 'none', 'disabled'].includes(v) ? (v === 'disabled' ? 'none' : v) : 'none';
   }
+
   if ('pyproxyUrl' in out && typeof out.pyproxyUrl === 'string') {
-    out.pyproxyUrl = out.pyproxyUrl.replace(/\/+$/, '');
+    out.pyproxyUrl = stripTrailingSlashes(out.pyproxyUrl);
   }
   if ('lidarrUrl' in out && typeof out.lidarrUrl === 'string') {
-    out.lidarrUrl = out.lidarrUrl.replace(/\/+$/, '');
+    out.lidarrUrl = stripTrailingSlashes(out.lidarrUrl);
   }
   if ('rootFolderPath' in out && typeof out.rootFolderPath === 'string') {
-    out.rootFolderPath = out.rootFolderPath.replace(/\/+$/, '');
+    out.rootFolderPath = stripTrailingSlashes(out.rootFolderPath);
   }
+
   if ('qualityProfileId' in out && out.qualityProfileId != null) {
     const n = parseInt(String(out.qualityProfileId), 10);
     if (Number.isFinite(n)) out.qualityProfileId = n; else delete out.qualityProfileId;
@@ -165,7 +183,7 @@ function pickSettings(input: any) {
 // ===== helpers =====
 
 function sanitizePath(p?: string | null) {
-  return String(p || '').replace(/\/+$/, '');
+  return stripTrailingSlashes(p);
 }
 
 function toNum(x: any): number | null {
@@ -281,8 +299,8 @@ r.post('/test/lidarr', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'No Lidarr URL or API key' });
     }
 
-    const base = lidarrUrl.replace(/\/+$/, '');
-    const url = `${base}/api/v1/system/status`;
+    const base = stripTrailingSlashes(lidarrUrl);
+    const url = joinUrl(base, 'api/v1/system/status');
 
     const { request } = await import('undici');
     const r2 = await request(url, { method: 'GET', headers: { 'X-Api-Key': lidarrApiKey } });
@@ -310,7 +328,7 @@ r.post('/test/lidarr', async (req, res) => {
       if (!s0?.monitor && d.monitor) needUpdate.monitor = d.monitor;
 
       if (Object.keys(needUpdate).length > 0) {
-        const saved = await prisma.setting.upsert({
+        await prisma.setting.upsert({
           where: { id: 1 },
           create: { id: 1, lidarrUrl: base, lidarrApiKey, ...needUpdate },
           update: { lidarrUrl: base, lidarrApiKey, ...needUpdate },
@@ -337,7 +355,7 @@ r.post('/lidarr/defaults', async (req, res) => {
     const overwrite = !!body.overwrite;
 
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
-    const lidarrUrl = s?.lidarrUrl?.replace(/\/+$/, '');
+    const lidarrUrl = s?.lidarrUrl ? stripTrailingSlashes(s.lidarrUrl) : '';
     const lidarrApiKey = s?.lidarrApiKey || '';
 
     if (!lidarrUrl || !lidarrApiKey) {
