@@ -1,28 +1,77 @@
 version: 2
 updates:
-  # NPM/Node.js (твои API + Web сервисы)
+  # NPM/Node.js workspaces (root + apps)
   - package-ecosystem: "npm"
-    directory: "/" # корень монорепы
+    directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
-    reviewers:
-      - "MrSaerus"   # можно убрать или указать команду/юзеров
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Amsterdam"
+    open-pull-requests-limit: 20
+    versioning-strategy: increase-if-necessary
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
+      - "npm"
 
   - package-ecosystem: "npm"
     directory: "/apps/api"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Amsterdam"
+    open-pull-requests-limit: 20
+    versioning-strategy: increase-if-necessary
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "npm"
 
   - package-ecosystem: "npm"
     directory: "/apps/web"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Amsterdam"
+    open-pull-requests-limit: 20
+    versioning-strategy: increase-if-necessary
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+      - "npm"
 
-  # GitHub Actions
+  # GitHub Actions updates
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Amsterdam"
+    labels:
+      - "dependencies"
+      - "ci"
+
+  # Docker base images (if Dockerfile present in repo root)
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Europe/Amsterdam"
+    labels:
+      - "dependencies"
+      - "docker"
