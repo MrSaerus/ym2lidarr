@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # NPM/Node.js (твои API + Web сервисы)
+  - package-ecosystem: "npm"
+    directory: "/" # корень монорепы
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "MrSaerus"   # можно убрать или указать команду/юзеров
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "npm"
+    directory: "/apps/api"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"
+    directory: "/apps/web"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
