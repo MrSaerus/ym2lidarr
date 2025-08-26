@@ -1,0 +1,32 @@
+name: Fuzz (fast-check)
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: API fast-check fuzz tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps (root + workspaces)
+        run: npm ci
+
+      - name: Prisma generate (apps/api)
+        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+
+      - name: Run fuzz tests (API)
+        run: npm -w apps/api run test:fuzz --if-present
