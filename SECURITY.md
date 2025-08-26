@@ -22,7 +22,10 @@ We only support the active development branch and the latest release. Security f
 
 ## Reporting a Vulnerability
 
-**Preferred method:** Use **GitHub Security Advisories** (`Security` → `Report a vulnerability`) — this creates a private notification for maintainers.
+**Preferred method:** Use **[GitHub Security Advisories](https://github.com/mrsaerus/ym2lidarr/security/advisories/new)** (`Security` → `Report a vulnerability`) — this creates a private notification for maintainers.
+
+Alternative resources:
+- [GitHub Security Advisories documentation](https://docs.github.com/en/code-security/security-advisories)
 
 **Please include:**
 - Detailed description of the issue and potential impact.
@@ -169,6 +172,12 @@ Out of scope: vulnerabilities in third‑party services and infrastructure not c
 ## Acknowledgements
 
 We appreciate responsible disclosure and may acknowledge contributions in **release notes** or a dedicated page (upon reporter's request).
+
+
+## References
+
+- [Responsible Disclosure Guidelines (GitHub Docs)](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository)
+- [OSV.dev Vulnerability Database](https://osv.dev/)
 
 ---
 
