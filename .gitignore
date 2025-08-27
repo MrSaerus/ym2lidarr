@@ -7,6 +7,9 @@ yarn-error.log*
 
 # build artifacts
 apps/**/dist/
+apps/api/coverage
+apps/api/reports
+apps/api/junit.xml
 apps/web/.next/
 apps/web/out/
 apps/pyproxy/.venv

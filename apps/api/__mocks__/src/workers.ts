@@ -1,0 +1,11 @@
+export const runYandexPull = jest.fn(async () => {});
+export const runLidarrPull = jest.fn(async () => {});
+export const runMbMatch = jest.fn(async () => {});
+export const runLidarrPush = jest.fn(async () => {});
+export const runCustomMatchAll = jest.fn(async () => ({ runId: 1 }));
+export const runCustomPushAll = jest.fn(async () => ({ runId: 2 }));
+export const runYandexPullAll = jest.fn(async () => ({ runId: 3 }));
+export const runYandexMatch = jest.fn(async () => ({ runId: 4 }));
+export const runYandexPush = jest.fn(async () => ({ runId: 5 }));
+export const runLidarrPullEx = jest.fn(async () => {});
+export const runCustomArtistsMatch = jest.fn(async () => ({ runId: 6 }));

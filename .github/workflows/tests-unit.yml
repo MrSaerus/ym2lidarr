@@ -1,0 +1,70 @@
+permissions:
+  contents: read
+name: Tests (unit)
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  CI: "true"
+
+jobs:
+  tests:
+    name: Install, Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install deps (root + workspaces)
+        run: npm ci
+
+      - name: Prisma generate (apps/api)
+        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+
+      - name: Build API (optional)
+        run: npm --workspace apps/api run build --if-present
+
+      - name: Run tests (unit)
+        run: npm --workspace apps/api run test:ci
+      - name: Show coverage summary
+        run: |
+          if [ -f apps/api/reports/coverage/lcov.info ]; then
+            echo "LCOV generated at apps/api/reports/coverage/lcov.info"
+          fi
+
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: apps/api/reports/junit/jest-junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload coverage (lcov + html)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            apps/api/reports/coverage/lcov.info
+            apps/api/reports/coverage
+          if-no-files-found: warn
+          retention-days: 14
