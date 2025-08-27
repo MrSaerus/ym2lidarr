@@ -12,7 +12,7 @@
     "bottleneck": "^2.19.5",
     "cors": "^2.8.5",
     "cron-parser": "^5.3.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.2.1",
     "express": "^4.19.2",
     "express-rate-limit": "^8.0.1",
     "morgan": "^1.10.1",
