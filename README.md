@@ -3,7 +3,7 @@
 [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/11085/badge)](https://bestpractices.coreinfrastructure.org/projects/11085)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/MrSaerus/ym2lidarr/badge)](https://securityscorecards.dev/viewer/?uri=github.com/MrSaerus/ym2lidarr)
 [![GitHub Release](https://img.shields.io/github/v/release/MrSaerus/ym2lidarr?sort=semver&label=Release%20latest)](https://github.com/MrSaerus/ym2lidarr/releases)
-[![Release](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml)
+[![Release](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml/badge.svg)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/release.yml)
 [![Tests (unit)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/tests-unit.yml/badge.svg?branch=main)](https://github.com/MrSaerus/ym2lidarr/actions/workflows/tests-unit.yml)
 
 ## Docker
