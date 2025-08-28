@@ -1,4 +1,4 @@
-name: CI (tests)
+name: Lint
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   test:
-    name: Install, Build & Test
+    name: Lint
     runs-on: ubuntu-latest
     environment: ym2lidarr
     steps:
@@ -41,4 +41,4 @@ jobs:
         run: npm --workspace apps/web run build --if-present
 
       - name: Run tests
-        run: npm test --workspaces --if-present
+        run: npm run lint

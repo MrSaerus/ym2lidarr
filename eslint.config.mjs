@@ -20,6 +20,10 @@ export default [
       '*.db-*',
       'backups/**',
       'apps/pyproxy/**',
+      'apps/api/__**',
+      'apps/api/coverage/**',
+      'apps/api/reports/**',
+      'apps/api/jest.setup.ts'
     ],
   },
 

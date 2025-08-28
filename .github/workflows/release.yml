@@ -24,15 +24,14 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { name: "api",    dockerfile: "./docker/api.Dockerfile",    repo: "ym2lidarr-api" }
-          - { name: "web",    dockerfile: "./docker/web.Dockerfile",    repo: "ym2lidarr-web" }
-          - { name: "pyproxy",dockerfile: "./docker/pyproxy.Dockerfile",repo: "ym2lidarr-pyproxy" }
-          - { name: "single", dockerfile: "./docker/single.Dockerfile", repo: "ym2lidarr-single" }
+          - { name: "api",     dockerfile: "./docker/api.Dockerfile",     repo: "ym2lidarr-api" }
+          - { name: "web",     dockerfile: "./docker/web.Dockerfile",     repo: "ym2lidarr-web" }
+          - { name: "pyproxy", dockerfile: "./docker/pyproxy.Dockerfile", repo: "ym2lidarr-pyproxy" }
+          - { name: "single",  dockerfile: "./docker/single.Dockerfile",  repo: "ym2lidarr-single" }
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
         with: { fetch-depth: 0 }
 
-      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
 
       - name: Build ${{ matrix.target.name }} (no push)
@@ -40,11 +39,13 @@ jobs:
         with:
           context: .
           file: ./${{ matrix.target.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: false
           tags: dummy/${{ matrix.target.repo }}:${{ github.event.release.tag_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_BASE=${{ vars.NEXT_PUBLIC_API_BASE }}
 
   push_all:
     name: Push all images (from release tag)
@@ -58,16 +59,15 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { name: "api",    dockerfile: "./docker/api.Dockerfile",    repo: "ym2lidarr-api" }
-          - { name: "web",    dockerfile: "./docker/web.Dockerfile",    repo: "ym2lidarr-web" }
-          - { name: "pyproxy",dockerfile: "./docker/pyproxy.Dockerfile",repo: "ym2lidarr-pyproxy" }
-          - { name: "single", dockerfile: "./docker/single.Dockerfile", repo: "ym2lidarr-single" }
+          - { name: "api",     dockerfile: "./docker/api.Dockerfile",     repo: "ym2lidarr-api" }
+          - { name: "web",     dockerfile: "./docker/web.Dockerfile",     repo: "ym2lidarr-web" }
+          - { name: "pyproxy", dockerfile: "./docker/pyproxy.Dockerfile", repo: "ym2lidarr-pyproxy" }
+          - { name: "single",  dockerfile: "./docker/single.Dockerfile",  repo: "ym2lidarr-single" }
 
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
         with: { fetch-depth: 0 }
 
-      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
 
       - name: Login to Docker Hub
@@ -94,9 +94,11 @@ jobs:
         with:
           context: .
           file: ./${{ matrix.target.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_API_BASE=${{ vars.NEXT_PUBLIC_API_BASE }}
