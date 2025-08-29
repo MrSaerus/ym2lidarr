@@ -3,9 +3,10 @@ import { startRun, endRun, patchRunStats, log as dblog } from './log';
 import { notify } from './notify';
 import { prisma } from './prisma';
 import {
-  ensureArtistInLidarr,
-  ensureAlbumInLidarr,
+  pushArtistWithConfirm,
+  pushAlbumWithConfirm,
 } from './services/lidarr';
+
 import { mbFindArtist, mbFindReleaseGroup } from './services/mb';
 import { yandexPullLikes, setPyproxyUrl } from './services/yandex';
 import { request } from 'undici';
@@ -689,74 +690,84 @@ export async function runLidarrPush(
 
       try {
         if (target === 'albums') {
-          const res = await ensureAlbumInLidarr(effSetting, {
-            artist: it.artist,
-            title: it.title,
-            rgMbid: it.rgMbid!,
-          });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const result = await pushAlbumWithConfirm(
+              effSetting,
+              { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
+              log,
+              { maxAttempts: 5, initialDelayMs: 1000 }
+          );
 
-          const title = res?.title || it.title;
-          const lidarrId = res?.id;
-          const path = res?.path;
-          const action = res?.__action || 'created';
-          const from = res?.__from;
+          if (result.ok) {
+            const confirmed = result.res;
+            const action   = confirmed?.__action || 'created';
+            const title    = confirmed?.title || it.title;
+            const lidarrId = confirmed?.id ?? null;
+            const path     = confirmed?.path ?? null;
 
-          await dblog(run.id, 'info', `Pushed album ${title}, action=${action}`, {
-            target, action, lidarrId, path, title, rgMbid: it.rgMbid, from,
-            payload: res?.__request, response: res?.__response,
-          });
-
-          if (it.rgMbid) {
-            const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
-            if (existing) {
-              await prisma.albumPush.update({
-                where: { id: existing.id },
-                data: { title, path: path ?? null, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
-              });
-            } else {
-              await prisma.albumPush.create({
-                data: { mbid: it.rgMbid, title, path: path ?? null, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
-              });
+            if (it.rgMbid) {
+              const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
+              if (existing) {
+                await prisma.albumPush.update({
+                  where: { id: existing.id },
+                  data: { title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+                });
+              } else {
+                await prisma.albumPush.create({
+                  data: { mbid: it.rgMbid, title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+                });
+              }
             }
+            ok++;
+          } else {
+            failed++;
+            await dblog(run.id, 'warn', `✖ Album push failed (after retries): ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
           }
         } else {
-          const res = await ensureArtistInLidarr(effSetting, { name: it.name, mbid: it.mbid! });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const result = await pushArtistWithConfirm(
+              effSetting,
+              { name: it.name, mbid: it.mbid! },
+              log,
+              { maxAttempts: 5, initialDelayMs: 1000 }
+          );
 
-          const name = res?.artistName || it.name;
-          const lidarrId = res?.id;
-          const path = res?.path;
-          const action = res?.__action || 'created';
-          const from = res?.__from;
+          if (result.ok) {
+            const confirmed = result.res;
+            const action   = confirmed?.__action || 'created';
+            const name     = confirmed?.artistName || it.name;
+            const lidarrId = confirmed?.id ?? null;
+            const path     = confirmed?.path ?? null;
 
-          await dblog(run.id, 'info', `Pushed artist ${name}, action=${action}`, {
-            target, action, lidarrId, path, name, mbid: it.mbid, from,
-            payload: res?.__request, response: res?.__response,
-          });
-
-          const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
-          if (existing) {
-            await prisma.artistPush.update({
-              where: { id: existing.id },
-              data: { name, path: path ?? null, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
-            });
+            const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
+            if (existing) {
+              await prisma.artistPush.update({
+                where: { id: existing.id },
+                data: { name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+              });
+            } else {
+              await prisma.artistPush.create({
+                data: {
+                  mbid: it.mbid,
+                  name,
+                  path,
+                  lidarrArtistId: lidarrId ?? null,
+                  status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                  source: src === 'custom' ? 'custom-push' : 'push',
+                },
+              });
+            }
+            ok++;
           } else {
-            await prisma.artistPush.create({
-              data: {
-                mbid: it.mbid,
-                name,
-                path: path ?? null,
-                lidarrArtistId: lidarrId ?? null,
-                status: action === 'exists' ? 'EXISTS' : 'CREATED',
-                source: src === 'custom' ? 'custom-push' : 'push',
-              },
-            });
+            failed++;
+            await dblog(run.id, 'warn', `✖ Push failed (after retries): ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
         }
-        ok++;
       } catch (e: any) {
         failed++;
-        await dblog(run.id, 'warn', `Push failed: ${String(e?.message || e)}`, { target });
+        await dblog(run.id, 'warn', `Push exception: ${String(e?.message || e)}`, { target });
       }
+
       done++;
       if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
     }
@@ -845,38 +856,82 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
 
       try {
         if (target === 'albums') {
-          const res = await ensureAlbumInLidarr(effSetting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid! });
-          await dblog(run.id, 'info', `✔ Pushed album:  ${it.title}`, {
-            target, action: res?.__action || 'created', lidarrId: res?.id, path: res?.path,
-            title: res?.title || it.title, rgMbid: it.rgMbid, from: res?.__from,
-            payload: res?.__request, response: res?.__response,
-          });
-          if (it.rgMbid) {
-            const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
-            if (existing) {
-              await prisma.albumPush.update({ where: { id: existing.id }, data: { title: res?.title || it.title, path: res?.path ?? null, lidarrAlbumId: res?.id ?? null, status: (res?.__action || 'created') === 'exists' ? 'EXISTS' : 'CREATED' } });
-            } else {
-              await prisma.albumPush.create({ data: { mbid: it.rgMbid, title: res?.title || it.title, path: res?.path ?? null, lidarrAlbumId: res?.id ?? null, status: (res?.__action || 'created') === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' } });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const result = await pushAlbumWithConfirm(
+              effSetting,
+              { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
+              log,
+              { maxAttempts: 5, initialDelayMs: 1000 }
+          );
+
+          if (result.ok) {
+            const confirmed = result.res;
+            const action   = confirmed?.__action || 'created';
+            const title    = confirmed?.title || it.title;
+            const lidarrId = confirmed?.id ?? null;
+            const path     = confirmed?.path ?? null;
+
+            if (it.rgMbid) {
+              const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
+              if (existing) {
+                await prisma.albumPush.update({
+                  where: { id: existing.id },
+                  data: { title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+                });
+              } else {
+                await prisma.albumPush.create({
+                  data: { mbid: it.rgMbid, title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+                });
+              }
             }
+            ok++;
+          } else {
+            failed++;
+            await dblog(run.id, 'warn', `✖ Album push failed (after retries): ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
           }
         } else {
-          const res = await ensureArtistInLidarr(effSetting, { name: it.name, mbid: it.mbid! });
-          await dblog(run.id, 'info', `✔ Pushed artist: ${it.name}`, {
-            target, action: res?.__action || 'created', lidarrId: res?.id, path: res?.path,
-            name: res?.artistName || it.name, mbid: it.mbid, from: res?.__from,
-            payload: res?.__request, response: res?.__response,
-          });
-          const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
-          if (existing) {
-            await prisma.artistPush.update({ where: { id: existing.id }, data: { name: res?.artistName || it.name, path: res?.path ?? null, lidarrArtistId: res?.id ?? null, status: (res?.__action || 'created') === 'exists' ? 'EXISTS' : 'CREATED' } });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const result = await pushArtistWithConfirm(
+              effSetting,
+              { name: it.name, mbid: it.mbid! },
+              log,
+              { maxAttempts: 5, initialDelayMs: 1000 }
+          );
+
+          if (result.ok) {
+            const confirmed = result.res;
+            const action   = confirmed?.__action || 'created';
+            const name     = confirmed?.artistName || it.name;
+            const lidarrId = confirmed?.id ?? null;
+            const path     = confirmed?.path ?? null;
+
+            const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
+            if (existing) {
+              await prisma.artistPush.update({
+                where: { id: existing.id },
+                data: { name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+              });
+            } else {
+              await prisma.artistPush.create({
+                data: {
+                  mbid: it.mbid,
+                  name,
+                  path,
+                  lidarrArtistId: lidarrId ?? null,
+                  status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                  source: source === 'custom' ? 'custom-push' : 'push',
+                },
+              });
+            }
+            ok++;
           } else {
-            await prisma.artistPush.create({ data: { mbid: it.mbid, name: res?.artistName || it.name, path: res?.path ?? null, lidarrArtistId: res?.id ?? null, status: (res?.__action || 'created') === 'exists' ? 'EXISTS' : 'CREATED', source: source === 'custom' ? 'custom-push' : 'push' } });
+            failed++;
+            await dblog(run.id, 'warn', `✖ Push failed (after retries): ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
         }
-        ok++;
       } catch (e: any) {
         failed++;
-        await dblog(run.id, 'warn', `✖ Push failed: ${String(e?.message || e)}`, { target });
+        await dblog(run.id, 'warn', `✖ Push exception: ${String(e?.message || e)}`, { target });
       }
 
       done++;
@@ -885,8 +940,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
 
     // 🔥 Новый финальный лог сводки
     const skipped = Math.max(0, total - (ok + failed));
-    await dblog(run.id, 'info', `Push finished: target ${target}, source ${source}, 
-    allowRepush ${allowRepush}, total ${total}, ok ${ok}, failed ${failed}, skipped ${skipped},`, {
+    await dblog(run.id, 'info', `Push finished: target ${target}, source ${source}, allowRepush ${allowRepush}, total ${total}, ok ${ok}, failed ${failed}, skipped ${skipped}`, {
       target,
       source,
       allowRepush,
