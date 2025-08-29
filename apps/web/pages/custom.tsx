@@ -155,20 +155,13 @@ export default function CustomArtistsPage() {
                         <button className="btn btn-outline" onClick={load} disabled={loading}>
                             {loading ? 'Refreshing…' : 'Refresh'}
                         </button>
-                        <button
-                            className="btn btn-outline"
-                            onClick={onMatchAll}
-                            disabled={matching}
-                            title="Сопоставить всех с MusicBrainz"
-                        >
-                            {matching ? 'Matching…' : 'Match all (MB)'}
-                        </button>
                     </div>
-
+                </div>
+                <div className="toolbar">
                     <div className="ml-auto flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Rows per page:</span>
+                        <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
                         <select
-                            className="select"
+                            className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1"
                             value={pageSize}
                             onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1); }}
                         >
@@ -177,7 +170,7 @@ export default function CustomArtistsPage() {
                             ))}
                         </select>
 
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-gray-500 text-nowrap">
               {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
             </span>
                         <div className="flex items-center gap-1">

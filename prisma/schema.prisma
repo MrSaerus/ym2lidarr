@@ -10,16 +10,18 @@ datasource db {
 // /* ===================== Ingest: Yandex ===================== */
 
 model YandexArtist {
-  id        Int      @id @default(autoincrement())
-  ymId      String   @unique
-  name      String
-  key       String?
-  present   Boolean  @default(true)
-  raw       String?
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  id         Int       @id @default(autoincrement())
+  ymId       String    @unique
+  name       String
+  key        String?
+  present    Boolean   @default(true)
+  lastSeenAt DateTime?
+  yGone      Boolean   @default(false)
+  yGoneAt    DateTime?
+  raw        String?
+  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
 
-  // результат матчинга
   mbid String?
 
   albums YandexAlbum[]
@@ -30,22 +32,23 @@ model YandexArtist {
 }
 
 model YandexAlbum {
-  id        Int      @id @default(autoincrement())
-  ymId      String   @unique
-  title     String
-  artist    String?
-  year      Int?
-  key       String?
-  present   Boolean  @default(true)
-  raw       String?
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  id         Int       @id @default(autoincrement())
+  ymId       String    @unique
+  title      String
+  artist     String?
+  year       Int?
+  key        String?
+  present    Boolean   @default(true)
+  lastSeenAt DateTime?
+  yGone      Boolean   @default(false)
+  yGoneAt    DateTime?
+  raw        String?
+  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
 
-  // связь на артиста Yandex по его ymId
   yandexArtistId String?
   artistRef      YandexArtist? @relation(fields: [yandexArtistId], references: [ymId], onDelete: SetNull)
 
-  // результат матчинга (release-group MBID)
   rgMbid String?
 
   @@index([title])
@@ -282,4 +285,7 @@ model Setting {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  matchRetryDays Int     @default(3)
+  allowRepush    Boolean @default(false)
 }

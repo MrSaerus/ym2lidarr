@@ -154,7 +154,17 @@ r.get('/', async (_req, res) => {
             createdAt: x.createdAt ? x.createdAt.toISOString() : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
         }));
-
+        const lArtistsDownloaded = await prisma.lidarrArtist.count({
+            where: {
+                removed: false,
+                OR: [
+                    { sizeOnDisk: { gt: 0 } },
+                    { tracks: { gt: 0 } },
+                ],
+            },
+        });
+        const lArtistsWithoutDownloads = Math.max(0, lArtistsTotal - lArtistsDownloaded);
+        const lArtistsDownloadedPct = lArtistsTotal ? lArtistsDownloaded / lArtistsTotal : 0;
         // учитываем оба вида kind для совместимости
         const yandex = await getRuns(['yandex', 'yandex-pull']);
         const lidarr = await getRuns(['lidarr', 'lidarr-pull']);
@@ -194,6 +204,9 @@ r.get('/', async (_req, res) => {
                     total: lArtistsTotal,
                     matched: lArtistsMatched,
                     unmatched: Math.max(0, lArtistsTotal - lArtistsMatched),
+                    downloaded: lArtistsDownloaded,
+                    noDownloads: lArtistsWithoutDownloads,
+                    downloadedPct: lArtistsDownloadedPct,
                 },
                 albums: {
                     total: lAlbumsTotal,

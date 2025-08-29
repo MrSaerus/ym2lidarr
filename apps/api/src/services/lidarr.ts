@@ -7,12 +7,10 @@ const DEFAULT_BODY_TIMEOUT = 30_000;    // 30s
 export type Setting = {
   lidarrUrl: string;
   lidarrApiKey: string;
-
-  // дефолты из БД
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
-  monitor?: string | null; // e.g. "all"
+  monitor?: string | null;
 
   lidarrAllowNoMetadata?: boolean | null; // для артистов
 };
@@ -249,4 +247,201 @@ export async function ensureAlbumInLidarr(s0: Setting, al: { artist: string; tit
   if (r.status >= 400) throw new Error(`Lidarr add album failed: ${r.status} ${JSON.stringify(r.data)}`);
 
   return { ...(r.data as any), __action: 'created', __from: 'lookup', __request: body, __response: r.data };
+}
+
+// ==================== ADD: confirm & retry helpers (artists + albums) ====================
+import { request as __undiciRequest } from 'undici';
+
+// Локальный helper HTTP для этого модуля (не конфликтует с workers.ts)
+async function __lidarrApi<T = any>(base: string, key: string, path: string): Promise<T> {
+  const url = `${base.replace(/\/+$/, '')}${path}`;
+  const res = await __undiciRequest(url, { headers: { 'X-Api-Key': key } });
+  const text = await res.body.text();
+  if (res.statusCode >= 400) throw new Error(`Lidarr ${path} ${res.statusCode}: ${text?.slice(0, 180)}`);
+  try { return JSON.parse(text) as T; } catch { return text as any; }
+}
+
+function __sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+function __jitter(extra = 250) { return Math.floor(Math.random() * extra); }
+function __isTransientLidarrError(err: any): boolean {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return /\b(5\d\d|serviceunavailable|temporarily unavailable|timeout|timed out|etimedout|econn|refused|fetch failed|503)\b/.test(msg);
+}
+
+/** Локальная проверка присутствия артиста по MBID: НЕ бьёт SkyHook */
+export async function findArtistLocalByMBID(base: string, apiKey: string, mbid: string): Promise<any | null> {
+  const artists: any[] = await __lidarrApi(base, apiKey, '/api/v1/artist');
+  return artists.find(a => (a?.foreignArtistId || a?.mbid) === mbid) || null;
+}
+
+/**
+ * Проверка альбома по MBID.
+ * В Лидарре нет стабильного фильтра «по MBID» в локальном списке альбомов,
+ * поэтому используем album lookup (это бьёт SkyHook). Это ОК, т.к. главный кейс
+ * — обработка транзиентных 503 с ретраями.
+ */
+export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
+    const items: any[] = await __lidarrApi(base, apiKey, `/api/v1/album/lookup?term=mbid:${encodeURIComponent(rgMbid)}`);
+    const hit = items?.find?.((x: any) => (x?.foreignAlbumId || x?.mbid) === rgMbid) || null;
+    return hit || (Array.isArray(items) && items.length ? items[0] : null);
+}
+
+/**
+ * Добавление артиста с подтверждением появления в ЛОКАЛЬНОЙ базе.
+ * - Идемпотентный pre-check (local /artist)
+ * - ensureArtistInLidarr
+ * - post-check (local /artist), ретраи на 5xx/503
+ */
+type LogFn = (level: 'info' | 'warn' | 'error', msg: string, extra?: any) => Promise<void>;
+export async function pushArtistWithConfirm(
+    setting: any,
+    it: { name: string; mbid: string },
+    log: LogFn,
+    opts: { maxAttempts?: number; initialDelayMs?: number } = {},
+): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
+  const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
+  const apiKey = String(setting?.lidarrApiKey || '');
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 5);
+  let delay = Math.max(500, opts.initialDelayMs ?? 1000);
+
+  // pre-check
+  try {
+    const exists = await findArtistLocalByMBID(base, apiKey, it.mbid);
+    if (exists) {
+      await log('info', `Artist already present (pre-check): ${it.name}`, { mbid: it.mbid, lidarrId: exists.id, action: 'exists-pre' });
+      return { ok: true, res: { __action: 'exists', id: exists.id, artistName: exists.artistName || exists.name, path: exists.path } };
+    }
+  } catch (e: any) {
+    await log('warn', 'Pre-check failed (will continue)', { name: it.name, mbid: it.mbid, error: String(e?.message || e) });
+  }
+
+  let lastErr: any;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await ensureArtistInLidarr(setting, { name: it.name, mbid: it.mbid });
+
+      // post-check: ждём появления локально
+      const confirmAttempts = 3;
+      let confirmed: any | null = null;
+      for (let c = 0; c < confirmAttempts; c++) {
+        await __sleep(500 + __jitter(200));
+        try {
+          confirmed = await findArtistLocalByMBID(base, apiKey, it.mbid);
+          if (confirmed) break;
+        } catch (e: any) {
+          await log('warn', 'Post-check read failed (will retry confirm)', { attempt: c + 1, name: it.name, mbid: it.mbid, error: String(e?.message || e) });
+        }
+      }
+
+      if (confirmed) {
+        await log('info', `✔ Pushed artist (confirmed): ${confirmed.artistName || it.name}`, {
+          action: res?.__action || 'created',
+          lidarrId: confirmed.id, path: confirmed.path,
+          name: confirmed.artistName || it.name, mbid: it.mbid, from: res?.__from,
+          payload: res?.__request, response: res?.__response,
+        });
+        return { ok: true, res: { ...res, id: confirmed.id, path: confirmed.path, artistName: confirmed.artistName || it.name } };
+      }
+
+      lastErr = new Error('timeout waiting artist to appear (post-check)');
+      await log('warn', `~ Retrying (artist not confirmed yet): ${it.name}`, { attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message) });
+    } catch (e: any) {
+      lastErr = e;
+      const transient = __isTransientLidarrError(e);
+      await log(transient ? 'warn' : 'error', transient ? `~ Retrying push (transient): ${it.name}` : `✖ Push failed (fatal): ${it.name}`, {
+        attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e),
+      });
+      if (!transient) break;
+    }
+
+    await __sleep(delay + __jitter(300));
+    delay = Math.min(delay * 3, 90_000);
+  }
+
+  return { ok: false, reason: String(lastErr?.message || lastErr || 'unknown error') };
+}
+
+/**
+ * Добавление альбома с подтверждением.
+ * - Pre-check: /api/v1/album/lookup?term=mbid:<rgMbid> (да, это SkyHook; решает наш кейс с 503 через ретраи)
+ * - ensureAlbumInLidarr
+ * - Post-check: тот же lookup с ретраями (на 503/5xx)
+ */
+export async function pushAlbumWithConfirm(
+    setting: any,
+    it: { artist: string; title: string; rgMbid: string },
+    log: LogFn,
+    opts: { maxAttempts?: number; initialDelayMs?: number } = {},
+): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
+  const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
+  const apiKey = String(setting?.lidarrApiKey || '');
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 5);
+  let delay = Math.max(500, opts.initialDelayMs ?? 1000);
+
+  // pre-check (если что-то вернулось — считаем, что в каталоге уже есть релиз по этому MBID)
+  try {
+    const hit = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
+    if (hit) {
+      await log('info', `Album seems present (pre-check lookup): ${it.artist} — ${it.title}`, {
+        rgMbid: it.rgMbid, action: 'exists-pre', hitTitle: hit?.title,
+      });
+      return { ok: true, res: { __action: 'exists', id: hit?.id, title: hit?.title, path: hit?.path } };
+    }
+  } catch (e: any) {
+    // Если тут 503 — продолжим, логнём и пойдём в ensure + ретраи
+    if (__isTransientLidarrError(e)) {
+      await log('warn', 'Album pre-check transient failure (will continue)', { artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e) });
+    } else {
+      await log('warn', 'Album pre-check failed (non-transient, will continue anyway)', { artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e) });
+    }
+  }
+
+  let lastErr: any;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await ensureAlbumInLidarr(setting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid });
+
+      // post-check через lookup с несколькими быстрыми попытками
+      const confirmAttempts = 3;
+      let confirmed: any | null = null;
+      for (let c = 0; c < confirmAttempts; c++) {
+        await __sleep(500 + __jitter(200));
+        try {
+          confirmed = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
+          if (confirmed) break;
+        } catch (e: any) {
+          await log('warn', 'Album post-check lookup failed (will retry confirm)', {
+            attempt: c + 1, artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e),
+          });
+        }
+      }
+
+      if (confirmed) {
+        await log('info', `✔ Pushed album (confirmed): ${confirmed.title || it.title}`, {
+          action: res?.__action || 'created',
+          lidarrId: confirmed.id, path: confirmed.path,
+          title: confirmed.title || it.title, rgMbid: it.rgMbid, from: res?.__from,
+          payload: res?.__request, response: res?.__response,
+        });
+        return { ok: true, res: { ...res, id: confirmed.id, path: confirmed.path, title: confirmed.title || it.title } };
+      }
+
+      lastErr = new Error('timeout waiting album to appear (post-check)');
+      await log('warn', `~ Retrying (album not confirmed yet): ${it.artist} — ${it.title}`, { attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message) });
+    } catch (e: any) {
+      lastErr = e;
+      const transient = __isTransientLidarrError(e);
+      await log(transient ? 'warn' : 'error', transient ? `~ Retrying album push (transient): ${it.artist} — ${it.title}` : `✖ Album push failed (fatal): ${it.artist} — ${it.title}`, {
+        attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e),
+      });
+      if (!transient) break;
+    }
+
+    await __sleep(delay + __jitter(300));
+    delay = Math.min(delay * 3, 90_000);
+  }
+
+  return { ok: false, reason: String(lastErr?.message || lastErr || 'unknown error') };
 }

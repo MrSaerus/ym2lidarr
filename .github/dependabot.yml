@@ -66,7 +66,7 @@ updates:
 
   # Docker base images (if Dockerfile present in repo root)
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/docker/"
     schedule:
       interval: "weekly"
       day: "monday"

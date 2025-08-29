@@ -5,6 +5,9 @@ import importPlugin from 'eslint-plugin-import';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default [
   {
@@ -36,7 +39,7 @@ export default [
       parser: tseslint.parser,
       parserOptions: {
         project: ['./apps/api/tsconfig.json'],
-        tsconfigRootDir: new URL('.', import.meta.url),
+        tsconfigRootDir: __dirname,
       },
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -67,11 +70,10 @@ export default [
       parser: tseslint.parser,
       parserOptions: {
         project: ['./apps/web/tsconfig.json'],
-        tsconfigRootDir: new URL('.', import.meta.url),
+        tsconfigRootDir: __dirname,
       },
       ecmaVersion: 2022,
       sourceType: 'module',
-      // браузерные глобалы + process (Next вырезает при билде)
       globals: { ...globals.browser, ...globals.es2021, process: 'readonly' },
     },
     plugins: {

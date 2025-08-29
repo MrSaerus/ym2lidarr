@@ -165,4 +165,26 @@ r.post('/resync', async (req, res) => {
     }
 });
 
+r.get('/stats/downloads', async (_req, res) => {
+    try {
+        const [total, withDownloads] = await Promise.all([
+            prisma.lidarrArtist.count({ where: { removed: false } }),
+            prisma.lidarrArtist.count({
+                where: {
+                    removed: false,
+                    OR: [
+                        { sizeOnDisk: { gt: 0 } },
+                        { tracks: { gt: 0 } },
+                    ],
+                },
+            }),
+        ]);
+        const withoutDownloads = Math.max(0, total - withDownloads);
+        const ratio = total ? withDownloads / total : 0;
+        res.json({ total, withDownloads, withoutDownloads, ratio });
+    } catch (e: any) {
+        res.status(500).json({ message: e?.message || String(e) });
+    }
+});
+
 export default r;

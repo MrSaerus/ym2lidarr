@@ -21,13 +21,14 @@ type LatestLA = { id: number; title: string; artistName: string; added: string |
 type LatestYArtist = { id: number; name: string; yandexUrl?: string; mbUrl?: string; };
 type LatestLArtist = { id: number; name: string; added?: string | null; lidarrUrl?: string; mbUrl?: string; };
 type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; hasLidarr?: boolean; lidarrUrl?: string | null; };
+type LidarrArtistsStats = CountBlock & { downloaded?: number; noDownloads?: number; downloadedPct?: number; };
 
 type StatsResp = {
   yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; };
-  lidarr?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
+  lidarr?: { artists: LidarrArtistsStats; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
   custom?: { artists: CountBlock; latestArtists?: LatestCArtist[]; };
-  // backward-compat
-  artists?: { total?: number; found?: number; unmatched?: number };
+
+  artists?: { total?: number; found?: number; unmatched?: number; downloaded?: number;  noDownloads?: number; downloadedPct?: number;};
   albums?: { total?: number; found?: number; unmatched?: number };
   runs?: { yandex?: { active: any; last: any }; lidarr?: { active: any; last: any }; match?: { active: any; last: any }; };
 };
@@ -107,7 +108,7 @@ export default function OverviewPage() {
   const [latest, setLatest] = useState<RunShort | null>(null);
   const [runs, setRuns] = useState<RunShort[]>([]);
   const [stoppingId, setStoppingId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [ ,setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
   // оптимистичные busy-флаги (моментально после клика)
@@ -222,21 +223,16 @@ export default function OverviewPage() {
   const lA = { total: toNum(stats?.lidarr?.artists?.total ?? 0), matched: toNum(stats?.lidarr?.artists?.matched ?? 0), unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0) };
   const lR = { total: toNum(stats?.lidarr?.albums?.total ?? 0), matched: toNum(stats?.lidarr?.albums?.matched ?? 0), unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0) };
 
-  const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA]);
-  const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA]);
-  const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR]);
-  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
-  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
+  const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA.matched, cA.total]);
+  const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA.matched, yA.total]);
+  const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR.matched, yR.total]);
+  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA.matched, lA.total]);
+  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR.matched, lR.total]);
+  const lDownloaded = toNum(stats?.lidarr?.artists?.downloaded ?? stats?.artists?.downloaded ?? 0);
+  const lNotDownloaded = lA.total ? Math.round(lA.total - lDownloaded ) : 0;
+  const lDownloadedFrac = lA.total ? (lDownloaded / lA.total) : 0;
 
   /* ----------------------- actions ----------------------- */
-
-  // Lidarr cache helpers
-  async function resyncCacheLidarrArtists() {
-    setMsg('Resyncing Lidarr cache (artists)…');
-    try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); }
-    catch(e:any){ setMsg(`Lidarr resync error: ${e?.message||String(e)}`); }
-  }
-  async function resyncCacheYandexAlbums() { return pullFromYandexAlbums(); }
 
   // Lidarr PULL
   async function pullFromLidarrArtists() {
@@ -272,7 +268,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex artists…');
     markBusy('yandexMatchArtists');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'artists' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'artists' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -280,7 +276,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex albums…');
     markBusy('yandexMatchAlbums');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'albums' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'albums' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -296,18 +292,6 @@ export default function OverviewPage() {
       setMsg(ok ? `Push started (run ${r?.runId ?? 'n/a'})` : `Push failed${r?.error?`: ${r.error}`:''}`);
       setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`); }
-  }
-
-  // One-click Yandex pull-all
-  async function runSyncYandex() {
-    setMsg('Starting Yandex pull-all…');
-    markBusy('yandexPull');
-    try {
-      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex/pull-all']);
-      const ok = r?.ok===true || typeof r?.runId==='number';
-      setMsg(ok ? `Yandex pull started (run ${r?.runId ?? 'n/a'})` : `Sync failed${r?.error?`: ${r.error}`:''}`);
-      setTimeout(loadRuns, 300);
-    } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`); }
   }
 
   // Custom panel
@@ -331,7 +315,16 @@ export default function OverviewPage() {
       setMsg(`Push error: ${e?.message || String(e)}`);
     }
   }
-
+  async function pushCustomToLidarrFull() {
+    setMsg('Pushing (custom) to Lidarr…');
+    markBusy('customPush');
+    try {
+      await tryPostMany(['/api/sync/custom/push'], { force: true});
+      setMsg('Push started'); setTimeout(loadRuns, 300);
+    } catch (e: any) {
+      setMsg(`Push error: ${e?.message || String(e)}`);
+    }
+  }
   // Soft-cancel run
   async function stopRun(id: number) {
     try {
@@ -354,7 +347,6 @@ export default function OverviewPage() {
 
           {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
-          {/* Latest Custom artists */}
           <section className="panel p-4">
             <div className="mb-2 flex items-center gap-3">
               <div className="section-title">Latest Custom artists</div>
@@ -372,6 +364,13 @@ export default function OverviewPage() {
                     disabled={isBusy('customPush')}
                 >
                   {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr'}
+                </button>
+                <button
+                    className="btn btn-outline"
+                    onClick={pushCustomToLidarrFull}
+                    disabled={isBusy('customPush')}
+                >
+                  {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr Force'}
                 </button>
               </div>
             </div>
@@ -415,9 +414,7 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* ALBUMS */}
           <section className="grid gap-4 md:grid-cols-2">
-            {/* Yandex albums */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex albums</div>
@@ -484,7 +481,6 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Lidarr albums */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr albums</div>
@@ -538,9 +534,7 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* ARTISTS */}
           <section className="grid gap-4 md:grid-cols-2">
-            {/* Yandex artists */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex artists</div>
@@ -605,7 +599,6 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Lidarr artists */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr artists</div>
@@ -656,16 +649,24 @@ export default function OverviewPage() {
               </div>
             </div>
           </section>
-
-          {/* Custom stats — full width */}
-          <section className="panel p-4 space-y-3">
-            <div className="text-sm text-gray-500">Custom artists matched</div>
-            <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
-            <ProgressBar value={cArtistPct} color="accent"/>
-            <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
+          <section className="grid gap-4 md:grid-cols-2">
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Artists with downloads</div>
+              <div className="text-2xl font-bold">{lDownloaded}/{lA.total}</div>
+              <ProgressBar
+                  value={lDownloadedFrac}
+                  color="ym"
+                  label={`${lDownloaded} / ${lA.total}`}
+              />
+              <div className="text-xs text-gray-500">Without tracks: {lNotDownloaded}</div>
+            </div>
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Custom artists matched</div>
+              <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
+              <ProgressBar value={cArtistPct} color="accent"/>
+              <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
+            </div>
           </section>
-
-          {/* Yandex stats */}
           <section className="grid gap-4 md:grid-cols-2">
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
@@ -681,7 +682,6 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* Lidarr stats */}
           <section className="grid gap-4 md:grid-cols-2">
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
@@ -697,7 +697,6 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* Runner & buttons */}
           <section className="panel p-4">
             <div className="text-sm text-gray-500 mb-1">Runner status</div>
 
@@ -784,40 +783,6 @@ export default function OverviewPage() {
                 </table>
             )}
           </section>
-          {/* Global actions */}
-          <section className="panel p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <button className="btn btn-outline" onClick={load} disabled={loading}>
-                {loading ? 'Refreshing…' : 'Refresh'}
-              </button>
-              <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists
-              </button>
-              <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
-              <button className="btn btn-outline" onClick={pullFromLidarrArtists}
-                      disabled={isBusy('lidarrPullArtists')}>
-                {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}
-              </button>
-              <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
-                {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr Albums'}
-              </button>
-              <button className="btn btn-outline" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>
-                {isBusy('yandexPull') ? 'Pulling…' : 'Pull from Yandex (All)'}
-              </button>
-              <button className="btn btn-outline" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>
-                {isBusy('yandexMatchArtists') ? 'Matching…' : 'Match Yandex Artists'}
-              </button>
-              <button className="btn btn-outline" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>
-                {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Match Yandex Albums'}
-              </button>
-              <button className="btn btn-primary" onClick={runSyncYandex} disabled={isBusy('yandexPull')}>
-                {isBusy('yandexPull') ? 'Pulling…' : 'Pull-all (Yandex)'}
-              </button>
-              <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>
-                Push Yandex (Both)
-              </button>
-            </div>
-          </section>
-
           <style jsx>{`
             :root {
               --chip-w: 96px;
