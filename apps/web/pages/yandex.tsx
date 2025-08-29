@@ -113,7 +113,17 @@ export default function YandexPage() {
         if (sda === 'asc' || sda === 'desc') setSortDirArtists(sda);
         if (sbb === 'title' || sbb === 'artist' || sbb === 'id') setSortByAlbums(sbb as SortFieldAlbums);
         if (sdb === 'asc' || sdb === 'desc') setSortDirAlbums(sdb);
-    }, [router.isReady]);
+    }, [
+        router.isReady,
+        router.query.target,
+        router.query.page,
+        router.query.pageSize,
+        router.query.q,
+        router.query.sortByArtists,
+        router.query.sortDirArtists,
+        router.query.sortByAlbums,
+        router.query.sortDirAlbums,
+    ]);
 
     const load = useCallback(
         async (p = page) => {

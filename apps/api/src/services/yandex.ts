@@ -80,7 +80,6 @@ export async function yandexGetAccount(token: string): Promise<YAccount> {
  */
 export async function yandexPullLikes(
     token: string,
-    _opts?: { driver?: 'pyproxy' | 'native' },
 ): Promise<{
   artists: Array<{ id?: number; name: string; mbid?: string | null }>;
   albums: Array<{ id?: number; title: string; artistName: string; year?: number; artistId?: number; rgMbid?: string | null }>;

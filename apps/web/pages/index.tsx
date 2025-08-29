@@ -108,7 +108,7 @@ export default function OverviewPage() {
   const [latest, setLatest] = useState<RunShort | null>(null);
   const [runs, setRuns] = useState<RunShort[]>([]);
   const [stoppingId, setStoppingId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [ ,setLoading] = useState(false);
   const [msg, setMsg] = useState('');
 
   // оптимистичные busy-флаги (моментально после клика)
@@ -223,24 +223,16 @@ export default function OverviewPage() {
   const lA = { total: toNum(stats?.lidarr?.artists?.total ?? 0), matched: toNum(stats?.lidarr?.artists?.matched ?? 0), unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0) };
   const lR = { total: toNum(stats?.lidarr?.albums?.total ?? 0), matched: toNum(stats?.lidarr?.albums?.matched ?? 0), unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0) };
 
-  const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA]);
-  const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA]);
-  const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR]);
-  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
-  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
+  const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA.matched, cA.total]);
+  const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA.matched, yA.total]);
+  const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR.matched, yR.total]);
+  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA.matched, lA.total]);
+  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR.matched, lR.total]);
   const lDownloaded = toNum(stats?.lidarr?.artists?.downloaded ?? stats?.artists?.downloaded ?? 0);
   const lNotDownloaded = lA.total ? Math.round(lA.total - lDownloaded ) : 0;
   const lDownloadedFrac = lA.total ? (lDownloaded / lA.total) : 0;
 
   /* ----------------------- actions ----------------------- */
-
-  // Lidarr cache helpers
-  async function resyncCacheLidarrArtists() {
-    setMsg('Resyncing Lidarr cache (artists)…');
-    try { await api('/api/lidarr/resync',{method:'POST'}); setMsg('Lidarr cache resynced'); load(); }
-    catch(e:any){ setMsg(`Lidarr resync error: ${e?.message||String(e)}`); }
-  }
-  async function resyncCacheYandexAlbums() { return pullFromYandexAlbums(); }
 
   // Lidarr PULL
   async function pullFromLidarrArtists() {
@@ -300,18 +292,6 @@ export default function OverviewPage() {
       setMsg(ok ? `Push started (run ${r?.runId ?? 'n/a'})` : `Push failed${r?.error?`: ${r.error}`:''}`);
       setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Push error: ${e?.message||String(e)}`); }
-  }
-
-  // One-click Yandex pull-all
-  async function runSyncYandex() {
-    setMsg('Starting Yandex pull-all…');
-    markBusy('yandexPull');
-    try {
-      const r = await tryPostMany<{ok?:boolean;runId?:number;error?:string}>(['/api/sync/yandex/pull-all']);
-      const ok = r?.ok===true || typeof r?.runId==='number';
-      setMsg(ok ? `Yandex pull started (run ${r?.runId ?? 'n/a'})` : `Sync failed${r?.error?`: ${r.error}`:''}`);
-      setTimeout(loadRuns, 300);
-    } catch(e:any){ setMsg(`Sync error: ${e?.message||String(e)}`); }
   }
 
   // Custom panel
@@ -678,7 +658,7 @@ export default function OverviewPage() {
                   color="ym"
                   label={`${lDownloaded} / ${lA.total}`}
               />
-              <div className="text-xs text-gray-500">Without tracks {lNotDownloaded}</div>
+              <div className="text-xs text-gray-500">Without tracks: {lNotDownloaded}</div>
             </div>
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Custom artists matched</div>
@@ -803,40 +783,6 @@ export default function OverviewPage() {
                 </table>
             )}
           </section>
-          {/* Global actions */}
-          {/*<section className="panel p-4">*/}
-          {/*  <div className="flex flex-wrap items-center gap-2">*/}
-          {/*    <button className="btn btn-outline" onClick={load} disabled={loading}>*/}
-          {/*      {loading ? 'Refreshing…' : 'Refresh'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>*/}
-          {/*    <button className="btn btn-outline" onClick={pullFromLidarrArtists}*/}
-          {/*            disabled={isBusy('lidarrPullArtists')}>*/}
-          {/*      {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>*/}
-          {/*      {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr Albums'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>*/}
-          {/*      {isBusy('yandexPull') ? 'Pulling…' : 'Pull from Yandex (All)'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>*/}
-          {/*      {isBusy('yandexMatchArtists') ? 'Matching…' : 'Match Yandex Artists'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-outline" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>*/}
-          {/*      {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Match Yandex Albums'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-primary" onClick={runSyncYandex} disabled={isBusy('yandexPull')}>*/}
-          {/*      {isBusy('yandexPull') ? 'Pulling…' : 'Pull-all (Yandex)'}*/}
-          {/*    </button>*/}
-          {/*    <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>*/}
-          {/*      Push Yandex (Both)*/}
-          {/*    </button>*/}
-          {/*  </div>*/}
-          {/*</section>*/}
-
           <style jsx>{`
             :root {
               --chip-w: 96px;

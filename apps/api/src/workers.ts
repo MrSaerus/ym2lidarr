@@ -78,7 +78,7 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
     await dblog(runId, 'info', 'Pulling likes from Yandex (pyproxy)…', { driver: 'pyproxy' });
     if (await bailIfCancelled(runId, 'pull-start')) return;
 
-    const { artists, albums } = await yandexPullLikes(token, { driver: 'pyproxy' });
+    const { artists, albums } = await yandexPullLikes(token);
 
     await patchRunStats(runId, { a_total: artists.length, al_total: albums.length });
     await dblog(runId, 'info', `Got ${artists.length} artists, ${albums.length} albums`);

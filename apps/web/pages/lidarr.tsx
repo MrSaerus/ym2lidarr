@@ -123,7 +123,15 @@ function ArtistsTab() {
             setSortBy(qsb as ArtistSortField);
         }
         if (qsd === 'asc' || qsd === 'desc') setSortDir(qsd as SortDir);
-    }, [router.isReady]);
+        }, [
+          router.isReady,
+          router.query.page,
+          router.query.pageSize,
+          router.query.q,
+          router.query.monitored,
+          router.query.sortBy,
+          router.query.sortDir,
+        ]);
 
     const load = useCallback(
         async (p = page) => {
@@ -323,7 +331,6 @@ function AlbumsTab() {
     const [q, setQ] = useState('');
     const [monitored, setMonitored] = useState<'all' | 'true' | 'false'>('all');
 
-    // оставляем только hasPath из доп. фильтров
     const [hasPath, setHasPath] = useState<'all' | 'with' | 'without'>('all');
 
     const [page, setPage] = useState(1);
@@ -355,7 +362,16 @@ function AlbumsTab() {
             setSortBy(qsb as AlbumSortField);
         }
         if (qsd === 'asc' || qsd === 'desc') setSortDir(qsd as SortDir);
-    }, [router.isReady]);
+    }, [
+        router.isReady,
+        router.query.page,
+        router.query.pageSize,
+        router.query.q,
+        router.query.monitored,
+        router.query.sortBy,
+        router.query.sortDir,
+        router.query.hasPath,
+    ]);
 
     const load = useCallback(
         async (p = page) => {

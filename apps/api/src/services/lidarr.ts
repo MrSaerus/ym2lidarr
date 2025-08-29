@@ -7,12 +7,10 @@ const DEFAULT_BODY_TIMEOUT = 30_000;    // 30s
 export type Setting = {
   lidarrUrl: string;
   lidarrApiKey: string;
-
-  // дефолты из БД
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
-  monitor?: string | null; // e.g. "all"
+  monitor?: string | null;
 
   lidarrAllowNoMetadata?: boolean | null; // для артистов
 };
@@ -283,14 +281,9 @@ export async function findArtistLocalByMBID(base: string, apiKey: string, mbid: 
  * — обработка транзиентных 503 с ретраями.
  */
 export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
-  try {
     const items: any[] = await __lidarrApi(base, apiKey, `/api/v1/album/lookup?term=mbid:${encodeURIComponent(rgMbid)}`);
-    // Если SkyHook ответил успешно и есть совпадение — считаем подтверждённым.
     const hit = items?.find?.((x: any) => (x?.foreignAlbumId || x?.mbid) === rgMbid) || null;
     return hit || (Array.isArray(items) && items.length ? items[0] : null);
-  } catch (e) {
-    throw e;
-  }
 }
 
 /**
@@ -299,10 +292,11 @@ export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: st
  * - ensureArtistInLidarr
  * - post-check (local /artist), ретраи на 5xx/503
  */
+type LogFn = (level: 'info' | 'warn' | 'error', msg: string, extra?: any) => Promise<void>;
 export async function pushArtistWithConfirm(
     setting: any,
     it: { name: string; mbid: string },
-    log: (level: 'info'|'warn'|'error', msg: string, extra?: any) => Promise<void>,
+    log: LogFn,
     opts: { maxAttempts?: number; initialDelayMs?: number } = {},
 ): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
   const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
@@ -377,7 +371,7 @@ export async function pushArtistWithConfirm(
 export async function pushAlbumWithConfirm(
     setting: any,
     it: { artist: string; title: string; rgMbid: string },
-    log: (level: 'info'|'warn'|'error', msg: string, extra?: any) => Promise<void>,
+    log: LogFn,
     opts: { maxAttempts?: number; initialDelayMs?: number } = {},
 ): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
   const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
