@@ -695,7 +695,7 @@ export async function runLidarrPush(
               effSetting,
               { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
               log,
-              { maxAttempts: 5, initialDelayMs: 1000 }
+              { maxAttempts: 1, initialDelayMs: 1000 }
           );
 
           if (result.ok) {
@@ -721,7 +721,7 @@ export async function runLidarrPush(
             ok++;
           } else {
             failed++;
-            await dblog(run.id, 'warn', `✖ Album push failed (after retries): ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
+            await dblog(run.id, 'warn', `✖ Album push failed: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
           }
         } else {
           const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
@@ -729,7 +729,7 @@ export async function runLidarrPush(
               effSetting,
               { name: it.name, mbid: it.mbid! },
               log,
-              { maxAttempts: 5, initialDelayMs: 1000 }
+              { maxAttempts: 1, initialDelayMs: 1000 }
           );
 
           if (result.ok) {
@@ -760,14 +760,13 @@ export async function runLidarrPush(
             ok++;
           } else {
             failed++;
-            await dblog(run.id, 'warn', `✖ Push failed (after retries): ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
+            await dblog(run.id, 'warn', `✖ Push failed: ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
         }
       } catch (e: any) {
         failed++;
         await dblog(run.id, 'warn', `Push exception: ${String(e?.message || e)}`, { target });
       }
-
       done++;
       if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
     }
@@ -861,7 +860,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
               effSetting,
               { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
               log,
-              { maxAttempts: 5, initialDelayMs: 1000 }
+              { maxAttempts: 1, initialDelayMs: 1000 }
           );
 
           if (result.ok) {
@@ -887,7 +886,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
             ok++;
           } else {
             failed++;
-            await dblog(run.id, 'warn', `✖ Album push failed (after retries): ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
+            await dblog(run.id, 'warn', `✖ Album push failed: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
           }
         } else {
           const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
@@ -895,7 +894,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
               effSetting,
               { name: it.name, mbid: it.mbid! },
               log,
-              { maxAttempts: 5, initialDelayMs: 1000 }
+              { maxAttempts: 1, initialDelayMs: 1000 }
           );
 
           if (result.ok) {
@@ -926,7 +925,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
             ok++;
           } else {
             failed++;
-            await dblog(run.id, 'warn', `✖ Push failed (after retries): ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
+            await dblog(run.id, 'warn', `✖ Push failed: ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
         }
       } catch (e: any) {
