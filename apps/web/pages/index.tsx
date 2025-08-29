@@ -272,7 +272,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex artists…');
     markBusy('yandexMatchArtists');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'artists' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'artists' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -280,7 +280,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex albums…');
     markBusy('yandexMatchAlbums');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'albums' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'albums' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }

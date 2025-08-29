@@ -97,6 +97,9 @@ const ALLOWED_FIELDS = new Set([
   'telegramChatId',
   'webhookUrl',
   'webhookSecret',
+
+  'allowRepush',
+  'matchRetryDays',
 ]);
 
 function pickSettings(input: any) {
@@ -142,6 +145,7 @@ function pickSettings(input: any) {
     'enableCronCustomMatch',
     'enableCronCustomPush',
     'enableCronLidarrPull',
+    'allowRepush',
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
 
   if ('backupRetention' in out && out.backupRetention != null) {

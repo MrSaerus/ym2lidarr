@@ -360,7 +360,25 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
       }
 
       await patchRunStats(runId, { a_total: candidates.length });
+      await dblog(runId, 'info', 'MB Match finished', {
+        target,
+        force,
+        artists: {
+          total: (await prisma.yandexArtist.count({ where: { present: true } })),
+          matched: (await prisma.yandexArtist.count({ where: { present: true, mbid: { not: null } } })),
+        },
+        albums: {
+          total: (await prisma.yandexAlbum.count({ where: { present: true } })),
+          matched: (await prisma.yandexAlbum.count({ where: { present: true, rgMbid: { not: null } } })),
+        },
+      });
 
+      await endRun(runId, 'ok');
+      const finalRun = await getRunWithRetry(runId);
+      try {
+        const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+        await notify('match', 'ok', stats);
+      } catch {}
       let a_done = 0, a_matched = 0;
       for (const y of candidates) {
         if (await bailIfCancelled(runId, 'match-artists')) return;
@@ -433,6 +451,26 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
       }
 
       await patchRunStats(runId, { al_total: candidates.length });
+
+      await dblog(runId, 'info', 'MB Match finished', {
+        target,
+        force,
+        artists: {
+          total: (await prisma.yandexArtist.count({ where: { present: true } })),
+          matched: (await prisma.yandexArtist.count({ where: { present: true, mbid: { not: null } } })),
+        },
+        albums: {
+          total: (await prisma.yandexAlbum.count({ where: { present: true } })),
+          matched: (await prisma.yandexAlbum.count({ where: { present: true, rgMbid: { not: null } } })),
+        },
+      });
+
+      await endRun(runId, 'ok');
+      const finalRun = await getRunWithRetry(runId);
+      try {
+        const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+        await notify('match', 'ok', stats);
+      } catch {}
 
       let al_done = 0, al_matched = 0;
       for (const rec of candidates) {
@@ -536,7 +574,7 @@ export async function runCustomArtistsMatch(
       if (await bailIfCancelled(runId, 'custom-match')) return;
 
       if (it.mbid && !force) {
-        await dblog(runId, 'info', 'Skip already matched', { id: it.id, name: it.name, mbid: it.mbid });
+        // await dblog(runId, 'info', 'Skip already matched', { id: it.id, name: it.name, mbid: it.mbid });
         c_done++;
         if (c_done % 5 === 0) await patchRunStats(runId, { c_done, c_matched });
         continue;
@@ -795,7 +833,8 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
       }
     }
 
-    await patchRunStats(run.id, { total: items.length });
+    const total = items.length;
+    await patchRunStats(run.id, { total });
 
     let done = 0, ok = 0, failed = 0;
     const effSetting = { ...(setting as any) };
@@ -806,7 +845,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
       try {
         if (target === 'albums') {
           const res = await ensureAlbumInLidarr(effSetting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid! });
-          await dblog(run.id, 'info', `Pushed album`, {
+          await dblog(run.id, 'info', `✔ Pushed album:  ${it.title}`, {
             target, action: res?.__action || 'created', lidarrId: res?.id, path: res?.path,
             title: res?.title || it.title, rgMbid: it.rgMbid, from: res?.__from,
             payload: res?.__request, response: res?.__response,
@@ -821,7 +860,7 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
           }
         } else {
           const res = await ensureArtistInLidarr(effSetting, { name: it.name, mbid: it.mbid! });
-          await dblog(run.id, 'info', `Pushed artist`, {
+          await dblog(run.id, 'info', `✔ Pushed artist: ${it.name}`, {
             target, action: res?.__action || 'created', lidarrId: res?.id, path: res?.path,
             name: res?.artistName || it.name, mbid: it.mbid, from: res?.__from,
             payload: res?.__request, response: res?.__response,
@@ -836,12 +875,25 @@ async function runLidarrPushEx(opts: PushExOpts = {}) {
         ok++;
       } catch (e: any) {
         failed++;
-        await dblog(run.id, 'warn', `Push failed: ${String(e?.message || e)}`, { target });
+        await dblog(run.id, 'warn', `✖ Push failed: ${String(e?.message || e)}`, { target });
       }
 
       done++;
       if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
     }
+
+    // 🔥 Новый финальный лог сводки
+    const skipped = Math.max(0, total - (ok + failed));
+    await dblog(run.id, 'info', `Push finished: target ${target}, source ${source}, 
+    allowRepush ${allowRepush}, total ${total}, ok ${ok}, failed ${failed}, skipped ${skipped},`, {
+      target,
+      source,
+      allowRepush,
+      total,
+      ok,
+      failed,
+      skipped,
+    });
 
     await patchRunStats(run.id, { done, ok, failed });
     if (!opts.noFinalize) {
