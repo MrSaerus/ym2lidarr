@@ -21,13 +21,14 @@ type LatestLA = { id: number; title: string; artistName: string; added: string |
 type LatestYArtist = { id: number; name: string; yandexUrl?: string; mbUrl?: string; };
 type LatestLArtist = { id: number; name: string; added?: string | null; lidarrUrl?: string; mbUrl?: string; };
 type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; hasLidarr?: boolean; lidarrUrl?: string | null; };
+type LidarrArtistsStats = CountBlock & { downloaded?: number; noDownloads?: number; downloadedPct?: number; };
 
 type StatsResp = {
   yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; };
-  lidarr?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
+  lidarr?: { artists: LidarrArtistsStats; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
   custom?: { artists: CountBlock; latestArtists?: LatestCArtist[]; };
-  // backward-compat
-  artists?: { total?: number; found?: number; unmatched?: number };
+
+  artists?: { total?: number; found?: number; unmatched?: number; downloaded?: number;  noDownloads?: number; downloadedPct?: number;};
   albums?: { total?: number; found?: number; unmatched?: number };
   runs?: { yandex?: { active: any; last: any }; lidarr?: { active: any; last: any }; match?: { active: any; last: any }; };
 };
@@ -227,6 +228,9 @@ export default function OverviewPage() {
   const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR]);
   const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA]);
   const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR]);
+  const lDownloaded = toNum(stats?.lidarr?.artists?.downloaded ?? stats?.artists?.downloaded ?? 0);
+  const lNotDownloaded = lA.total ? Math.round(lA.total - lDownloaded ) : 0;
+  const lDownloadedFrac = lA.total ? (lDownloaded / lA.total) : 0;
 
   /* ----------------------- actions ----------------------- */
 
@@ -363,7 +367,6 @@ export default function OverviewPage() {
 
           {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
-          {/* Latest Custom artists */}
           <section className="panel p-4">
             <div className="mb-2 flex items-center gap-3">
               <div className="section-title">Latest Custom artists</div>
@@ -396,7 +399,7 @@ export default function OverviewPage() {
                   <div className="text-sm text-gray-500">No data</div>
               ) : (
                   <table className="w-full text-sm">
-                  <thead className="text-gray-400">
+                    <thead className="text-gray-400">
                     <tr>
                       <th className="text-left w-10">#</th>
                       <th className="text-left">Artist</th>
@@ -431,9 +434,7 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* ALBUMS */}
           <section className="grid gap-4 md:grid-cols-2">
-            {/* Yandex albums */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex albums</div>
@@ -500,7 +501,6 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Lidarr albums */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr albums</div>
@@ -554,9 +554,7 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* ARTISTS */}
           <section className="grid gap-4 md:grid-cols-2">
-            {/* Yandex artists */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Yandex artists</div>
@@ -621,7 +619,6 @@ export default function OverviewPage() {
               </div>
             </div>
 
-            {/* Lidarr artists */}
             <div className="panel p-4">
               <div className="mb-2 flex items-center gap-3">
                 <div className="section-title">Latest Lidarr artists</div>
@@ -672,16 +669,24 @@ export default function OverviewPage() {
               </div>
             </div>
           </section>
-
-          {/* Custom stats — full width */}
-          <section className="panel p-4 space-y-3">
-            <div className="text-sm text-gray-500">Custom artists matched</div>
-            <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
-            <ProgressBar value={cArtistPct} color="accent"/>
-            <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
+          <section className="grid gap-4 md:grid-cols-2">
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Artists with downloads</div>
+              <div className="text-2xl font-bold">{lDownloaded}/{lA.total}</div>
+              <ProgressBar
+                  value={lDownloadedFrac}
+                  color="ym"
+                  label={`${lDownloaded} / ${lA.total}`}
+              />
+              <div className="text-xs text-gray-500">Without tracks {lNotDownloaded}</div>
+            </div>
+            <div className="panel p-4 space-y-3">
+              <div className="text-sm text-gray-500">Custom artists matched</div>
+              <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
+              <ProgressBar value={cArtistPct} color="accent"/>
+              <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
+            </div>
           </section>
-
-          {/* Yandex stats */}
           <section className="grid gap-4 md:grid-cols-2">
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
@@ -697,7 +702,6 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* Lidarr stats */}
           <section className="grid gap-4 md:grid-cols-2">
             <div className="panel p-4 space-y-3">
               <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
@@ -713,7 +717,6 @@ export default function OverviewPage() {
             </div>
           </section>
 
-          {/* Runner & buttons */}
           <section className="panel p-4">
             <div className="text-sm text-gray-500 mb-1">Runner status</div>
 
