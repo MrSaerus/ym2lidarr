@@ -1,5 +1,5 @@
 # ---------- node builder ----------
-FROM --platform=$BUILDPLATFORM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS nodebuilder
+FROM --platform=$BUILDPLATFORM node:24.7.0@sha256:701c8a634cb3ddbc1dc9584725937619716882525356f0989f11816ba3747a22 AS nodebuilder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY apps/pyproxy /py/app
 
 # ---------- runner ----------
-FROM --platform=$TARGETPLATFORM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS api_web
+FROM --platform=$TARGETPLATFORM node:24.7.0@sha256:701c8a634cb3ddbc1dc9584725937619716882525356f0989f11816ba3747a22 AS api_web
 WORKDIR /app
 
 ENV NODE_ENV=production
