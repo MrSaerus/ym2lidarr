@@ -269,31 +269,6 @@ export default function UnifiedPage() {
         });
     }
 
-    async function pullFromYandex() {
-        try {
-            try {
-                await api('/api/sync/yandex/pull', { method: 'POST' });
-            } catch {
-                await api('/api/sync/yandex', { method: 'POST' });
-            }
-            await load(1);
-        } catch (e: any) {
-            alert('Yandex pull failed: ' + (e?.message || String(e)));
-        }
-    }
-    async function pullFromLidarr() {
-        try {
-            try {
-                await api('/api/sync/lidarr/pull', { method: 'POST' });
-            } catch {
-                await api('/api/sync/lidarr', { method: 'POST' });
-            }
-            await load(1);
-        } catch (e: any) {
-            alert('Lidarr pull failed: ' + (e?.message || String(e)));
-        }
-    }
-
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const headerArrow = (active: boolean) =>
         active ? (
@@ -317,7 +292,8 @@ export default function UnifiedPage() {
                             Albums
                         </button>
                     </div>
-
+                </div>
+                <div className="toolbar">
                     <input
                         placeholder={target === 'albums' ? 'Search title or artist…' : 'Search by name…'}
                         className="input w-80"
@@ -328,41 +304,18 @@ export default function UnifiedPage() {
                     <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </button>
-                    <button className="btn btn-outline" onClick={pullFromYandex}>
-                        Pull from Yandex
-                    </button>
-                    <button className="btn btn-outline" onClick={pullFromLidarr}>
-                        Pull from Lidarr
-                    </button>
-
-                    <button
-                        className="btn btn-outline"
-                        onClick={async () => {
-                            try {
-                                await api('/api/sync/match', {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ force: true, target: target === 'artists' ? 'artists' : 'albums' }),
-                                });
-                                await load(1);
-                            } catch (e: any) {
-                                alert('Match failed: ' + (e?.message || String(e)));
-                            }
-                        }}
-                    >
-                        Match {target === 'artists' ? 'Artists' : 'Albums'}
-                    </button>
-
+                </div>
+                <div className="toolbar">
                     <div className="ml-auto flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Rows per page:</span>
-                        <select className="select" value={pageSize} onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
+                        <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
+                        <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize} onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
                             {[25, 50, 100, 200].map((n) => (
                                 <option key={n} value={n}>
                                     {n}
                                 </option>
                             ))}
                         </select>
-                        <span className="text-xs text-gray-500">{total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}</span>
+                        <span className="text-xs text-gray-500 text-nowrap">{total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}</span>
                         <div className="flex items-center gap-1">
                             <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>
                                 {'«'}

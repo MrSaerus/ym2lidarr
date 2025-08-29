@@ -248,18 +248,6 @@ export default function YandexPage() {
         });
     }
 
-    async function pullFromYandex() {
-        try {
-            try {
-                await api('/api/sync/yandex/pull', { method: 'POST' });
-            } catch {
-                await api('/api/sync/yandex', { method: 'POST' });
-            }
-            await load(1);
-        } catch (e: any) {
-            alert('Yandex pull failed: ' + (e?.message || String(e)));
-        }
-    }
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const headerArrow = (active: boolean) =>
@@ -274,7 +262,6 @@ export default function YandexPage() {
             <Nav />
             <main className="mx-auto max-w-6xl px-4 py-4">
                 <h1 className="h1">Yandex</h1>
-
                 <div className="toolbar">
                     <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
                         <button
@@ -290,45 +277,22 @@ export default function YandexPage() {
                             Albums
                         </button>
                     </div>
-
+                </div>
+                <div className="toolbar">
                     <input
                         placeholder={target === 'albums' ? 'Search title or artist…' : 'Search by name…'}
                         className="input w-80"
                         value={q}
                         onChange={(e) => setQAndUrl(e.target.value)}
                     />
-
                     <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </button>
-                    <button className="btn btn-outline" onClick={pullFromYandex}>
-                        Pull from Yandex
-                    </button>
-
-                    <button
-                        className="btn btn-outline"
-                        onClick={async () => {
-                            try {
-                                await api('/api/sync/match', {
-                                    method: 'POST',
-                                    headers: {'Content-Type': 'application/json'},
-                                    body: JSON.stringify({
-                                        force: true,
-                                        target: target === 'artists' ? 'artists' : 'albums',
-                                    }),
-                                });
-                                await load(1);
-                            } catch (e: any) {
-                                alert('Match failed: ' + (e?.message || String(e)));
-                            }
-                        }}
-                    >
-                        Match {target === 'artists' ? 'Artists' : 'Albums'}
-                    </button>
-
+                </div>
+                <div className="toolbar">
                     <div className="ml-auto flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Rows per page:</span>
-                        <select className="select" value={pageSize}
+                        <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
+                        <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize}
                                 onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
                             {[25, 50, 100, 200].map((n) => (
                                 <option key={n} value={n}>
@@ -336,7 +300,7 @@ export default function YandexPage() {
                                 </option>
                             ))}
                         </select>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-gray-500 text-nowrap">
               {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
             </span>
                         <div className="flex items-center gap-1">
@@ -410,7 +374,8 @@ export default function YandexPage() {
                         {rows.length === 0 ? (
                             <tr>
                                 <Td colSpan={target === 'artists' ? 3 : 4}>
-                                    <div className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
+                                    <div
+                                        className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
                                 </Td>
                             </tr>
                         ) : target === 'artists' ? (

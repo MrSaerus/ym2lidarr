@@ -203,7 +203,7 @@ function ArtistsTab() {
                     value={q}
                     onChange={(e) => setFilterQAndUrl(e.target.value)}
                 />
-                <select className="select" value={monitored} onChange={(e) => setFilterMonAndUrl(e.target.value as any)}>
+                <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={monitored} onChange={(e) => setFilterMonAndUrl(e.target.value as any)}>
                     <option value="all">All</option>
                     <option value="true">Monitored</option>
                     <option value="false">Unmonitored</option>
@@ -211,40 +211,16 @@ function ArtistsTab() {
                 <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                     {loading ? 'Refreshing…' : 'Refresh'}
                 </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={async () => {
-                        try {
-                            await api('/api/lidarr/resync', { method: 'POST' });
-                            await load(1);
-                        } catch (e: any) {
-                            alert('Resync failed: ' + (e?.message || String(e)));
-                        }
-                    }}
-                >
-                    Resync cache
-                </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={async () => {
-                        try {
-                            await api('/api/lidarr/resync', { method: 'POST' });
-                            await load(1);
-                        } catch (e: any) {
-                            alert('Lidarr pull failed: ' + (e?.message || String(e)));
-                        }
-                    }}
-                >
-                    Pull from Lidarr
-                </button>
+            </div>
+            <div className="toolbar">
                 <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Rows per page:</span>
-                    <select className="select" value={pageSize} onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
+                    <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
+                    <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize} onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
                         {[25, 50, 100, 200].map((n) => (
                             <option key={n} value={n}>{n}</option>
                         ))}
                     </select>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-500 text-nowrap">
             {total ? `Page ${page} of ${Math.max(1, Math.ceil(total / pageSize))} — total ${total}` : 'No data'}
           </span>
                     <div className="flex items-center gap-1">
@@ -462,13 +438,13 @@ function AlbumsTab() {
                     value={q}
                     onChange={(e) => patchQueryAndReload({q: e.target.value})}
                 />
-                <select className="select" value={monitored}
+                <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={monitored}
                         onChange={(e) => patchQueryAndReload({monitored: e.target.value})}>
                     <option value="all">All</option>
                     <option value="true">Monitored</option>
                     <option value="false">Unmonitored</option>
                 </select>
-                <select className="select" value={hasPath}
+                <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={hasPath}
                         onChange={(e) => patchQueryAndReload({hasPath: e.target.value})}>
                     <option value="all">Any path</option>
                     <option value="with">With path</option>
@@ -491,12 +467,12 @@ function AlbumsTab() {
                     Pull from Lidarr
                 </button>
                 <div className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Rows per page:</span>
-                    <select className="select" value={pageSize}
+                    <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
+                    <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize}
                             onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
                         {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-500 text-nowrap">
             {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
           </span>
                     <div className="flex items-center gap-1">
@@ -610,22 +586,20 @@ export default function LidarrPage() {
             <main className="mx-auto max-w-6xl px-4 py-4">
                 <h1 className="h1">Lidarr</h1>
 
-                <div className="mb-3 flex gap-2">
-                    <button
-                        className={`tab ${tab === 'artists' ? 'tab--active' : ''}`}
-                        onClick={() => setTab('artists')}
-                    >
-                        Artists
-                    </button>
-                    <button
-                        className={`tab ${tab === 'albums' ? 'tab--active' : ''}`}
-                        onClick={() => setTab('albums')}
-                    >
-                        Albums
-                    </button>
+                <div className="toolbar">
+                    <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
+                        <button className={`btn ${tab === 'artists' ? 'btn-primary' : 'btn-outline'}`}
+                                onClick={() => setTab('artists')}>
+                            Artists
+                        </button>
+                        <button className={`btn ${tab === 'albums' ? 'btn-primary' : 'btn-outline'}`}
+                                onClick={() => setTab('albums')}>
+                            Albums
+                        </button>
+                    </div>
                 </div>
 
-                {tab === 'artists' ? <ArtistsTab /> : <AlbumsTab />}
+                {tab === 'artists' ? <ArtistsTab/> : <AlbumsTab/>}
             </main>
         </>
     );

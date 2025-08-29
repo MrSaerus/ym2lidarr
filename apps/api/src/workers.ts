@@ -782,13 +782,14 @@ type PushExOpts = {
   reuseRunId?: number;
   noFinalize?: boolean;
   kindOverride?: string;
+  allowRepushOverride?: boolean;
 };
 
 async function runLidarrPushEx(opts: PushExOpts = {}) {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   const target: 'artists'|'albums' = opts.target ?? 'artists';
   const source: 'yandex'|'custom' = opts.source ?? 'yandex';
-  const allowRepush = !!setting?.allowRepush;
+  const allowRepush = opts.allowRepushOverride ?? !!setting?.allowRepush;
 
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
     await prisma.syncRun.create({ data: { kind: opts.kindOverride || 'lidarr.push', status: 'error', message: 'No Lidarr URL or API key' } });
@@ -920,8 +921,17 @@ export async function runCustomMatchAll(reuseRunId?: number, opts?: { force?: bo
   return runCustomArtistsMatch(run.id, { force: !!opts?.force });
 }
 
-export async function runCustomPushAll(reuseRunId?: number) {
-  return runLidarrPushEx({ target: 'artists', source: 'custom', reuseRunId, kindOverride: 'custom.push.all' });
+export async function runCustomPushAll(
+    reuseRunId?: number,
+    opts?: { force?: boolean }
+) {
+  return runLidarrPushEx({
+    target: 'artists',
+    source: 'custom',
+    reuseRunId,
+    kindOverride: 'custom.push.all',
+    allowRepushOverride: !!opts?.force,
+  });
 }
 
 export async function runYandexPullAll(reuseRunId?: number) {

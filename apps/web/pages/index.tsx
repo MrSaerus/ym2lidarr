@@ -331,7 +331,16 @@ export default function OverviewPage() {
       setMsg(`Push error: ${e?.message || String(e)}`);
     }
   }
-
+  async function pushCustomToLidarrFull() {
+    setMsg('Pushing (custom) to Lidarr…');
+    markBusy('customPush');
+    try {
+      await tryPostMany(['/api/sync/custom/push'], { force: true});
+      setMsg('Push started'); setTimeout(loadRuns, 300);
+    } catch (e: any) {
+      setMsg(`Push error: ${e?.message || String(e)}`);
+    }
+  }
   // Soft-cancel run
   async function stopRun(id: number) {
     try {
@@ -373,6 +382,13 @@ export default function OverviewPage() {
                 >
                   {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr'}
                 </button>
+                <button
+                    className="btn btn-outline"
+                    onClick={pushCustomToLidarrFull}
+                    disabled={isBusy('customPush')}
+                >
+                  {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr Force'}
+                </button>
               </div>
             </div>
             <div className="space-y-1">
@@ -380,7 +396,7 @@ export default function OverviewPage() {
                   <div className="text-sm text-gray-500">No data</div>
               ) : (
                   <table className="w-full text-sm">
-                    <thead className="text-gray-400">
+                  <thead className="text-gray-400">
                     <tr>
                       <th className="text-left w-10">#</th>
                       <th className="text-left">Artist</th>
@@ -785,38 +801,38 @@ export default function OverviewPage() {
             )}
           </section>
           {/* Global actions */}
-          <section className="panel p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <button className="btn btn-outline" onClick={load} disabled={loading}>
-                {loading ? 'Refreshing…' : 'Refresh'}
-              </button>
-              <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists
-              </button>
-              <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>
-              <button className="btn btn-outline" onClick={pullFromLidarrArtists}
-                      disabled={isBusy('lidarrPullArtists')}>
-                {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}
-              </button>
-              <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
-                {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr Albums'}
-              </button>
-              <button className="btn btn-outline" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>
-                {isBusy('yandexPull') ? 'Pulling…' : 'Pull from Yandex (All)'}
-              </button>
-              <button className="btn btn-outline" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>
-                {isBusy('yandexMatchArtists') ? 'Matching…' : 'Match Yandex Artists'}
-              </button>
-              <button className="btn btn-outline" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>
-                {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Match Yandex Albums'}
-              </button>
-              <button className="btn btn-primary" onClick={runSyncYandex} disabled={isBusy('yandexPull')}>
-                {isBusy('yandexPull') ? 'Pulling…' : 'Pull-all (Yandex)'}
-              </button>
-              <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>
-                Push Yandex (Both)
-              </button>
-            </div>
-          </section>
+          {/*<section className="panel p-4">*/}
+          {/*  <div className="flex flex-wrap items-center gap-2">*/}
+          {/*    <button className="btn btn-outline" onClick={load} disabled={loading}>*/}
+          {/*      {loading ? 'Refreshing…' : 'Refresh'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={resyncCacheLidarrArtists}>Resync cache Lidarr Artists*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={resyncCacheYandexAlbums}>Resync cache Yandex Albums</button>*/}
+          {/*    <button className="btn btn-outline" onClick={pullFromLidarrArtists}*/}
+          {/*            disabled={isBusy('lidarrPullArtists')}>*/}
+          {/*      {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr Artists'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>*/}
+          {/*      {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr Albums'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>*/}
+          {/*      {isBusy('yandexPull') ? 'Pulling…' : 'Pull from Yandex (All)'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>*/}
+          {/*      {isBusy('yandexMatchArtists') ? 'Matching…' : 'Match Yandex Artists'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-outline" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>*/}
+          {/*      {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Match Yandex Albums'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-primary" onClick={runSyncYandex} disabled={isBusy('yandexPull')}>*/}
+          {/*      {isBusy('yandexPull') ? 'Pulling…' : 'Pull-all (Yandex)'}*/}
+          {/*    </button>*/}
+          {/*    <button className="btn btn-primary" onClick={() => pushYandexToLidarr('both')}>*/}
+          {/*      Push Yandex (Both)*/}
+          {/*    </button>*/}
+          {/*  </div>*/}
+          {/*</section>*/}
 
           <style jsx>{`
             :root {

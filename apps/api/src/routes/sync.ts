@@ -115,9 +115,10 @@ r.post('/custom/match', async (req, res) => {
 });
 
 r.post('/custom/push', async (_req, res) => {
+  const force = _req.body?.force === true || String(_req.query.force || '').toLowerCase() === 'true';
   const run = await startRun('custom.push.all', { phase: 'start', total: 0, done: 0, ok: 0, failed: 0 });
-  runCustomPushAll(run.id).catch(() => {});
-  res.json({ started: true, runId: run.id });
+  runCustomPushAll(run.id, { force }).catch(() => {});
+  res.json({ started: true, runId: run.id, force });
 });
 
 r.post('/yandex/pull-all', async (_req, res) => {
