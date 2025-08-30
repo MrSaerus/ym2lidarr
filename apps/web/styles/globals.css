@@ -17,6 +17,9 @@
         --error: #ef4444;
 
         --ym: #ffcc00;
+
+        --chip-w: 96px;
+        --chip-gap: 6px;
     }
 
     /* Светлая тема (опционально) */
@@ -37,6 +40,44 @@
     }
 
     a { @apply underline-offset-2; }
+
+    .links-col-2 {
+        width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
+    }
+    .link-tray {
+        display: flex;
+        align-items: center;
+        gap: var(--chip-gap);
+        white-space: nowrap;
+    }
+
+    .link-tray-right {
+        justify-content: flex-end;
+    }
+
+    .link-tray-2 {
+        min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
+    }
+
+    .link-tray :global(.link-chip) {
+        display: inline-flex;
+        justify-content: center;
+        width: var(--chip-w);
+    }
+
+    .link-tray :global(.link-chip.placeholder) {
+        visibility: hidden;
+    }
+
+    .link-margin-right-5 {
+        margin-right: 5px;
+    }
+
+    .btn[disabled] {
+        opacity: .6;
+        cursor: not-allowed;
+    }
+
 }
 
 /* Компонентные классы под наш UI */
