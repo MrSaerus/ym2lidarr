@@ -396,13 +396,14 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {lidarrHref
-                                    ? <a href={lidarrHref} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--lidarr">Lidarr</a>
-                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                  ? <a href={lidarrHref} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--lidarr">Lidarr</a>
+                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--mb">MusicBrainz</a>
-                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip invisible select-none"
+                                          aria-hidden="true">MusicBrainz</span>}
                               </div>
                             </td>
                           </tr>
@@ -466,11 +467,12 @@ export default function OverviewPage() {
                                 {r.yandexUrl
                                     ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
                                          className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
-                                    : <span className="link-chip placeholder">Yandex</span>}
+                                    : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--mb">MusicBrainz</a>
-                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip invisible select-none"
+                                          aria-hidden="true">MusicBrainz</span>}
                               </div>
                             </td>
                           </tr>
@@ -516,13 +518,14 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.lidarrUrl
-                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
-                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                  ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--mb">MusicBrainz</a>
-                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip invisible select-none"
+                                          aria-hidden="true">MusicBrainz</span>}
                               </div>
                             </td>
                           </tr>
@@ -582,13 +585,14 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.yandexUrl
-                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
-                                    : <span className="link-chip placeholder">Yandex</span>}
+                                  ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                                  : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--mb">MusicBrainz</a>
-                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip invisible select-none"
+                                          aria-hidden="true">MusicBrainz</span>}
                               </div>
                             </td>
                           </tr>
@@ -632,13 +636,13 @@ export default function OverviewPage() {
                             <td className="py-1 links-col-2">
                               <div className="link-tray link-tray-2 link-tray-right">
                                 {r.lidarrUrl
-                                    ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
-                                    : <span className="link-chip placeholder">Lidarr</span>}
+                                  ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
                                 {r.mbUrl
-                                    ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--mb">MusicBrainz</a>
-                                    : <span className="link-chip placeholder">MusicBrainz</span>}
+                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                       className="link-chip link-chip--mb">MusicBrainz</a>
+                                  : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
                               </div>
                             </td>
                           </tr>
@@ -783,50 +787,6 @@ export default function OverviewPage() {
                 </table>
             )}
           </section>
-          <style jsx>{`
-            :root {
-              --chip-w: 96px;
-              --chip-gap: 6px;
-            }
-
-            .links-col-2 {
-              width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
-            }
-
-            .link-tray {
-              display: flex;
-              align-items: center;
-              gap: var(--chip-gap);
-              white-space: nowrap;
-            }
-
-            .link-tray-right {
-              justify-content: flex-end;
-            }
-
-            .link-tray-2 {
-              min-width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
-            }
-
-            .link-tray :global(.link-chip) {
-              display: inline-flex;
-              justify-content: center;
-              width: var(--chip-w);
-            }
-
-            .link-tray :global(.link-chip.placeholder) {
-              visibility: hidden;
-            }
-
-            .link-margin-right-5 {
-              margin-right: 5px;
-            }
-
-            .btn[disabled] {
-              opacity: .6;
-              cursor: not-allowed;
-            }
-          `}</style>
         </main>
       </>
   );
