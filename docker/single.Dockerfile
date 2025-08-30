@@ -1,5 +1,5 @@
 # ---------- node builder ----------
-FROM --platform=$BUILDPLATFORM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS nodebuilder
+FROM --platform=$BUILDPLATFORM node:24.7.0@sha256:701c8a634cb3ddbc1dc9584725937619716882525356f0989f11816ba3747a22 AS nodebuilder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
@@ -20,7 +20,7 @@ RUN npm --workspace apps/api run build
 RUN npm --workspace apps/web run build
 
 # ---------- python builder ----------
-FROM --platform=$BUILDPLATFORM python:3.11-slim@sha256:1d6131b5d479888b43200645e03a78443c7157efbdb730e6b48129740727c312 AS pybuilder
+FROM --platform=$BUILDPLATFORM python:3.13-slim@sha256:27f90d79cc85e9b7b2560063ef44fa0e9eaae7a7c3f5a9f74563065c5477cc24 AS pybuilder
 WORKDIR /py
 ENV VIRTUAL_ENV=/opt/venv
 RUN python -m venv $VIRTUAL_ENV
@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY apps/pyproxy /py/app
 
 # ---------- runner ----------
-FROM --platform=$TARGETPLATFORM node:20.19.4@sha256:572a90df10a58ebb7d3f223d661d964a6c2383a9c2b5763162b4f631c53dc56a AS api_web
+FROM --platform=$TARGETPLATFORM node:24.7.0@sha256:701c8a634cb3ddbc1dc9584725937619716882525356f0989f11816ba3747a22 AS api_web
 WORKDIR /app
 
 ENV NODE_ENV=production
