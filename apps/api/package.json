@@ -23,7 +23,7 @@
     "prisma": "^5.15.0",
     "undici": "^6.19.8",
     "undici-proxy": "^0.3.0",
-    "zod": "^3.23.8"
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -36,7 +36,7 @@
     "fast-check": "^4.2.0",
     "jest": "^30.0.5",
     "jest-junit": "^16.0.0",
-    "supertest": "^6.3.4",
+    "supertest": "^7.1.4",
     "ts-jest": "^29.4.1",
     "ts-node": "^10.9.2",
     "tslib": "^2.6.2",
