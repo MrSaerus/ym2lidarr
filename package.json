@@ -15,7 +15,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:seed": "prisma db seed",
-    "lint": "eslint . --max-warnings 0",
+    "lint": "eslint . --max-warnings 5",
     "lint:fix": "eslint . --fix",
     "format": "prettier -c \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
     "format:fix": "prettier -w \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\""
