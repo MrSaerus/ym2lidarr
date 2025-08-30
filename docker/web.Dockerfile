@@ -13,7 +13,7 @@ COPY apps/web ./apps/web
 RUN npm --workspace apps/web run build
 
 # ---------- runner ----------
-FROM --platform=$TARGETPLATFORM gcr.io/distroless/nodejs20-debian12@sha256:079f8c6514d2f21e13e27a40f3e0ee0c5a12aa208d2ef5a2390e44e03e4f36c8 AS web
+FROM --platform=$TARGETPLATFORM gcr.io/distroless/nodejs20-debian12@sha256:a68373cb68a08c63bc5523d06e4c2dcd6cb0d04d1a3f8558cb5ace6fc901d27b AS web
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
