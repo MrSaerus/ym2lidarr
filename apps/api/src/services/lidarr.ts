@@ -292,6 +292,7 @@ export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: st
  * - ensureArtistInLidarr
  * - post-check (local /artist), ретраи на 5xx/503
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars, no-unused-vars
 type LogFn = (level: 'info' | 'warn' | 'error', msg: string, extra?: any) => Promise<void>;
 export async function pushArtistWithConfirm(
     setting: any,
