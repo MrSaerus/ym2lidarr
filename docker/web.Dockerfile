@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM --platform=$BUILDPLATFORM node:20-bookworm-slim@sha256:6db5e436948af8f0244488a1f658c2c8e55a3ae51ca2e1686ed042be8f25f70a AS builder
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:363eede750b6677a578eea4373235aaa70a7df0da90b5fe77f66b3e651484f6f AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
