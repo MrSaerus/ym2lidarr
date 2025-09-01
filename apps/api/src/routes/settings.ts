@@ -100,6 +100,13 @@ const ALLOWED_FIELDS = new Set([
 
   'allowRepush',
   'matchRetryDays',
+
+  // qBittorrent
+  'qbtUrl',
+  'qbtUser',
+  'qbtPass',
+  'qbtDeleteFiles',
+  'qbtWebhookSecret',
 ]);
 
 function pickSettings(input: any) {
@@ -146,7 +153,13 @@ function pickSettings(input: any) {
     'enableCronCustomPush',
     'enableCronLidarrPull',
     'allowRepush',
+    'qbtDeleteFiles',
+
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
+
+  if ('qbtUrl' in out && typeof out.qbtUrl === 'string') {
+    out.qbtUrl = stripTrailingSlashes(out.qbtUrl);
+  }
 
   if ('backupRetention' in out && out.backupRetention != null) {
     const n = parseInt(String(out.backupRetention), 10);
@@ -249,7 +262,10 @@ async function saveSettingsHandler(req: any, res: any) {
 // GET /api/settings
 r.get('/', async (_req, res) => {
   const s: any = await prisma.setting.findFirst({ where: { id: 1 } });
-  res.json(s || {});
+  if (!s) return res.json({});
+  const safe = { ...s };
+  safe.qbtPass = '';
+  return res.json(safe);
 });
 
 // GET /api/settings/scheduler
@@ -331,11 +347,15 @@ r.post('/test/lidarr', async (req, res) => {
       if (!s0?.metadataProfileId && d.metadataProfileId != null) needUpdate.metadataProfileId = d.metadataProfileId;
       if (!s0?.monitor && d.monitor) needUpdate.monitor = d.monitor;
 
+      const raw = pickSettings(req.body);
+      const data = { ...raw };
+      if (raw.qbtPass === '') delete (data as any).qbtPass;
+
       if (Object.keys(needUpdate).length > 0) {
         await prisma.setting.upsert({
           where: { id: 1 },
-          create: { id: 1, lidarrUrl: base, lidarrApiKey, ...needUpdate },
-          update: { lidarrUrl: base, lidarrApiKey, ...needUpdate },
+          create: { id: 1, ...data },
+          update: { ...data },
         });
         applied = needUpdate;
         appliedCount = Object.keys(needUpdate).length;
@@ -388,6 +408,33 @@ r.post('/lidarr/defaults', async (req, res) => {
     res.json({ ok: true, defaults: d, applied: update, appliedCount });
   } catch (e: any) {
     res.status(400).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+r.post('/test/qbt', async (_req, res) => {
+  try {
+    const s = await prisma.setting.findFirst({ where: { id: 1 } });
+    const base = (s?.qbtUrl || '').replace(/\/+$/, '');
+    const user = s?.qbtUser || '';
+    const pass = s?.qbtPass || '';
+
+    if (!base) return res.status(400).json({ ok: false, error: 'qbtUrl is not set' });
+
+    // webapiVersion (без auth)
+    const r1 = await fetch(`${base}/api/v2/app/webapiVersion`);
+    const webApi = await r1.text();
+
+    // login (auth)
+    const r2 = await fetch(`${base}/api/v2/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ username: user, password: pass }),
+    });
+    const okLogin = r2.ok;
+
+    res.json({ ok: r1.ok && okLogin, webApi, login: okLogin });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 

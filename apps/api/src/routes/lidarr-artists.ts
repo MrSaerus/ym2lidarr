@@ -4,6 +4,8 @@ import { prisma } from '../prisma';
 import { request } from 'undici';
 import { getLidarrCreds } from '../utils/lidarr-creds';
 import { syncLidarrArtists, syncLidarrAlbums } from '../services/lidarr-cache';
+import { runLidarrSearchArtists } from '../workers';
+import { startRun } from '../log';
 
 // NEW: взаимная блокировка с кроном/другими ручными раннами
 import { ensureNotBusyOrThrow } from '../scheduler';
@@ -187,4 +189,18 @@ r.get('/stats/downloads', async (_req, res) => {
     }
 });
 
+r.post('/search-artists', async (req, res) => {
+    try {
+        // при желании можно добавить взаимную блокировку с другими lidarr.* задачами
+        // await ensureNotBusyOrThrow(['lidarr.'], ['lidarrPull'] as any);
+
+        const delayMs = Number(req.body?.delayMs);
+        const run = await startRun('lidarr.search.artists', { phase: 'search', total: 0, done: 0, ok: 0, failed: 0 });
+        runLidarrSearchArtists(run.id, { delayMs: Number.isFinite(delayMs) ? delayMs : 150 }).catch(() => {});
+        res.json({ started: true, runId: run.id });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
 export default r;

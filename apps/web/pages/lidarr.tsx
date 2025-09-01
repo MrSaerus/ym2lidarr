@@ -3,6 +3,7 @@ import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import { Table, Th, Td } from '../components/Table';
 import { useRouter } from 'next/router';
+import Footer from '../components/Footer';
 
 type SortDir = 'asc' | 'desc';
 
@@ -617,6 +618,7 @@ export default function LidarrPage() {
 
                 {tab === 'artists' ? <ArtistsTab/> : <AlbumsTab/>}
             </main>
+            <Footer />
         </>
     );
 }

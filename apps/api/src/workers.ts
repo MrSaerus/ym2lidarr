@@ -1019,3 +1019,60 @@ export async function runYandexPush(target: 'artists'|'albums'|'both' = 'artists
     await runLidarrPushEx({ target, source: 'yandex', reuseRunId: run.id, kindOverride: kind });
   }
 }
+
+// --- Mass search for all Lidarr artists ---
+export async function runLidarrSearchArtists(reuseRunId?: number, opts?: { delayMs?: number }) {
+
+  const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+  if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
+    await prisma.syncRun.create({ data: { kind: 'lidarr.search.artists', status: 'error', message: 'No Lidarr URL or API key' } });
+    return;
+  }
+
+  const run = await startRunWithKind(
+    'lidarr.search.artists',
+    { phase: 'search', total: 0, done: 0, ok: 0, failed: 0 },
+    reuseRunId
+  );
+  if (!run) return;
+  const runId = run.id;
+
+  const base = setting.lidarrUrl.replace(/\/+$/, '');
+  const key  = setting.lidarrApiKey;
+  const delay = Math.max(0, Number(opts?.delayMs ?? 150));
+
+  await dblog(runId, 'info', 'Lidarr search all artists is started');
+  try {
+    const artists = await prisma.lidarrArtist.findMany({ where: { removed: false }, select: { id: true } });
+    await patchRunStats(runId, { total: artists.length });
+
+    let done = 0, ok = 0, failed = 0;
+
+    for (const a of artists) {
+      try {
+        const url = `${base}/api/v1/command`;
+        const body = JSON.stringify({ name: 'ArtistSearch', artistId: a.id });
+        const res = await request(url, { method: 'POST', body, headers: { 'X-Api-Key': key, 'Content-Type': 'application/json' } });
+        if (res.statusCode >= 400) throw new Error(`ArtistSearch ${a.id} -> ${res.statusCode}`);
+        ok++;
+      } catch (e: any) {
+        failed++;
+        await dblog(runId, 'warn', `ArtistSearch failed: ${a.id}`, { artistId: a.id, error: String(e?.message || e) });
+      }
+      done++;
+      if (done % 25 === 0) await patchRunStats(runId, { done, ok, failed });
+      if (delay) await new Promise(r => setTimeout(r, delay));
+    }
+
+    await patchRunStats(runId, { done, ok, failed, phase: 'done' });
+    await endRun(runId, 'ok');
+    const finalRun = await getRunWithRetry(runId);
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'ok', stats); } catch {}
+  } catch (e: any) {
+    await dblog(runId, 'error', 'Lidarr mass ArtistSearch failed', { error: String(e?.message || e) });
+    await endRun(runId, 'error', String(e?.message || e));
+    const finalRun = await getRunWithRetry(runId);
+    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('lidarr', 'error', stats); } catch {}
+  }
+  await dblog(runId, 'info', 'Lidarr search all artists is done');
+}

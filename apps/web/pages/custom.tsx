@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
 import { Table, Th, Td } from '../components/Table';
 import { customArtists } from '../lib/api';
+import Footer from '../components/Footer';
 
 type SortDir = 'asc' | 'desc';
 type SortField = 'name' | 'matched' | 'created';
@@ -287,6 +288,7 @@ export default function CustomArtistsPage() {
                     </Table>
                 </div>
             </main>
+            <Footer />
         </>
     );
 }

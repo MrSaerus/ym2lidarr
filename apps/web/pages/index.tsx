@@ -1,6 +1,7 @@
 // apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
+import Footer from '../components/Footer';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
 
@@ -788,6 +789,7 @@ export default function OverviewPage() {
             )}
           </section>
         </main>
+        <Footer />
       </>
   );
 }

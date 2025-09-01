@@ -4,6 +4,7 @@ import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import { Table, Th, Td } from '../components/Table';
 import { useRouter } from 'next/router';
+import Footer from '../components/Footer';
 
 type Target = 'artists' | 'albums';
 
@@ -420,6 +421,7 @@ export default function YandexPage() {
                     </Table>
                 </div>
             </main>
+            <Footer />
         </>
     );
 }

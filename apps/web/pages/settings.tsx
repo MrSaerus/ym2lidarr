@@ -59,6 +59,13 @@ type Settings = {
   telegramBot?: string | null;
   telegramChatId?: string | null;
   webhookUrl?: string | null;
+
+  // qBittorrent
+  qbtUrl?: string | null;
+  qbtUser?: string | null;
+  qbtPass?: string | null;
+  qbtDeleteFiles?: boolean | null;
+  qbtWebhookSecret?: string | null;
 };
 
 
@@ -110,6 +117,12 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     telegramBot: s.telegramBot ?? '',
     telegramChatId: s.telegramChatId ?? '',
     webhookUrl: s.webhookUrl ?? '',
+
+    qbtUrl: s.qbtUrl ?? 'http://qbittorrent:8080',
+    qbtUser: s.qbtUser ?? 'admin',
+    qbtPass: s.qbtPass ?? '',
+    qbtDeleteFiles: s.qbtDeleteFiles ?? true,
+    qbtWebhookSecret: s.qbtWebhookSecret ?? '',
   };
 }
 
@@ -117,6 +130,41 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>(withDefaults(undefined));
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [running, setRunning] = useState(false);
+  const [lastRun, setLastRun] = useState<number | null>(null);
+
+  type StartRunRes = { started?: boolean; runId?: number; ok?: boolean; error?: string };
+
+  async function forceSearchAllArtists() {
+    setMsg('Запускаю массовый поиск в Lidarr…');
+    setRunning(true);
+    try {
+      // если твой api-клиент сам префиксит /api — оставь как '/lidarr/search-artists'
+      // иначе используй '/api/lidarr/search-artists'
+      const r = await api<StartRunRes>('/api/lidarr/search-artists', {
+        method: 'POST',
+        body: { delayMs: 150 },
+      });
+
+      const started = r?.started ?? r?.ok ?? false;
+      const runId = r?.runId ?? null;
+
+      if (started) {
+        setLastRun(runId);
+        setMsg(runId
+          ? `Стартовал ArtistSearch для всех артистов (runId=${runId}).`
+          : 'Стартовал ArtistSearch для всех артистов.');
+      } else {
+        setMsg(`Не удалось стартовать: ${r?.error || 'неизвестная ошибка'}`);
+      }
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      // часто при занятой системе сервер отдаёт 409 → приведём к понятному тексту
+      setMsg(/409|Busy/i.test(m) ? 'Сейчас занято: уже идёт другой запуск.' : `Ошибка: ${m}`);
+    } finally {
+      setRunning(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,6 +224,16 @@ export default function SettingsPage() {
       const r = await api<any>('/api/backup/run', { method: 'POST' });
       setMsg(r?.ok ? 'Backup completed' : `Backup error: ${r?.error || 'unknown'}`);
     } catch (e: any) { setMsg(e?.message || String(e)); }
+  }
+
+  async function testQbt() {
+    setMsg('Testing qBittorrent…');
+    try {
+      const r = await api<any>('/api/settings/test/qbt', { method: 'POST' });
+      setMsg(r?.ok ? `qBittorrent OK (webApi: ${r.webApi || 'unknown'})` : `qBittorrent failed: ${r?.error || 'unknown'}`);
+    } catch (e: any) {
+      setMsg(e?.message || String(e));
+    }
   }
 
   return (
@@ -253,30 +311,56 @@ export default function SettingsPage() {
           {/* Lidarr */}
           <section className="panel p-4 space-y-3">
             <div className="section-title">Lidarr</div>
+            <button
+              className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
+              onClick={forceSearchAllArtists}
+              disabled={running}
+              title="Запустить ArtistSearch для всех артистов в Lidarr"
+            >
+              {running ? 'Запускаю…' : 'Искать по торрентам — все артисты'}
+            </button>
 
+            <div className="mt-3 text-sm text-gray-700">
+              {msg}
+              {lastRun ? (
+                <div className="mt-1">
+                  runId: <span className="font-mono">{lastRun}</span>
+                </div>
+              ) : null}
+            </div>
             <FormRow label="URL" help="Базовый URL Lidarr (например http://lidarr:8686).">
-              <input className="input" value={settings.lidarrUrl || ''} onChange={(e) => setSettings({ ...settings, lidarrUrl: e.target.value })} placeholder="http://localhost:8686" />
+              <input className="input" value={settings.lidarrUrl || ''}
+                     onChange={(e) => setSettings({ ...settings, lidarrUrl: e.target.value })}
+                     placeholder="http://localhost:8686" />
             </FormRow>
             <FormRow label="API Key" help="Настройки → General → Security → API Key в Lidarr.">
-              <input className="input" value={settings.lidarrApiKey || ''} onChange={(e) => setSettings({ ...settings, lidarrApiKey: e.target.value })} placeholder="xxxxxxxxxxxxxxxx" />
+              <input className="input" value={settings.lidarrApiKey || ''}
+                     onChange={(e) => setSettings({ ...settings, lidarrApiKey: e.target.value })}
+                     placeholder="xxxxxxxxxxxxxxxx" />
             </FormRow>
-            <FormRow label="Allow fallback without metadata" help="Разрешить создавать артистов без lookup при недоступном SkyHook.">
+            <FormRow label="Allow fallback without metadata"
+                     help="Разрешить создавать артистов без lookup при недоступном SkyHook.">
               <div className="control flex items-center gap-2">
-                <input type="checkbox" checked={!!settings.lidarrAllowNoMetadata} onChange={(e) => setSettings({ ...settings, lidarrAllowNoMetadata: e.target.checked })} />
+                <input type="checkbox" checked={!!settings.lidarrAllowNoMetadata}
+                       onChange={(e) => setSettings({ ...settings, lidarrAllowNoMetadata: e.target.checked })} />
                 <span className="text-sm text-gray-500">Create artists without metadata</span>
               </div>
             </FormRow>
 
             <FormRow label="Lidarr pull cron" help={<><code>35 */6 * * *</code> — каждые 6 часов</>}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <input className="input md:col-span-1" value={settings.cronLidarrPull || ''} onChange={(e) => setSettings({ ...settings, cronLidarrPull: e.target.value })} placeholder="35 */6 * * *" />
-                <select className="select md:col-span-1" value={settings.lidarrPullTarget || 'both'} onChange={(e) => setSettings({ ...settings, lidarrPullTarget: e.target.value as any })}>
+                <input className="input md:col-span-1" value={settings.cronLidarrPull || ''}
+                       onChange={(e) => setSettings({ ...settings, cronLidarrPull: e.target.value })}
+                       placeholder="35 */6 * * *" />
+                <select className="select md:col-span-1" value={settings.lidarrPullTarget || 'both'}
+                        onChange={(e) => setSettings({ ...settings, lidarrPullTarget: e.target.value as any })}>
                   <option value="both">both</option>
                   <option value="artists">artists</option>
                   <option value="albums">albums</option>
                 </select>
                 <label className="flex items-center gap-2 text-sm text-gray-400">
-                  <input type="checkbox" checked={!!settings.enableCronLidarrPull} onChange={(e) => setSettings({ ...settings, enableCronLidarrPull: e.target.checked })}/>
+                  <input type="checkbox" checked={!!settings.enableCronLidarrPull}
+                         onChange={(e) => setSettings({ ...settings, enableCronLidarrPull: e.target.checked })} />
                   Enabled
                 </label>
               </div>
@@ -284,7 +368,8 @@ export default function SettingsPage() {
 
             {/* Параметры для ручного Push (кнопки на главной) */}
             <FormRow label="Manual push target" help="Кого отправлять в Lidarr при ручном пуше (кнопкой).">
-              <select className="select" value={settings.pushTarget} onChange={(e) => setSettings({ ...settings, pushTarget: e.target.value as any })}>
+              <select className="select" value={settings.pushTarget}
+                      onChange={(e) => setSettings({ ...settings, pushTarget: e.target.value as any })}>
                 <option value="artists">Artists (default)</option>
                 <option value="albums">Albums</option>
               </select>
@@ -296,40 +381,40 @@ export default function SettingsPage() {
 
               <FormRow label="Root folder path" help="Корень библиотеки в Lidarr, например /music.">
                 <input
-                    className="input"
-                    value={settings.rootFolderPath || ''}
-                    onChange={(e) => setSettings({ ...settings, rootFolderPath: e.target.value })}
-                    placeholder="/music"
+                  className="input"
+                  value={settings.rootFolderPath || ''}
+                  onChange={(e) => setSettings({ ...settings, rootFolderPath: e.target.value })}
+                  placeholder="/music"
                 />
               </FormRow>
 
               <FormRow label="Quality profile ID" help="ID профиля качества из Lidarr.">
                 <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    value={settings.qualityProfileId ?? 1}
-                    onChange={(e) => setSettings({ ...settings, qualityProfileId: Number(e.target.value || 1) })}
-                    placeholder="1"
+                  className="input"
+                  type="number"
+                  min={1}
+                  value={settings.qualityProfileId ?? 1}
+                  onChange={(e) => setSettings({ ...settings, qualityProfileId: Number(e.target.value || 1) })}
+                  placeholder="1"
                 />
               </FormRow>
 
               <FormRow label="Metadata profile ID" help="ID метадата-профиля из Lidarr.">
                 <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    value={settings.metadataProfileId ?? 1}
-                    onChange={(e) => setSettings({ ...settings, metadataProfileId: Number(e.target.value || 1) })}
-                    placeholder="1"
+                  className="input"
+                  type="number"
+                  min={1}
+                  value={settings.metadataProfileId ?? 1}
+                  onChange={(e) => setSettings({ ...settings, metadataProfileId: Number(e.target.value || 1) })}
+                  placeholder="1"
                 />
               </FormRow>
 
               <FormRow label="Monitor policy" help="Что мониторить у артиста при добавлении. Обычно 'all'.">
                 <select
-                    className="select"
-                    value={settings.monitor || 'all'}
-                    onChange={(e) => setSettings({ ...settings, monitor: e.target.value })}
+                  className="select"
+                  value={settings.monitor || 'all'}
+                  onChange={(e) => setSettings({ ...settings, monitor: e.target.value })}
                 >
                   <option value="all">all</option>
                   <option value="none">none</option>
@@ -345,9 +430,11 @@ export default function SettingsPage() {
           {/* Custom */}
           <section className="panel p-4 space-y-3">
             <div className="section-title">Custom</div>
-            <FormRow label="Custom match cron"  help={<><code>0 0 * * *</code> — Раз в день в 00:00 </>}>
+            <FormRow label="Custom match cron" help={<><code>0 0 * * *</code> — Раз в день в 00:00 </>}>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <input className="input md:col-span-2" value={settings.cronCustomMatch || ''} onChange={(e) => setSettings({ ...settings, cronCustomMatch: e.target.value })} placeholder="0 0 * * *" />
+                <input className="input md:col-span-2" value={settings.cronCustomMatch || ''}
+                       onChange={(e) => setSettings({ ...settings, cronCustomMatch: e.target.value })}
+                       placeholder="0 0 * * *" />
                 <label className="flex items-center gap-2 text-sm text-gray-400">
                   <input type="checkbox" checked={!!settings.enableCronCustomMatch} onChange={(e) => setSettings({ ...settings, enableCronCustomMatch: e.target.checked })}/>
                   Enabled
@@ -380,6 +467,54 @@ export default function SettingsPage() {
             <div className="toolbar">
               <button className="btn btn-outline" onClick={listBackups}>List backups</button>
               <button className="btn btn-primary" onClick={runBackupNow}>Run backup now</button>
+            </div>
+          </section>
+
+          {/* qBittorrent */}
+          <section className="panel p-4 space-y-3">
+            <div className="section-title">qBittorrent</div>
+
+            <FormRow label="URL" help="Базовый URL qBittorrent WebUI (без хвостового /).">
+              <input className="input" value={settings.qbtUrl || ''} onChange={(e) => setSettings({ ...settings, qbtUrl: e.target.value })} placeholder="http://qbittorrent:8080" />
+            </FormRow>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <FormRow label="Username">
+                <input className="input" value={settings.qbtUser || ''} onChange={(e) => setSettings({ ...settings, qbtUser: e.target.value })} placeholder="admin" />
+              </FormRow>
+              <FormRow label="Password">
+                <input className="input" type="password" value={settings.qbtPass || ''} onChange={(e) => setSettings({ ...settings, qbtPass: e.target.value })} placeholder="••••••••" />
+              </FormRow>
+            </div>
+
+            <FormRow label="Delete mode" help="Удалять только торрент или также файлы после импорта.">
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input type="checkbox" checked={!!settings.qbtDeleteFiles} onChange={(e) => setSettings({ ...settings, qbtDeleteFiles: e.target.checked })} />
+                <span>Delete data files too</span>
+              </label>
+            </FormRow>
+
+            <FormRow label="Webhook secret" help={<>Секрет для <code>{settings.qbtUrl}/api/webhooks/lidarr?secret=…</code></>}>
+              <div className="flex gap-2">
+                <input className="input flex-1" value={settings.qbtWebhookSecret || ''} onChange={(e) => setSettings({ ...settings, qbtWebhookSecret: e.target.value })} placeholder="(optional)" />
+                <button
+                  className="btn btn-outline"
+                  type="button"
+                  onClick={() => {
+                    const arr = new Uint8Array(16);
+                    if (window.crypto?.getRandomValues) window.crypto.getRandomValues(arr);
+                    else for (let i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+                    const hex = Array.from(arr).map((b) => b.toString(16).padStart(2, '0')).join('');
+                    setSettings({ ...settings, qbtWebhookSecret: hex });
+                  }}
+                >
+                  Generate
+                </button>
+              </div>
+            </FormRow>
+
+            <div className="toolbar">
+              <button className="btn btn-outline" onClick={testQbt}>Test qBittorrent</button>
             </div>
           </section>
 

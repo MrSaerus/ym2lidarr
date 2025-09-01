@@ -4,6 +4,7 @@ import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import Skeleton from '../components/Skeleton';
 import { Table, Th, Td } from '../components/Table';
+import Footer from '../components/Footer';
 
 type BackupEntry = { file: string; size: number; mtime: number };
 type ListResp = { ok: boolean; dir: string; files: BackupEntry[] };
@@ -141,6 +142,7 @@ export default function BackupsPage() {
                     Files live on the API host. For downloads expose a static route or copy from the mounted volume.
                 </p>
             </main>
+            <Footer />
         </>
     );
 }
