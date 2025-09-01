@@ -1023,6 +1023,7 @@ export async function runYandexPush(target: 'artists'|'albums'|'both' = 'artists
 // --- Mass search for all Lidarr artists ---
 export async function runLidarrSearchArtists(reuseRunId?: number, opts?: { delayMs?: number }) {
 
+  const MAX_DELAY_MS = 10_000;
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
     await prisma.syncRun.create({ data: { kind: 'lidarr.search.artists', status: 'error', message: 'No Lidarr URL or API key' } });
@@ -1039,7 +1040,8 @@ export async function runLidarrSearchArtists(reuseRunId?: number, opts?: { delay
 
   const base = setting.lidarrUrl.replace(/\/+$/, '');
   const key  = setting.lidarrApiKey;
-  const delay = Math.max(0, Number(opts?.delayMs ?? 150));
+  const delayRaw = Number(opts?.delayMs ?? 150);
+  const delay = Number.isFinite(delayRaw) ? Math.max(0, Math.min(delayRaw, MAX_DELAY_MS)) : 150;
 
   await dblog(runId, 'info', 'Lidarr search all artists is started');
   try {
