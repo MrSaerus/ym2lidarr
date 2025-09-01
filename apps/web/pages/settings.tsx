@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import FormRow from '../components/FormRow';
+import { toastOk, toastWarn, toastErr } from '../lib/toast';
 
 type Settings = {
   // Yandex Music
@@ -135,6 +136,14 @@ export default function SettingsPage() {
 
   type StartRunRes = { started?: boolean; runId?: number; ok?: boolean; error?: string };
 
+  useEffect(() => {
+    if (!msg || !msg.trim()) return;
+    // простой маппинг тона: ошибки → красный, "процессы" → жёлтый, остальное → зелёный
+    if (/(error|failed|ошибка)/i.test(msg))      toastErr(msg);
+    else if (/(saving|testing|running|запускаю)/i.test(msg)) toastWarn(msg, 2500);
+    else                                          toastOk(msg);
+  }, [msg]);
+
   async function forceSearchAllArtists() {
     setMsg('Запускаю массовый поиск в Lidarr…');
     setRunning(true);
@@ -187,8 +196,11 @@ export default function SettingsPage() {
     try {
       await api('/api/settings', { method: 'PUT', body: settings });
       setMsg('Saved');
+      toastOk('Settings saved');           // адресный зелёный тост
     } catch (e: any) {
-      setMsg(e?.message || String(e));
+      const m = e?.message || String(e);
+      setMsg(m);
+      toastErr(`Save failed: ${m}`);       // адресный красный тост
     }
   }
 
@@ -207,8 +219,14 @@ export default function SettingsPage() {
         method: 'POST',
         body: { lidarrUrl: settings.lidarrUrl || '', lidarrApiKey: settings.lidarrApiKey || '' },
       });
-      setMsg(r?.ok ? 'Lidarr OK' : `Lidarr failed: ${r?.error || 'unknown error'}`);
-    } catch (e: any) { setMsg(e?.message || String(e)); }
+      const ok = !!r?.ok;
+      setMsg(ok ? 'Lidarr OK' : `Lidarr failed: ${r?.error || 'unknown error'}`);
+      ok ? toastOk('Lidarr OK') : toastErr(`Lidarr failed: ${r?.error || 'unknown error'}`);
+    } catch (e: any) {
+      const m = e?.message || String(e);
+      setMsg(m);
+      toastErr(`Lidarr error: ${m}`);
+    }
   }
 
   async function listBackups() {
@@ -241,7 +259,6 @@ export default function SettingsPage() {
         <Nav />
         <main className="mx-auto max-w-4xl px-4 py-4 space-y-6">
           <h1 className="h1">Settings</h1>
-          {msg ? <div className="badge">{msg}</div> : null}
 
           {/* Yandex Music */}
           <section className="panel p-4 space-y-3">

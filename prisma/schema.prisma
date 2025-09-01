@@ -115,7 +115,7 @@ model LidarrAlbum {
 model CustomArtist {
   id        Int       @id @default(autoincrement())
   name      String
-  nkey      String    @unique // нормализованное имя для дедупа
+  nkey      String    @unique
   mbid      String?
   matchedAt DateTime?
   createdAt DateTime  @default(now())
