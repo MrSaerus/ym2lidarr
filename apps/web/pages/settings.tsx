@@ -152,7 +152,7 @@ export default function SettingsPage() {
       // иначе используй '/api/lidarr/search-artists'
       const r = await api<StartRunRes>('/api/lidarr/search-artists', {
         method: 'POST',
-        body: { delayMs: 150 },
+        body: { mode: 'normal' }, // fast | normal | slow
       });
 
       const started = r?.started ?? r?.ok ?? false;

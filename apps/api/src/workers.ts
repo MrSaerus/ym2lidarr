@@ -1023,6 +1023,7 @@ export async function runYandexPush(target: 'artists'|'albums'|'both' = 'artists
 // --- Mass search for all Lidarr artists ---
 export async function runLidarrSearchArtists(reuseRunId?: number, opts?: { delayMs?: number }) {
 
+  const MIN_DELAY_MS = 50;
   const MAX_DELAY_MS = 10_000;
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   if (!setting?.lidarrUrl || !setting?.lidarrApiKey) {
@@ -1041,8 +1042,9 @@ export async function runLidarrSearchArtists(reuseRunId?: number, opts?: { delay
   const base = setting.lidarrUrl.replace(/\/+$/, '');
   const key  = setting.lidarrApiKey;
   const delayRaw = Number(opts?.delayMs ?? 150);
-  const delay = Number.isFinite(delayRaw) ? Math.max(0, Math.min(delayRaw, MAX_DELAY_MS)) : 150;
-
+  const delay = Number.isFinite(delayRaw)
+    ? Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, delayRaw))
+    : 150;
   await dblog(runId, 'info', 'Lidarr search all artists is started');
   try {
     const artists = await prisma.lidarrArtist.findMany({ where: { removed: false }, select: { id: true } });
