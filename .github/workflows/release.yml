@@ -32,6 +32,9 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
         with: { fetch-depth: 0 }
 
+      - name: Compute build date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
 
       - name: Build ${{ matrix.target.name }} (no push)
@@ -46,6 +49,10 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             NEXT_PUBLIC_API_BASE=${{ vars.NEXT_PUBLIC_API_BASE }}
+            VERSION=${{ github.event.release.tag_name }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            REPO_URL=${{ vars.REPO_URL }} # добавь org-level/Env var
 
   push_all:
     name: Push all images (from release tag)
@@ -68,8 +75,10 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
         with: { fetch-depth: 0 }
 
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      - name: Compute build date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
 
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
       - name: Login to Docker Hub
         uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1
         with:
@@ -102,3 +111,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             NEXT_PUBLIC_API_BASE=${{ vars.NEXT_PUBLIC_API_BASE }}
+            VERSION=${{ github.event.release.tag_name }}
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+            REPO_URL=${{ vars.REPO_URL }}

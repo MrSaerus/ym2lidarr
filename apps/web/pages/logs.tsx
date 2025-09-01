@@ -1,7 +1,8 @@
 // apps/web/pages/logs.tsx
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import { api } from '../lib/api';
+import Footer from '../components/Footer';
 
 type RunShort = {
   id: number;
@@ -339,6 +340,7 @@ export default function LogsPage() {
             </div>
           </div>
         </main>
+        <Footer />
       </div>
   );
 }

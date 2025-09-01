@@ -4,15 +4,20 @@ import { prisma } from '../prisma';
 import { request } from 'undici';
 import { getLidarrCreds } from '../utils/lidarr-creds';
 import { syncLidarrArtists, syncLidarrAlbums } from '../services/lidarr-cache';
-
-// NEW: взаимная блокировка с кроном/другими ручными раннами
+import { runLidarrSearchArtists } from '../workers';
+import { startRun } from '../log';
 import { ensureNotBusyOrThrow } from '../scheduler';
 
 const r = Router();
 
 /** ===== list artists from DB with filters/sort/paging ===== */
 type SortField = 'name' | 'monitored' | 'albums' | 'tracks' | 'size' | 'path' | 'added';
-
+type LidarrSearchMode = 'fast' | 'normal' | 'slow';
+const SEARCH_DELAYS: Record<LidarrSearchMode, number> = {
+    fast: 50,
+    normal: 150,
+    slow: 500,
+};
 function i(v: any, d: number) {
     const n = parseInt(String(v ?? ''), 10);
     return Number.isFinite(n) ? n : d;
@@ -187,4 +192,23 @@ r.get('/stats/downloads', async (_req, res) => {
     }
 });
 
+r.post('/search-artists', async (req, res) => {
+    try {
+        await ensureNotBusyOrThrow(['lidarr.'], ['lidarrPull'] as any);
+
+        const modeRaw = String(req.body?.mode || 'normal').toLowerCase();
+        const mode: LidarrSearchMode = (['fast', 'normal', 'slow'].includes(modeRaw) ? modeRaw : 'normal') as LidarrSearchMode;
+        const delayMs = SEARCH_DELAYS[mode];
+
+        const run = await startRun('lidarr.search.artists', {
+            phase: 'search', total: 0, done: 0, ok: 0, failed: 0,
+        });
+
+        runLidarrSearchArtists(run.id, { delayMs }).catch(() => {});
+        res.json({ started: true, runId: run.id, mode, delayMs });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
 export default r;

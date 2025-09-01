@@ -17,6 +17,8 @@ import lidarrAlbumsRouter from './routes/lidarr-albums';
 import yandexRouter from './routes/yandex';
 import unifiedRouter from './routes/unified';
 import customArtistsRoute from './routes/custom-artists';
+import lidarrWebhook from './routes/webhooks.lidarr';
+import qbtDebug from './routes/debug.qbt';
 
 import { prisma } from './prisma';
 import { instanceId } from './instance';
@@ -76,6 +78,8 @@ app.use('/api/lidarr', lidarrAlbumsRouter);
 app.use('/api/yandex', yandexRouter);
 app.use('/api/unified', unifiedRouter);
 app.use('/api/custom-artists', customArtistsRoute);
+app.use('/api/webhooks', lidarrWebhook);
+app.use('/api/debug', qbtDebug);
 
 // Runs/logs router (supports /runs and /api/runs internally)
 app.use(runsRouter);

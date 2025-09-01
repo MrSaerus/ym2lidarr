@@ -115,7 +115,7 @@ model LidarrAlbum {
 model CustomArtist {
   id        Int       @id @default(autoincrement())
   name      String
-  nkey      String    @unique // нормализованное имя для дедупа
+  nkey      String    @unique
   mbid      String?
   matchedAt DateTime?
   createdAt DateTime  @default(now())
@@ -256,13 +256,11 @@ model Setting {
   metadataProfileId Int?
   monitor           String?
 
-  // СТАРОЕ (совместимость UI/миграций)
   cronYandex String  @default("0 */6 * * *")
   cronLidarr String  @default("0 3 * * *")
   yandexCron String?
   lidarrCron String?
 
-  // НОВОЕ: расписания и таргеты
   cronCustomMatch String @default("0 0 * * *")
   cronCustomPush  String @default("0 12 * * *")
 
@@ -275,7 +273,6 @@ model Setting {
   cronLidarrPull   String @default("0 3 * * *")
   lidarrPullTarget String @default("both") // 'both' | 'artists' | 'albums'
 
-  // НОВОЕ: enable-флаги для каждого крона
   enableCronYandexPull  Boolean @default(true)
   enableCronYandexMatch Boolean @default(true)
   enableCronYandexPush  Boolean @default(true)
@@ -288,4 +285,10 @@ model Setting {
 
   matchRetryDays Int     @default(3)
   allowRepush    Boolean @default(false)
+
+  qbtUrl           String?
+  qbtUser          String?
+  qbtPass          String?
+  qbtDeleteFiles   Boolean @default(true)
+  qbtWebhookSecret String?
 }

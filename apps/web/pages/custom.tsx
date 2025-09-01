@@ -3,6 +3,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Nav from '../components/Nav';
 import { Table, Th, Td } from '../components/Table';
 import { customArtists } from '../lib/api';
+import Footer from '../components/Footer';
+import { toastOk, toastWarn, toastErr } from '../lib/toast';
 
 type SortDir = 'asc' | 'desc';
 type SortField = 'name' | 'matched' | 'created';
@@ -88,17 +90,37 @@ export default function CustomArtistsPage() {
 
     const onAdd = useCallback(async () => {
         const lines = (bulkText || '')
-            .split(/[\r\n,;]+/g)
-            .map(s => s.trim())
-            .filter(Boolean);
+          .split(/[\r\n,;]+/g)
+          .map(s => s.trim())
+          .filter(Boolean);
         const uniq = Array.from(new Set(lines));
         if (!uniq.length) return;
 
         setAdding(true);
         try {
-            await customArtists.addMany(uniq);
+            const res: any = await customArtists.addMany(uniq);
             setBulkText('');
             await load();
+
+            const added   = Number(res?.added   ?? res?.okCount ?? res?.created ?? 0) || 0;
+            const exists  = Number(res?.exists  ?? res?.duplicate ?? res?.skipped ?? 0) || 0;
+            const failed  = Number(res?.failed  ?? res?.errorsCount ?? 0) || 0;
+            const errors  = Array.isArray(res?.errors) ? res.errors : Array.isArray(res?.failures) ? res.failures : [];
+
+            if (added > 0)  toastOk(`Added ${added} artist${added === 1 ? '' : 's'}.`);
+            if (exists > 0) toastWarn(`${exists} already existed.`);
+            if (failed > 0) toastErr(`Failed: ${failed}.`);
+            if (Array.isArray(errors) && errors.length) {
+                errors.slice(0, 3).forEach((e: any) => toastErr(typeof e === 'string' ? e : (e?.message || 'Unknown error')));
+                if (errors.length > 3) toastErr(`…and ${errors.length - 3} more errors`);
+            }
+            // Если вообще ничего не пришло — всё равно дёрнем общий успех
+            if (added === 0 && exists === 0 && failed === 0 && !errors?.length) {
+                toastOk('Processed list.');
+            }
+        } catch (e: any) {
+            const m = e?.message || String(e);
+            toastErr(`Add failed: ${m}`);
         } finally {
             setAdding(false);
         }
@@ -109,19 +131,33 @@ export default function CustomArtistsPage() {
         try {
             await customArtists.matchAll();
             await load();
+            toastOk('Match all started.');
+        } catch (e: any) {
+            toastErr(`Match all failed: ${e?.message || e}`);
         } finally {
             setMatching(false);
         }
     }, [load]);
 
     const onMatchOne = useCallback(async (id: number) => {
-        await customArtists.matchOne(id);
-        await load();
+        try {
+            await customArtists.matchOne(id);
+            await load();
+            toastOk('Matched.');
+        } catch (e: any) {
+            toastErr(`Match failed: ${e?.message || e}`);
+        }
     }, [load]);
 
+
     const onDelete = useCallback(async (id: number) => {
-        await customArtists.remove(id);
-        await load();
+        try {
+            await customArtists.remove(id);
+            await load();
+            toastWarn('Deleted.');
+        } catch (e: any) {
+            toastErr(`Delete failed: ${e?.message || e}`);
+        }
     }, [load]);
 
     const pages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total, pageSize]);
@@ -287,6 +323,7 @@ export default function CustomArtistsPage() {
                     </Table>
                 </div>
             </main>
+            <Footer />
         </>
     );
 }

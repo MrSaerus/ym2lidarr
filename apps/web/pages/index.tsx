@@ -1,8 +1,10 @@
 // apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
+import Footer from '../components/Footer';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
+import { toastOk } from '../lib/toast';
 
 type CronItem = {
   key: 'yandexPull'|'yandexMatch'|'yandexPush'|'lidarrPull'|'customMatch'|'customPush'|'backup';
@@ -110,6 +112,13 @@ export default function OverviewPage() {
   const [stoppingId, setStoppingId] = useState<number | null>(null);
   const [ ,setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (msg && msg.trim()) {
+      // по умолчанию считаем, что это ok-инфо
+      toastOk(msg);
+    }
+  }, [msg]);
 
   // оптимистичные busy-флаги (моментально после клика)
   const [optimisticBusy, setOptimisticBusy] = useState<Partial<Record<BusyKey, boolean>>>({});
@@ -344,8 +353,6 @@ export default function OverviewPage() {
         <Nav />
         <main className="mx-auto max-w-6xl px-4 py-4 space-y-6">
           <h1 className="h1">Overview</h1>
-
-          {msg ? <div className="badge badge-ok">{msg}</div> : null}
 
           <section className="panel p-4">
             <div className="mb-2 flex items-center gap-3">
@@ -788,6 +795,7 @@ export default function OverviewPage() {
             )}
           </section>
         </main>
+        <Footer />
       </>
   );
 }
