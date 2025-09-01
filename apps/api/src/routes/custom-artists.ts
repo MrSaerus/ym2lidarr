@@ -100,7 +100,7 @@ r.post('/', async (req, res) => {
           : [];
 
         if (!names.length) {
-            return res.status(400).json({ ok: false, error: 'No names provided', added: 0, exists: 0, failed: 0 });
+            return res.status(400).json({ ok: false, error: 'No names provided', added: 0, exists: 0, failed: 0, created: 0 });
         }
 
         // легкая валидация и сбор ошибок, не ломаем весь батч
@@ -119,6 +119,7 @@ r.post('/', async (req, res) => {
                 exists: 0,
                 failed: errors.length,
                 errors,
+                created: 0
             });
         }
 
@@ -144,6 +145,7 @@ r.post('/', async (req, res) => {
                 errors,
                 existed: existing.map((e) => e.name).sort(),
                 createdIds: [],
+                created: 0
             });
         }
 
@@ -195,9 +197,14 @@ r.post('/', async (req, res) => {
             errors,
             existed: existing.map((e) => e.name).sort(),
             createdIds,
+            created: added,
         });
     } catch (e: any) {
-        return res.status(500).json({ ok: false, error: e?.message || String(e) });
+        return res.status(500).json({
+            ok: false,
+            error: e?.message || String(e),
+            created: 0,
+        });
     }
 });
 

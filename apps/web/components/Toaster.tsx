@@ -1,6 +1,7 @@
 // apps/web/components/Toaster.tsx
 import React, { useEffect, useState } from 'react';
-import { subscribe, ToastItem } from '../lib/toast';
+import { subscribe } from '../lib/toast';
+import type { ToastItem } from '../lib/toast';
 
 function toneClasses(tone: ToastItem['tone']) {
   switch (tone) {

@@ -52,6 +52,7 @@ export default [
       },
     },
     rules: {
+      'no-unused-vars': 'off',
       'no-console': 'off',
       'import/order': 'off',
       '@typescript-eslint/consistent-type-imports': 'warn',
@@ -62,6 +63,17 @@ export default [
       'no-empty': ['warn', { allowEmptyCatch: true }],
     },
   }),
+  {
+    files: ['apps/api/**/*.{ts,js}'],
+    plugins: { '@typescript-eslint': tseslint.plugin },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
+      '@typescript-eslint/consistent-type-imports': 'warn',
+    },
+  },
 
   // Web (Next/TSX)
   ...tseslint.config({
@@ -87,6 +99,7 @@ export default [
       },
     },
     rules: {
+      'no-unused-vars': 'off',
       'no-console': 'off',
       'import/order': 'off',
       '@typescript-eslint/consistent-type-imports': 'warn',
@@ -100,8 +113,18 @@ export default [
       'react-hooks/exhaustive-deps': 'warn',
     },
   }),
+  {
+    files: ['apps/web/**/*.{ts,tsx,js,jsx}'],
+    plugins: { '@typescript-eslint': tseslint.plugin },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+      ],
+      '@typescript-eslint/consistent-type-imports': 'warn',
+    },
+  },
 
-  // Node-глобалы для конфигов (next.config.js и т.п.)
   {
     files: ['**/*.config.{js,cjs,mjs}', 'apps/web/next.config.js'],
     languageOptions: {

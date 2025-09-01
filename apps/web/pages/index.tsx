@@ -4,7 +4,7 @@ import Nav from '../components/Nav';
 import Footer from '../components/Footer';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
-import { toastOk, toastWarn, toastErr } from '../lib/toast';
+import { toastOk } from '../lib/toast';
 
 type CronItem = {
   key: 'yandexPull'|'yandexMatch'|'yandexPush'|'lidarrPull'|'customMatch'|'customPush'|'backup';

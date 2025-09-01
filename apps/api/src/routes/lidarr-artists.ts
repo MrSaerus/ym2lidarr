@@ -194,9 +194,13 @@ r.post('/search-artists', async (req, res) => {
         // при желании можно добавить взаимную блокировку с другими lidarr.* задачами
         // await ensureNotBusyOrThrow(['lidarr.'], ['lidarrPull'] as any);
 
-        const delayMs = Number(req.body?.delayMs);
+        const MAX_DELAY_MS = 10_000;
+        const rawDelay = Number(req.body?.delayMs);
+        const delayMs = Number.isFinite(rawDelay)
+          ? Math.max(0, Math.min(rawDelay, MAX_DELAY_MS))
+          : 150;
         const run = await startRun('lidarr.search.artists', { phase: 'search', total: 0, done: 0, ok: 0, failed: 0 });
-        runLidarrSearchArtists(run.id, { delayMs: Number.isFinite(delayMs) ? delayMs : 150 }).catch(() => {});
+        runLidarrSearchArtists(run.id, { delayMs }).catch(() => {});
         res.json({ started: true, runId: run.id });
     } catch (e: any) {
         const status = e?.status === 409 ? 409 : 500;
