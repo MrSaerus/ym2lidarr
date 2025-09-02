@@ -1,6 +1,8 @@
 services:
   single:
-    image: saerus/ym2lidarr-single:latest
+    build:
+      context: .
+      dockerfile: docker/single.Dockerfile
     environment:
       - MB_RECHECK_HOURS=72
       - DATABASE_URL=file:/app/data/app.db
