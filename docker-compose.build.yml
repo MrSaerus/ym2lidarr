@@ -1,6 +1,8 @@
 services:
   api:
-    image: saerus/ym2lidarr-api:latest
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
     environment:
       - MB_RECHECK_HOURS=72
       - DATABASE_URL=file:/app/data/app.db
@@ -23,7 +25,15 @@ services:
       retries: 5
 
   web:
-    image: saerus/ym2lidarr-web:latest
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE: 'http://localhost:4000'
+        VERSION: ${VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+        REPO_URL: ${REPO_URL:-}
     environment:
       - PORT=3000
     ports:
@@ -37,7 +47,9 @@ services:
       retries: 5
 
   pyproxy:
-    image: saerus/ym2lidarr-pyproxy:latest
+    build:
+      context: .
+      dockerfile: docker/pyproxy.Dockerfile
     ports:
       - '8080:8080'
     healthcheck:
