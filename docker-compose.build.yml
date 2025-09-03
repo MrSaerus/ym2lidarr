@@ -29,13 +29,13 @@ services:
       context: .
       dockerfile: docker/web.Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE: 'http://localhost:4000'
         VERSION: ${VERSION:-dev}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
         REPO_URL: ${REPO_URL:-}
     environment:
-      - PORT=3000
+      - NEXT_PUBLIC_API_BASE=http://localhost:4000
+      - NEXT_PUBLIC_LIDARR_BASE=http://localhost:8686
     ports:
       - '3000:3000'
     depends_on:

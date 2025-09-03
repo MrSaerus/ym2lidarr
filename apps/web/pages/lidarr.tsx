@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { Table, Th, Td } from '../components/Table';
 import { useRouter } from 'next/router';
 import Footer from '../components/Footer';
+import { getRuntimeEnv } from '../lib/runtime';
 
 type SortDir = 'asc' | 'desc';
 
@@ -69,7 +70,7 @@ function fmtBytes(n?: number | null) {
     return `${x.toFixed(1)} ${units[i]}`;
 }
 
-const LIDARR_BASE = process.env.NEXT_PUBLIC_LIDARR_BASE || '';
+const LIDARR_BASE = getRuntimeEnv('NEXT_PUBLIC_LIDARR_BASE') || '';
 function cleanMbid(v?: string | null) { return v ? v.replace(/^mbid:/i, '') : ''; }
 
 function linkToLidarrArtist(row: ArtistRow) {

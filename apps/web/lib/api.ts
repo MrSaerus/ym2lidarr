@@ -4,7 +4,11 @@
 //  - automatic JSON serialization for plain object bodies OR explicit `json` field
 //  - typed ApiError on non-2xx responses
 //  - JSON auto-parsing by content-type, fallback to text
+import { getRuntimeEnv } from './runtime';
 
+export function getApiBase(): string {
+  return getRuntimeEnv('NEXT_PUBLIC_API_BASE') || '';
+}
 export class ApiError extends Error {
   readonly status: number;
   readonly url: string;
@@ -25,9 +29,9 @@ export function isApiError(err: unknown): err is ApiError {
 
 function withBase(path: string): string {
   if (/^https?:\/\//i.test(path) || path.startsWith('//')) return path;
-  const base = process.env.NEXT_PUBLIC_API_BASE?.replace(/\/+$/, '');
+  const base = (getApiBase() || '').replace(/\/+$/, '');
   if (!base) return path;
-  return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${base}/${path.replace(/^\/+/, '')}`;
 }
 
 function isJsonContentType(ct: string | null): boolean {
