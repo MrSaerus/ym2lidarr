@@ -476,19 +476,6 @@ function AlbumsTab() {
                 <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                     {loading ? 'Refreshing…' : 'Refresh'}
                 </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={async () => {
-                        try {
-                            await api('/api/lidarr/resync', {method: 'POST'});
-                            await load(1);
-                        } catch (e: any) {
-                            alert('Lidarr pull failed: ' + (e?.message || String(e)));
-                        }
-                    }}
-                >
-                    Pull from Lidarr
-                </button>
                 <div className="ml-auto flex items-center gap-2">
                     <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
                     <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize}
