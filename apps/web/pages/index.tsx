@@ -1,10 +1,10 @@
-// apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import Footer from '../components/Footer';
 import ProgressBar from '../components/ProgressBar';
 import { api } from '../lib/api';
 import { toastOk } from '../lib/toast';
+import { ResponsiveTable } from '../components/ResponsiveTable';
 
 type CronItem = {
   key: 'yandexPull'|'yandexMatch'|'yandexPush'|'lidarrPull'|'customMatch'|'customPush'|'backup';
@@ -54,13 +54,13 @@ const pct = (matched: number, total: number) => {
 
 function Badge({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'ok'|'warn'|'err'|'muted' }) {
   const cls =
-      tone === 'ok'
-          ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
-          : tone === 'warn'
-              ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
-              : tone === 'err'
-                  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
-                  : 'bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30';
+    tone === 'ok'
+      ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
+      : tone === 'warn'
+        ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
+        : tone === 'err'
+          ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
+          : 'bg-slate-500/15 text-slate-300 ring-1 ring-slate-500/30';
   return <span className={`inline-flex items-center rounded px-2 py-[2px] text-xs ${cls}`}>{children}</span>;
 }
 
@@ -82,15 +82,15 @@ async function tryPostMany<T = any>(paths: string[], body?: any): Promise<T> {
 
 /** Ключи busy-состояний под конкретные кнопки */
 type BusyKey =
-    | 'customMatch'
-    | 'customPush'
-    | 'yandexPull'
-    | 'yandexMatchArtists'
-    | 'yandexMatchAlbums'
-    | 'yandexPushArtists'
-    | 'yandexPushAlbums'
-    | 'lidarrPullArtists'
-    | 'lidarrPullAlbums';
+  | 'customMatch'
+  | 'customPush'
+  | 'yandexPull'
+  | 'yandexMatchArtists'
+  | 'yandexMatchAlbums'
+  | 'yandexPushArtists'
+  | 'yandexPushAlbums'
+  | 'lidarrPullArtists'
+  | 'lidarrPullAlbums';
 
 /** Какие kind из бекенда соответствуют какой кнопке */
 const KIND_MAP: Record<BusyKey, string[]> = {
@@ -101,7 +101,7 @@ const KIND_MAP: Record<BusyKey, string[]> = {
   yandexMatchAlbums:  ['yandex.match.albums', 'yandex.match.all'],
   yandexPushArtists:  ['yandex.push.artists','yandex.push.all'],
   yandexPushAlbums:   ['yandex.push.albums','yandex.push.all'],
-  lidarrPullArtists:  ['lidarr.pull.artists','lidarr.pull.all','lidarr'], // 'lidarr' — на случай старых раннов
+  lidarrPullArtists:  ['lidarr.pull.artists','lidarr.pull.all','lidarr'],
   lidarrPullAlbums:   ['lidarr.pull.albums','lidarr.pull.all','lidarr'],
 };
 
@@ -115,7 +115,6 @@ export default function OverviewPage() {
 
   useEffect(() => {
     if (msg && msg.trim()) {
-      // по умолчанию считаем, что это ok-инфо
       toastOk(msg);
     }
   }, [msg]);
@@ -349,42 +348,35 @@ export default function OverviewPage() {
   }
 
   return (
-      <>
-        <Nav />
-        <main className="mx-auto max-w-6xl px-4 py-4 space-y-6">
-          <h1 className="h1">Overview</h1>
+    <>
+      <Nav />
+      <main className="mx-auto max-w-6xl px-4 py-4 space-y-6">
+        <h1 className="h1">Overview</h1>
 
-          <section className="panel p-4">
-            <div className="mb-2 flex items-center gap-3">
+        {/* Custom artists */}
+        <section className="grid gap-4 md:grid-cols-1">
+          <div className="panel p-3 sm:p-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="section-title">Latest Custom artists</div>
-              <div className="ml-auto flex items-center gap-2">
-                <button
-                    className="btn btn-outline"
-                    onClick={matchCustomAll}
-                    disabled={isBusy('customMatch')}
-                >
+              <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button className="btn btn-outline shrink-0" onClick={matchCustomAll} disabled={isBusy('customMatch')}>
                   {isBusy('customMatch') ? 'Matching…' : 'Match MB'}
                 </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={pushCustomToLidarr}
-                    disabled={isBusy('customPush')}
-                >
+                <button className="btn btn-outline shrink-0" onClick={pushCustomToLidarr}
+                        disabled={isBusy('customPush')}>
                   {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr'}
                 </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={pushCustomToLidarrFull}
-                    disabled={isBusy('customPush')}
-                >
+                <button className="btn btn-outline shrink-0" onClick={pushCustomToLidarrFull}
+                        disabled={isBusy('customPush')}>
                   {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr Force'}
                 </button>
               </div>
             </div>
             <div className="space-y-1">
               {(stats?.custom?.latestArtists || []).length === 0 ? (
-                  <div className="text-sm text-gray-500">No data</div>
+                <div className="text-sm text-gray-500">No data</div>
               ) : (
+                <ResponsiveTable>
                   <table className="w-full text-sm">
                     <thead className="text-gray-400">
                     <tr>
@@ -397,405 +389,384 @@ export default function OverviewPage() {
                     {(stats?.custom?.latestArtists || []).slice(0, 5).map((r, i) => {
                       const lidarrHref = r.hasLidarr ? (r.lidarrUrl || `/lidarr?q=${encodeURIComponent(r.name)}`) : undefined;
                       return (
-                          <tr key={`c-${r.id}-${i}`} className="border-t border-white/5">
-                            <td className="py-1 pr-2">{i + 1}</td>
-                            <td className="py-1 pr-2">{r.name || '—'}</td>
-                            <td className="py-1 links-col-2">
-                              <div className="link-tray link-tray-2 link-tray-right">
-                                {lidarrHref
-                                  ? <a href={lidarrHref} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--lidarr">Lidarr</a>
-                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
-                                {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip invisible select-none"
-                                          aria-hidden="true">MusicBrainz</span>}
-                              </div>
-                            </td>
-                          </tr>
+                        <tr key={`c-${r.id}-${i}`} className="border-t border-white/5">
+                          <td className="py-1 pr-2">{i + 1}</td>
+                          <td className="py-1 pr-2">{r.name || '—'}</td>
+                          <td className="py-1 links-col-2">
+                            <div className="link-tray link-tray-2 link-tray-right">
+                              {lidarrHref
+                                ? <a href={lidarrHref} target="_blank" rel="noreferrer"
+                                     className="link-chip link-chip--lidarr">Lidarr</a>
+                                : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
+                              {r.mbUrl
+                                ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                     className="link-chip link-chip--mb">MusicBrainz</a>
+                                :
+                                <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
+                            </div>
+                          </td>
+                        </tr>
                       );
                     })}
                     </tbody>
                   </table>
+                </ResponsiveTable>
               )}
             </div>
-          </section>
+          </div>
+        </section>
 
-          <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <div className="section-title">Latest Yandex albums</div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                      className="btn btn-outline"
-                      onClick={pullFromYandexAlbums}
-                      disabled={isBusy('yandexPull')}
-                  >
-                    {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
-                  </button>
-                  <button
-                      className="btn btn-outline"
-                      onClick={matchYandexAlbums}
-                      disabled={isBusy('yandexMatchAlbums')}
-                  >
-                    {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Matching YM'}
-                  </button>
-                  <button
-                      className="btn btn-outline"
-                      onClick={() => pushYandexToLidarr('albums')}
-                      disabled={isBusy('yandexPushAlbums')}
-                  >
-                    {isBusy('yandexPushAlbums') ? 'Pushing…' : 'Push to Lidarr'}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {(stats?.yandex?.latestAlbums || []).length === 0 ? (
-                    <div className="text-sm text-gray-500">No data</div>
-                ) : (
-                    <table className="w-full text-sm">
-                      <thead className="text-gray-400">
-                      <tr>
-                        <th className="text-left w-10">#</th>
-                        <th className="text-left">Album</th>
-                        <th className="text-left">Artist</th>
-                        <th className="text-right links-col-2">Links</th>
-                      </tr>
-                      </thead>
-                      <tbody>
-                      {(stats?.yandex?.latestAlbums || []).slice(0, 5).map((r, i) => (
-                          <tr key={`ya-${r.id}-${i}`} className="border-t border-white/5">
-                            <td className="py-1 pr-2">{i + 1}</td>
-                            <td className="py-1 pr-2">{r.title || '—'}</td>
-                            <td className="py-1 pr-2">{r.artistName || '—'}</td>
-                            <td className="py-1 links-col-2">
-                              <div className="link-tray link-tray-2 link-tray-right">
-                                {r.yandexUrl
-                                    ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
-                                         className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
-                                    : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
-                                {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip invisible select-none"
-                                          aria-hidden="true">MusicBrainz</span>}
-                              </div>
-                            </td>
-                          </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                )}
+        {/* Yandex & Lidarr albums */}
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="panel p-3 sm:p-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="section-title">Latest Yandex albums</div>
+              <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button className="btn btn-outline shrink-0" onClick={pullFromYandexAlbums} disabled={isBusy('yandexPull')}>
+                  {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
+                </button>
+                <button className="btn btn-outline shrink-0" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>
+                  {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Matching YM'}
+                </button>
+                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('albums')} disabled={isBusy('yandexPushAlbums')}>
+                  {isBusy('yandexPushAlbums') ? 'Pushing…' : 'Push to Lidarr'}
+                </button>
               </div>
             </div>
-
-            <div className="panel p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <div className="section-title">Latest Lidarr albums</div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                      className="btn btn-outline"
-                      onClick={pullFromLidarrAlbums}
-                      disabled={isBusy('lidarrPullAlbums')}
-                  >
-                    {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr'}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {(stats?.lidarr?.latestAlbums || []).length === 0 ? (
-                    <div className="text-sm text-gray-500">No data</div>
-                ) : (
-                    <table className="w-full text-sm">
-                      <thead className="text-gray-400">
-                      <tr>
-                        <th className="text-left w-10">#</th>
-                        <th className="text-left">Album</th>
-                        <th className="text-left">Artist</th>
-                        <th className="text-right links-col-2">Links</th>
-                      </tr>
-                      </thead>
-                      <tbody>
-                      {(stats?.lidarr?.latestAlbums || []).slice(0, 5).map((r, i) => (
-                          <tr key={`la-${r.id}-${i}`} className="border-t border-white/5">
-                            <td className="py-1 pr-2">{i + 1}</td>
-                            <td className="py-1 pr-2">{r.title || '—'}</td>
-                            <td className="py-1 pr-2">{r.artistName || '—'}</td>
-                            <td className="py-1 links-col-2">
-                              <div className="link-tray link-tray-2 link-tray-right">
-                                {r.lidarrUrl
-                                  ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
-                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
-                                {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip invisible select-none"
-                                          aria-hidden="true">MusicBrainz</span>}
-                              </div>
-                            </td>
-                          </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <div className="section-title">Latest Yandex artists</div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                      className="btn btn-outline"
-                      onClick={pullFromYandexArtists}
-                      disabled={isBusy('yandexPull')}
-                  >
-                    {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
-                  </button>
-                  <button
-                      className="btn btn-outline"
-                      onClick={matchYandexArtists}
-                      disabled={isBusy('yandexMatchArtists')}
-                  >
-                    {isBusy('yandexMatchArtists') ? 'Matching…' : 'Matching YM'}
-                  </button>
-                  <button
-                      className="btn btn-outline"
-                      onClick={() => pushYandexToLidarr('artists')}
-                      disabled={isBusy('yandexPushArtists')}
-                  >
-                    {isBusy('yandexPushArtists') ? 'Pushing…' : 'Push to Lidarr'}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {(stats?.yandex?.latestArtists || []).length === 0 ? (
-                    <div className="text-sm text-gray-500">No data</div>
-                ) : (
-                    <table className="w-full text-sm">
-                      <thead className="text-gray-400">
-                      <tr>
-                        <th className="text-left w-10">#</th>
-                        <th className="text-left">Artist</th>
-                        <th className="text-right links-col-2">Links</th>
-                      </tr>
-                      </thead>
-                      <tbody>
-                      {(stats?.yandex?.latestArtists || []).slice(0, 5).map((r, i) => (
-                          <tr key={`yart-${r.id}-${i}`} className="border-t border-white/5">
-                            <td className="py-1 pr-2">{i + 1}</td>
-                            <td className="py-1 pr-2">{r.name || '—'}</td>
-                            <td className="py-1 links-col-2">
-                              <div className="link-tray link-tray-2 link-tray-right">
-                                {r.yandexUrl
-                                  ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
-                                  : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
-                                {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip invisible select-none"
-                                          aria-hidden="true">MusicBrainz</span>}
-                              </div>
-                            </td>
-                          </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                )}
-              </div>
-            </div>
-
-            <div className="panel p-4">
-              <div className="mb-2 flex items-center gap-3">
-                <div className="section-title">Latest Lidarr artists</div>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                      className="btn btn-outline"
-                      onClick={pullFromLidarrArtists}
-                      disabled={isBusy('lidarrPullArtists')}
-                  >
-                    {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr'}
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-1">
-                {(stats?.lidarr?.latestArtists || []).length === 0 ? (
-                    <div className="text-sm text-gray-500">No data</div>
-                ) : (
-                    <table className="w-full text-sm">
-                      <thead className="text-gray-400">
-                      <tr>
-                        <th className="text-left w-10">#</th>
-                        <th className="text-left">Artist</th>
-                        <th className="text-right links-col-2">Links</th>
-                      </tr>
-                      </thead>
-                      <tbody>
-                      {(stats?.lidarr?.latestArtists || []).slice(0, 5).map((r, i) => (
-                          <tr key={`lart-${r.id}-${i}`} className="border-t border-white/5">
-                            <td className="py-1 pr-2">{i + 1}</td>
-                            <td className="py-1 pr-2">{r.name || '—'}</td>
-                            <td className="py-1 links-col-2">
-                              <div className="link-tray link-tray-2 link-tray-right">
-                                {r.lidarrUrl
-                                  ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
-                                  : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
-                                {r.mbUrl
-                                  ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
-                                       className="link-chip link-chip--mb">MusicBrainz</a>
-                                  : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
-                              </div>
-                            </td>
-                          </tr>
-                      ))}
-                      </tbody>
-                    </table>
-                )}
-              </div>
-            </div>
-          </section>
-          <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Artists with downloads</div>
-              <div className="text-2xl font-bold">{lDownloaded}/{lA.total}</div>
-              <ProgressBar
-                  value={lDownloadedFrac}
-                  color="ym"
-                  label={`${lDownloaded} / ${lA.total}`}
-              />
-              <div className="text-xs text-gray-500">Without tracks: {lNotDownloaded}</div>
-            </div>
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Custom artists matched</div>
-              <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
-              <ProgressBar value={cArtistPct} color="accent"/>
-              <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
-            </div>
-          </section>
-          <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
-              <div className="text-2xl font-bold">{yA.matched}/{yA.total}</div>
-              <ProgressBar value={yArtistPct} color="accent"/>
-              <div className="text-xs text-gray-500">Unmatched: {yA.unmatched}</div>
-            </div>
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Albums matched (Yandex)</div>
-              <div className="text-2xl font-bold">{yR.matched}/{yR.total}</div>
-              <ProgressBar value={yAlbumPct} color="primary"/>
-              <div className="text-xs text-gray-500">Unmatched: {yR.unmatched}</div>
-            </div>
-          </section>
-
-          <section className="grid gap-4 md:grid-cols-2">
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
-              <div className="text-2xl font-bold">{lA.matched}/{lA.total}</div>
-              <ProgressBar value={lArtistPct} color="accent"/>
-              <div className="text-xs text-gray-500">Without MBID: {lA.unmatched}</div>
-            </div>
-            <div className="panel p-4 space-y-3">
-              <div className="text-sm text-gray-500">Albums (Lidarr, with RG MBID)</div>
-              <div className="text-2xl font-bold">{lR.matched}/{lR.total}</div>
-              <ProgressBar value={lAlbumPct} color="primary"/>
-              <div className="text-xs text-gray-500">Without RG MBID: {lR.unmatched}</div>
-            </div>
-          </section>
-
-          <section className="panel p-4">
-            <div className="text-sm text-gray-500 mb-1">Runner status</div>
-
-            {runs.length > 0 ? (
-                <div className="space-y-2">
-                  {runs.map((r) => (
-                      <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge tone="ok">running</Badge>
-                          <span>#{r.id}</span>
-                          <span>Job: <b>{r.kind ?? 'n/a'}</b></span>
-                          <span className="text-gray-400">• started {new Date(r.startedAt).toLocaleString()}</span>
-                          {r.message ? <span className="text-gray-400">• {r.message}</span> : null}
-                        </div>
-                        <div className="shrink-0">
-                          <button className="btn btn-outline" onClick={() => stopRun(r.id)}
-                                  disabled={stoppingId === r.id}>
-                            {stoppingId === r.id ? 'Stopping…' : 'Stop'}
-                          </button>
-                        </div>
-                      </div>
-                  ))}
-                </div>
-            ) : (
-                (!latest ? (
-                    <div className="text-sm text-gray-400">No runs yet.</div>
-                ) : latest.status === 'running' ? (
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <Badge tone="ok">running</Badge>
-                      <span>Job: <b>{latest.kind ?? 'n/a'}</b></span>
-                      <span className="text-gray-400">• started {new Date(latest.startedAt).toLocaleString()}</span>
-                    </div>
-                ) : (
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <Badge tone="muted">idle</Badge>
-                      <span>Last: #{latest.id} • <b>{latest.kind ?? 'n/a'}</b> • {latest.status}</span>
-                      <span className="text-gray-400">
-                  • {new Date(latest.startedAt).toLocaleString()}
-                        {latest.finishedAt ? ` → ${new Date(latest.finishedAt).toLocaleString()}` : ''}
-                </span>
-                      {latest.message ? <span className="text-gray-400">• {latest.message}</span> : null}
-                    </div>
-                ))
-            )}
-          </section>
-          <section className="panel p-4">
-            <div className="mb-2 flex items-center gap-3">
-              <div className="section-title">Scheduler</div>
-              <div className="ml-auto text-xs text-gray-400">updates every 30s</div>
-            </div>
-
-            {cronJobs.length === 0 ? (
-                <div className="text-sm text-gray-400">No jobs configured.</div>
-            ) : (
-                <table className="w-full text-sm">
-                  <thead className="text-gray-400">
-                  <tr>
-                    <th className="text-left">Job</th>
-                    <th className="text-left">Cron</th>
-                    <th className="text-left">Enabled</th>
-                    <th className="text-left">Valid</th>
-                    <th className="text-left">Next run</th>
-                    <th className="text-left">In</th>
-                    <th className="text-left">State</th>
-                  </tr>
-                  </thead>
-                  <tbody>
-                  {cronJobs.map((j) => (
-                      <tr key={j.key} className="border-t border-white/5">
-                        <td className="py-1 pr-2">{j.title}</td>
-                        <td className="py-1 pr-2 font-mono text-xs">{j.cron || '—'}</td>
-                        <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> :
-                            <Badge tone="muted">off</Badge>}</td>
-                        <td className="py-1 pr-2">{j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> :
-                            <Badge tone="err">invalid</Badge>) : <span className="text-gray-500">—</span>}</td>
-                        <td className="py-1 pr-2">{j.nextRun ? new Date(j.nextRun).toLocaleString() : '—'}</td>
-                        <td className="py-1 pr-2">{humanCountdown(j.nextRun)}</td>
-                        <td className="py-1 pr-2">
-                          {j.running ? <Badge tone="ok">running</Badge> : <Badge tone="muted">idle</Badge>}
+            <div className="space-y-1">
+              {(stats?.yandex?.latestAlbums || []).length === 0 ? (
+                <div className="text-sm text-gray-500">No data</div>
+              ) : (
+                <ResponsiveTable>
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left w-10">#</th>
+                      <th className="text-left">Album</th>
+                      <th className="text-left">Artist</th>
+                      <th className="text-right links-col-2">Links</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(stats?.yandex?.latestAlbums || []).slice(0, 5).map((r, i) => (
+                      <tr key={`ya-${r.id}-${i}`} className="border-t border-white/5">
+                        <td className="py-1 pr-2">{i + 1}</td>
+                        <td className="py-1 pr-2">{r.title || '—'}</td>
+                        <td className="py-1 pr-2">{r.artistName || '—'}</td>
+                        <td className="py-1 links-col-2">
+                          <div className="link-tray link-tray-2 link-tray-right">
+                            {r.yandexUrl
+                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
+                            {r.mbUrl
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
+                          </div>
                         </td>
                       </tr>
-                  ))}
-                  </tbody>
-                </table>
-            )}
-          </section>
-        </main>
-        <Footer />
-      </>
+                    ))}
+                    </tbody>
+                  </table>
+                </ResponsiveTable>
+              )}
+            </div>
+          </div>
+
+          <div className="panel p-3 sm:p-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="section-title">Latest Lidarr albums</div>
+              <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
+                  {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr'}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              {(stats?.lidarr?.latestAlbums || []).length === 0 ? (
+                <div className="text-sm text-gray-500">No data</div>
+              ) : (
+                <ResponsiveTable>
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left w-10 hidden sm:table-cell">#</th>
+                      <th className="text-left whitespace-nowrap">Album</th>
+                      {/* или Artist */}
+                      <th className="text-left whitespace-nowrap">Artist</th>
+                      {/* где есть */}
+                      <th className="text-right links-col-2">
+                        {/* на мобилке скрываем слово, на sm+ показываем */}
+                        <span className="sr-only sm:not-sr-only">Links</span>
+                      </th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(stats?.lidarr?.latestAlbums || []).slice(0, 5).map((r, i) => (
+                      <tr key={`la-${r.id}-${i}`} className="border-t border-white/5">
+                        <td className="py-1 pr-2 hidden sm:table-cell">{i + 1}</td>
+                        <td className="py-1 pr-2">{r.title || '—'}</td>
+                        <td className="py-1 pr-2">{r.artistName || '—'}</td>
+                        <td className="py-1 links-col-2">
+                          <div className="link-tray link-tray-2 link-tray-right">
+                            {r.lidarrUrl
+                              ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
+                            {r.mbUrl
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--mb">MusicBrainz</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                </ResponsiveTable>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Yandex & Lidarr artists */}
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="panel p-3 sm:p-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="section-title">Latest Yandex artists</div>
+              <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button className="btn btn-outline shrink-0" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>
+                  {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
+                </button>
+                <button className="btn btn-outline shrink-0" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>
+                  {isBusy('yandexMatchArtists') ? 'Matching…' : 'Matching YM'}
+                </button>
+                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('artists')} disabled={isBusy('yandexPushArtists')}>
+                  {isBusy('yandexPushArtists') ? 'Pushing…' : 'Push to Lidarr'}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              {(stats?.yandex?.latestArtists || []).length === 0 ? (
+                <div className="text-sm text-gray-500">No data</div>
+              ) : (
+                <ResponsiveTable>
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left w-10">#</th>
+                      <th className="text-left">Artist</th>
+                      <th className="text-right links-col-2">Links</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(stats?.yandex?.latestArtists || []).slice(0, 5).map((r, i) => (
+                      <tr key={`yart-${r.id}-${i}`} className="border-t border-white/5">
+                        <td className="py-1 pr-2">{i + 1}</td>
+                        <td className="py-1 pr-2">{r.name || '—'}</td>
+                        <td className="py-1 links-col-2">
+                          <div className="link-tray link-tray-2 link-tray-right">
+                            {r.yandexUrl
+                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
+                            {r.mbUrl
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                </ResponsiveTable>
+              )}
+            </div>
+          </div>
+
+          <div className="panel p-3 sm:p-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="section-title">Latest Lidarr artists</div>
+              <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrArtists} disabled={isBusy('lidarrPullArtists')}>
+                  {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr'}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              {(stats?.lidarr?.latestArtists || []).length === 0 ? (
+                <div className="text-sm text-gray-500">No data</div>
+              ) : (
+                <ResponsiveTable>
+                  <table className="w-full text-sm">
+                    <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left w-10">#</th>
+                      <th className="text-left">Artist</th>
+                      <th className="text-right links-col-2">Links</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {(stats?.lidarr?.latestArtists || []).slice(0, 5).map((r, i) => (
+                      <tr key={`lart-${r.id}-${i}`} className="border-t border-white/5">
+                        <td className="py-1 pr-2">{i + 1}</td>
+                        <td className="py-1 pr-2">{r.name || '—'}</td>
+                        <td className="py-1 links-col-2">
+                          <div className="link-tray link-tray-2 link-tray-right">
+                            {r.lidarrUrl
+                              ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
+                            {r.mbUrl
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    </tbody>
+                  </table>
+                </ResponsiveTable>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* KPI панели */}
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Artists with downloads</div>
+            <div className="text-2xl font-bold">{lDownloaded}/{lA.total}</div>
+            <ProgressBar value={lDownloadedFrac} color="ym" label={`${lDownloaded} / ${lA.total}`} />
+            <div className="text-xs text-gray-500">Without tracks: {lNotDownloaded}</div>
+          </div>
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Custom artists matched</div>
+            <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
+            <ProgressBar value={cArtistPct} color="accent"/>
+            <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
+            <div className="text-2xl font-bold">{yA.matched}/{yA.total}</div>
+            <ProgressBar value={yArtistPct} color="accent"/>
+            <div className="text-xs text-gray-500">Unmatched: {yA.unmatched}</div>
+          </div>
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Albums matched (Yandex)</div>
+            <div className="text-2xl font-bold">{yR.matched}/{yR.total}</div>
+            <ProgressBar value={yAlbumPct} color="primary"/>
+            <div className="text-xs text-gray-500">Unmatched: {yR.unmatched}</div>
+          </div>
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-2">
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
+            <div className="text-2xl font-bold">{lA.matched}/{lA.total}</div>
+            <ProgressBar value={lArtistPct} color="accent"/>
+            <div className="text-xs text-gray-500">Without MBID: {lA.unmatched}</div>
+          </div>
+          <div className="panel p-3 sm:p-4 space-y-3">
+            <div className="text-sm text-gray-500">Albums (Lidarr, with RG MBID)</div>
+            <div className="text-2xl font-bold">{lR.matched}/{lR.total}</div>
+            <ProgressBar value={lAlbumPct} color="primary"/>
+            <div className="text-xs text-gray-500">Without RG MBID: {lR.unmatched}</div>
+          </div>
+        </section>
+
+        {/* Runs */}
+        <section className="panel p-4">
+          <div className="text-sm text-gray-500 mb-1">Runner status</div>
+
+          {runs.length > 0 ? (
+            <div className="space-y-2">
+              {runs.map((r) => (
+                <div key={r.id} className="flex items-center justify-between gap-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="ok">running</Badge>
+                    <span>#{r.id}</span>
+                    <span>Job: <b>{r.kind ?? 'n/a'}</b></span>
+                    <span className="text-gray-400">• started {new Date(r.startedAt).toLocaleString()}</span>
+                    {r.message ? <span className="text-gray-400">• {r.message}</span> : null}
+                  </div>
+                  <div className="shrink-0">
+                    <button className="btn btn-outline" onClick={() => stopRun(r.id)} disabled={stoppingId === r.id}>
+                      {stoppingId === r.id ? 'Stopping…' : 'Stop'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            (!latest ? (
+              <div className="text-sm text-gray-400">No runs yet.</div>
+            ) : latest.status === 'running' ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge tone="ok">running</Badge>
+                <span>Job: <b>{latest.kind ?? 'n/a'}</b></span>
+                <span className="text-gray-400">• started {new Date(latest.startedAt).toLocaleString()}</span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge tone="muted">idle</Badge>
+                <span>Last: #{latest.id} • <b>{latest.kind ?? 'n/a'}</b> • {latest.status}</span>
+                <span className="text-gray-400">
+                  • {new Date(latest.startedAt).toLocaleString()}
+                  {latest.finishedAt ? ` → ${new Date(latest.finishedAt).toLocaleString()}` : ''}
+                </span>
+                {latest.message ? <span className="text-gray-400">• {latest.message}</span> : null}
+              </div>
+            ))
+          )}
+        </section>
+
+        {/* Scheduler */}
+        <section className="panel p-4">
+          <div className="mb-2 flex items-center gap-3">
+            <div className="section-title">Scheduler</div>
+            <div className="ml-auto text-xs text-gray-400">updates every 30s</div>
+          </div>
+
+          {cronJobs.length === 0 ? (
+            <div className="text-sm text-gray-400">No jobs configured.</div>
+          ) : (
+            <ResponsiveTable>
+              <table className="w-full text-sm">
+                <thead className="text-gray-400">
+                <tr>
+                  <th className="text-left">Job</th>
+                  <th className="text-left">Cron</th>
+                  <th className="text-left">Enabled</th>
+                  <th className="text-left">Valid</th>
+                  <th className="text-left">Next run</th>
+                  <th className="text-left">In</th>
+                  <th className="text-left">State</th>
+                </tr>
+                </thead>
+                <tbody>
+                {cronJobs.map((j) => (
+                  <tr key={j.key} className="border-t border-white/5">
+                    <td className="py-1 pr-2">{j.title}</td>
+                    <td className="py-1 pr-2 font-mono text-xs">{j.cron || '—'}</td>
+                    <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="muted">off</Badge>}</td>
+                    <td className="py-1 pr-2">
+                      {j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> : <Badge tone="err">invalid</Badge>) : <span className="text-gray-500">—</span>}
+                    </td>
+                    <td className="py-1 pr-2">{j.nextRun ? new Date(j.nextRun).toLocaleString() : '—'}</td>
+                    <td className="py-1 pr-2">{humanCountdown(j.nextRun)}</td>
+                    <td className="py-1 pr-2">
+                      {j.running ? <Badge tone="ok">running</Badge> : <Badge tone="muted">idle</Badge>}
+                    </td>
+                  </tr>
+                ))}
+                </tbody>
+              </table>
+            </ResponsiveTable>
+          )}
+        </section>
+      </main>
+      <Footer />
+    </>
   );
 }

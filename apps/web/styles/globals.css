@@ -40,7 +40,18 @@
     }
 
     a { @apply underline-offset-2; }
+    /* скрываем горизонтальный скроллбар там, где он не нужен визуально */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+    /* На мобилке не фиксируем ширину колонки ссылок, чтобы всё влезало */
+    @media (max-width: 640px) {
+        .links-col-2 { width: auto; }
+        .link-tray-2 { min-width: 0; }
+    }
+
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     .links-col-2 {
         width: calc(2 * var(--chip-w) + 1 * var(--chip-gap));
     }

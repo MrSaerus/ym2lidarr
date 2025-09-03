@@ -311,9 +311,6 @@ export default function YandexPage() {
                                 </option>
                             ))}
                         </select>
-                        <span className="text-xs text-gray-500 text-nowrap">
-              {total ? `Page ${page} of ${pageCount} — total ${total}` : 'No data'}
-            </span>
                         <div className="flex items-center gap-1">
                             <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>
                                 {'«'}

@@ -230,15 +230,20 @@ function ArtistsTab() {
                             <option key={n} value={n}>{n}</option>
                         ))}
                     </select>
-                    <span className="text-xs text-gray-500 text-nowrap">
-            {total ? `Page ${page} of ${Math.max(1, Math.ceil(total / pageSize))} — total ${total}` : 'No data'}
-          </span>
                     <div className="flex items-center gap-1">
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>{'«'}</button>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))} disabled={page <= 1}>{'‹'}</button>
-                        <span className="text-xs text-gray-500 px-2">Page {page}/{Math.max(1, Math.ceil(total / pageSize))}</span>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'›'}</button>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, Math.ceil(total / pageSize)))} disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'»'}</button>
+                        <button className="btn btn-outline" onClick={() => setPageAndUrl(1)}
+                                disabled={page <= 1}>{'«'}</button>
+                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))}
+                                disabled={page <= 1}>{'‹'}</button>
+                        <span
+                          className="text-xs text-gray-500 px-2">Page {page}/{Math.max(1, Math.ceil(total / pageSize))}</span>
+                        <button className="btn btn-outline"
+                                onClick={() => setPageAndUrl(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+                                disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'›'}</button>
+                        <button className="btn btn-outline"
+                                onClick={() => setPageAndUrl(Math.max(1, Math.ceil(total / pageSize)))}
+                                disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'»'}</button>
+
                     </div>
                 </div>
             </div>
@@ -247,7 +252,7 @@ function ArtistsTab() {
 
             <div className="panel overflow-x-auto">
                 <Table className="table-default">
-                    <thead>
+                <thead>
                     <tr>
                         <Th>#</Th>
                         <Th className="select-none">
