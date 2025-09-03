@@ -1,21 +1,19 @@
 // apps/web/components/ConfigProvider.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 
 export function ConfigProvider({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(typeof window === 'undefined'); // на SSR уже "готово"
-
   useEffect(() => {
-    if (typeof window === 'undefined') return;          // SSR
-    if ((window as any).__CONFIG_LOADED__) { setReady(true); return; }
+    if (typeof window === 'undefined') return;
+    const w = window as any;
+    if (w.__CONFIG_LOADED__) return;
 
     const s = document.createElement('script');
     s.src = '/config.js';
     s.async = false;
-    s.onload = () => { (window as any).__CONFIG_LOADED__ = true; setReady(true); };
-    s.onerror = () => { console.warn('Failed to load /config.js'); setReady(true); };
+    s.onload = () => { w.__CONFIG_LOADED__ = true; };
+    s.onerror = () => { console.warn('Failed to load /config.js'); };
     document.head.appendChild(s);
   }, []);
 
-  if (!ready) return <div style={{ padding: 16 }}>Loading…</div>;
   return <>{children}</>;
 }
