@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { Table, Th, Td } from '../components/Table';
 import { useRouter } from 'next/router';
 import Footer from '../components/Footer';
+import { getRuntimeEnv } from '../lib/runtime';
 
 type SortDir = 'asc' | 'desc';
 
@@ -69,7 +70,7 @@ function fmtBytes(n?: number | null) {
     return `${x.toFixed(1)} ${units[i]}`;
 }
 
-const LIDARR_BASE = process.env.NEXT_PUBLIC_LIDARR_BASE || '';
+const LIDARR_BASE = getRuntimeEnv('NEXT_PUBLIC_LIDARR_BASE') || '';
 function cleanMbid(v?: string | null) { return v ? v.replace(/^mbid:/i, '') : ''; }
 
 function linkToLidarrArtist(row: ArtistRow) {
@@ -229,15 +230,20 @@ function ArtistsTab() {
                             <option key={n} value={n}>{n}</option>
                         ))}
                     </select>
-                    <span className="text-xs text-gray-500 text-nowrap">
-            {total ? `Page ${page} of ${Math.max(1, Math.ceil(total / pageSize))} — total ${total}` : 'No data'}
-          </span>
                     <div className="flex items-center gap-1">
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>{'«'}</button>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))} disabled={page <= 1}>{'‹'}</button>
-                        <span className="text-xs text-gray-500 px-2">Page {page}/{Math.max(1, Math.ceil(total / pageSize))}</span>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'›'}</button>
-                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, Math.ceil(total / pageSize)))} disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'»'}</button>
+                        <button className="btn btn-outline" onClick={() => setPageAndUrl(1)}
+                                disabled={page <= 1}>{'«'}</button>
+                        <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))}
+                                disabled={page <= 1}>{'‹'}</button>
+                        <span
+                          className="text-xs text-gray-500 px-2">Page {page}/{Math.max(1, Math.ceil(total / pageSize))}</span>
+                        <button className="btn btn-outline"
+                                onClick={() => setPageAndUrl(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+                                disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'›'}</button>
+                        <button className="btn btn-outline"
+                                onClick={() => setPageAndUrl(Math.max(1, Math.ceil(total / pageSize)))}
+                                disabled={page >= Math.max(1, Math.ceil(total / pageSize))}>{'»'}</button>
+
                     </div>
                 </div>
             </div>
@@ -246,7 +252,7 @@ function ArtistsTab() {
 
             <div className="panel overflow-x-auto">
                 <Table className="table-default">
-                    <thead>
+                <thead>
                     <tr>
                         <Th>#</Th>
                         <Th className="select-none">
@@ -469,19 +475,6 @@ function AlbumsTab() {
                 </select>
                 <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
                     {loading ? 'Refreshing…' : 'Refresh'}
-                </button>
-                <button
-                    className="btn btn-outline"
-                    onClick={async () => {
-                        try {
-                            await api('/api/lidarr/resync', {method: 'POST'});
-                            await load(1);
-                        } catch (e: any) {
-                            alert('Lidarr pull failed: ' + (e?.message || String(e)));
-                        }
-                    }}
-                >
-                    Pull from Lidarr
                 </button>
                 <div className="ml-auto flex items-center gap-2">
                     <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>

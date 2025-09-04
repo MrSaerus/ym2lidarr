@@ -5,7 +5,7 @@ services:
       - MB_RECHECK_HOURS=72
       - DATABASE_URL=file:/app/data/app.db
       - YA_PYPROXY_URL=http://localhost:8080
-      - QBT_URL=http://94.41.86.101:9097
+      - QBT_URL=http://qbittorrent:9097
       - QBT_USER=admin
       - QBT_PASS=adminadmin
       - QBT_DELETE_FILES=true

@@ -78,7 +78,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     pyproxyUrl: s.pyproxyUrl ?? 'http://pyproxy:8080',
 
     cronYandexPull:  s.cronYandexPull  ?? '0 */6 * * *',
-    enableCronYandexPull: s.enableCronYandexPull ?? true,
+    enableCronYandexPull: s.enableCronYandexPull ?? false,
 
     cronYandexMatch: s.cronYandexMatch ?? '10 */6 * * *',
     enableCronYandexMatch: s.enableCronYandexMatch ?? false,
@@ -88,12 +88,12 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     enableCronYandexPush: s.enableCronYandexPush ?? false,
     yandexPushTarget:  (s.yandexPushTarget  as any) || 'both',
 
-    lidarrUrl: s.lidarrUrl ?? 'http://localhost:8686',
+    lidarrUrl: s.lidarrUrl ?? 'http://lidarr:8686',
     lidarrApiKey: s.lidarrApiKey ?? '',
     lidarrAllowNoMetadata: !!s.lidarrAllowNoMetadata,
 
     cronLidarrPull:  s.cronLidarrPull ?? '35 */6 * * *',
-    enableCronLidarrPull: s.enableCronLidarrPull ?? true,
+    enableCronLidarrPull: s.enableCronLidarrPull ?? false,
     lidarrPullTarget: (s.lidarrPullTarget as any) || 'both',
 
     pushTarget: (s.pushTarget as any) || 'artists',

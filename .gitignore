@@ -15,7 +15,7 @@ apps/web/out/
 apps/pyproxy/.venv
 apps/pyproxy/__pycache__
 apps/pyproxy/requirements.in
-
+apps/web/public/example.js
 # env
 .env
 .env.*.local
