@@ -175,7 +175,7 @@ COPY apps/pyproxy /app
 
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt --require-hashes
 
 COPY --from=builder /app/apps/web/out /var/www/html
 
