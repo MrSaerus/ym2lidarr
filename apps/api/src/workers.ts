@@ -464,8 +464,7 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
       }
 
       await patchRunStats(runId, { al_total: candidates.length });
-
-      await dblog(runId, 'info', 'MB Match finished', {
+      await dblog(runId, 'info', 'MB Match (albums) started', {
         target,
         force,
         artists: {
@@ -477,14 +476,6 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
           matched: (await prisma.yandexAlbum.count({ where: { present: true, rgMbid: { not: null } } })),
         },
       });
-
-      await endRun(runId, 'ok');
-      const finalRun = await getRunWithRetry(runId);
-      try {
-        const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
-        await notify('match', 'ok', stats);
-      } catch {}
-
       let al_done = 0, al_matched = 0;
       for (const rec of candidates) {
         if (await bailIfCancelled(runId, 'match-albums')) return;
@@ -528,7 +519,10 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
         al_done++;
         if (al_done % 5 === 0) await patchRunStats(runId, { al_done, al_matched });
       }
-      await patchRunStats(runId, { al_done, al_matched });
+      await patchRunStats(runId, { al_done, al_matched, phase: 'done' });
+      await endRun(runId, 'ok');
+      const finalRun = await getRunWithRetry(runId);
+      try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await notify('match', 'ok', stats); } catch {}
     }
 
     await patchRunStats(runId, { phase: 'done' });
