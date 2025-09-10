@@ -1,6 +1,9 @@
 // apps/api/src/services/mb.ts
 import Bottleneck from 'bottleneck';
 import { request } from 'undici';
+import { createLogger } from '../lib/logger';
+
+const log = createLogger({ scope: 'service.mb' });
 
 const limiter = new Bottleneck({ minTime: 1100 }); // ~1 req/sec
 const BASE = 'https://musicbrainz.org/ws/2';
@@ -35,13 +38,20 @@ export type ReleaseGroupCandidateMB = {
 };
 
 async function getJSON<T = unknown>(url: string): Promise<T> {
+  const startedAt = Date.now();
+  log.debug('MB request', 'mb.http.req', { url });
   const res = await request(url, { headers: { 'User-Agent': UA } });
+  const durMs = Date.now() - startedAt;
+
   if (res.statusCode >= 400) {
     const body = await res.body.text();
+    log.warn('MB error response', 'mb.http.err', { status: res.statusCode, durMs, preview: body?.slice(0, 180) });
     throw new Error(`MB ${url} ${res.statusCode}: ${body}`);
   }
+
   // undici's .json() is typed as unknown — cast at the boundary
   const data = (await res.body.json()) as unknown as T;
+  log.debug('MB response ok', 'mb.http.ok', { status: res.statusCode, durMs });
   return data;
 }
 
@@ -63,43 +73,58 @@ function pickMedian(values: (string | undefined | null)[]): string | undefined {
  */
 export const mbFindArtist = limiter.wrap(async (name: string) => {
   const url = `${BASE}/artist?fmt=json&query=${encodeURIComponent(`artist:"${name}"`)}`;
-  const raw: any = await getJSON(url);
-  const list: any[] = raw?.artists || [];
-  if (!list.length)
-    return { externalId: null as string | null, candidates: [] as ArtistCandidateMB[], raw };
+  log.info('MB find artist', 'mb.find.artist.start', { name });
 
-  const exact = list.filter((a: any) => norm(a.name) === norm(name));
-  const ranked: any[] = exact
+  try {
+    const raw: any = await getJSON(url);
+    const list: any[] = raw?.artists || [];
+    log.debug('MB artist list', 'mb.find.artist.list', { name, count: list.length });
+
+    if (!list.length)
+      return { externalId: null as string | null, candidates: [] as ArtistCandidateMB[], raw };
+
+    const exact = list.filter((a: any) => norm(a.name) === norm(name));
+    const ranked: any[] = exact
       .concat(list.filter((a: any) => !exact.includes(a)))
       .slice(0, 50)
       .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 
-  const hit = ranked[0];
+    const hit = ranked[0];
 
-  const candidates: ArtistCandidateMB[] = ranked.slice(0, 3).map((a: any): ArtistCandidateMB => {
-    const life = a['life-span'] || {};
-    return {
-      externalId: a.id,
-      source: 'mb',
-      name: a.name,
-      score: a.score,
-      disambiguation: a.disambiguation,
-      type: a.type,
-      country: a.country,
-      area: a.area?.name,
-      begin: life.begin,
-      end: life.end,
-      url: a.id ? `https://musicbrainz.org/artist/${a.id}` : undefined,
-    };
-  });
+    const candidates: ArtistCandidateMB[] = ranked.slice(0, 3).map((a: any): ArtistCandidateMB => {
+      const life = a['life-span'] || {};
+      return {
+        externalId: a.id,
+        source: 'mb',
+        name: a.name,
+        score: a.score,
+        disambiguation: a.disambiguation,
+        type: a.type,
+        country: a.country,
+        area: a.area?.name,
+        begin: life.begin,
+        end: life.end,
+        url: a.id ? `https://musicbrainz.org/artist/${a.id}` : undefined,
+      };
+    });
 
-  const typeMed = pickMedian(candidates.map((c) => c.type));
-  const countryMed = pickMedian(candidates.map((c) => c.country));
-  candidates.forEach((c) => {
-    c.highlight = (!!typeMed && c.type === typeMed) || (!!countryMed && c.country === countryMed);
-  });
+    const typeMed = pickMedian(candidates.map((c) => c.type));
+    const countryMed = pickMedian(candidates.map((c) => c.country));
+    candidates.forEach((c) => {
+      c.highlight = (!!typeMed && c.type === typeMed) || (!!countryMed && c.country === countryMed);
+    });
 
-  return { externalId: hit?.id ?? null, candidates, raw };
+    log.info('MB find artist done', 'mb.find.artist.done', {
+      name,
+      candidates: candidates.length,
+      externalId: hit?.id ?? null,
+    });
+
+    return { externalId: hit?.id ?? null, candidates, raw };
+  } catch (e: any) {
+    log.error('MB find artist failed', 'mb.find.artist.fail', { name, err: e?.message || String(e) });
+    throw e;
+  }
 });
 
 /**
@@ -109,35 +134,40 @@ export const mbFindArtist = limiter.wrap(async (name: string) => {
 export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: string) => {
   const q = `releasegroup:"${title}" AND artist:"${artist}"`;
   const url = `${BASE}/release-group?fmt=json&query=${encodeURIComponent(q)}`;
-  const raw: any = await getJSON(url);
-  const list: any[] = raw?.['release-groups'] || [];
-  if (!list.length)
-    return { externalId: null as string | null, candidates: [] as ReleaseGroupCandidateMB[], raw };
+  log.info('MB find release-group', 'mb.find.rg.start', { artist, title });
 
-  const clean = (s: string) =>
+  try {
+    const raw: any = await getJSON(url);
+    const list: any[] = raw?.['release-groups'] || [];
+    log.debug('MB release-group list', 'mb.find.rg.list', { artist, title, count: list.length });
+
+    if (!list.length)
+      return { externalId: null as string | null, candidates: [] as ReleaseGroupCandidateMB[], raw };
+
+    const clean = (s: string) =>
       (s || '')
-          .replace(/\s*[([].*?[)\]]\s*/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .toLowerCase();
+        .replace(/\s*[([].*?[)\]]\s*/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
 
-  const primaryArtist = (rg: any) => {
-    const ac = rg['artist-credit'] || [];
-    if (ac && typeof ac[0] === 'object') return (ac[0].name || ac[0].artist?.name || '').trim();
-    return '';
-  };
+    const primaryArtist = (rg: any) => {
+      const ac = rg['artist-credit'] || [];
+      if (ac && typeof ac[0] === 'object') return (ac[0].name || ac[0].artist?.name || '').trim();
+      return '';
+    };
 
-  const exact = list.filter(
+    const exact = list.filter(
       (rg: any) => clean(rg.title) === clean(title) && norm(primaryArtist(rg)) === norm(artist),
-  );
-  const ranked: any[] = exact
+    );
+    const ranked: any[] = exact
       .concat(list.filter((rg: any) => !exact.includes(rg)))
       .slice(0, 50)
       .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
 
-  const hit = ranked[0];
+    const hit = ranked[0];
 
-  const candidates: ReleaseGroupCandidateMB[] = ranked.slice(0, 3).map(
+    const candidates: ReleaseGroupCandidateMB[] = ranked.slice(0, 3).map(
       (rg: any): ReleaseGroupCandidateMB => ({
         externalId: rg.id,
         source: 'mb',
@@ -149,14 +179,25 @@ export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: str
         score: rg.score,
         url: rg.id ? `https://musicbrainz.org/release-group/${rg.id}` : undefined,
       }),
-  );
+    );
 
-  const typeMed = pickMedian(candidates.map((c) => c.primaryType));
-  candidates.forEach((c) => {
-    c.highlight = (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
-  });
+    const typeMed = pickMedian(candidates.map((c) => c.primaryType));
+    candidates.forEach((c) => {
+      c.highlight = (!!typeMed && c.primaryType === typeMed) || norm(c.primaryArtist) === norm(artist);
+    });
 
-  return { externalId: hit?.id ?? null, candidates, raw };
+    log.info('MB find release-group done', 'mb.find.rg.done', {
+      artist,
+      title,
+      candidates: candidates.length,
+      externalId: hit?.id ?? null,
+    });
+
+    return { externalId: hit?.id ?? null, candidates, raw };
+  } catch (e: any) {
+    log.error('MB find release-group failed', 'mb.find.rg.fail', { artist, title, err: e?.message || String(e) });
+    throw e;
+  }
 });
 
 /**
@@ -165,8 +206,15 @@ export const mbFindReleaseGroup = limiter.wrap(async (artist: string, title: str
  * маршруты могли просто записать MBID.
  */
 export async function searchArtistMB(
-    name: string,
+  name: string,
 ): Promise<{ id: string; name: string } | null> {
-  const res = await mbFindArtist(name);
-  return res.externalId ? { id: res.externalId, name } : null;
+  try {
+    const res = await mbFindArtist(name);
+    const out = res.externalId ? { id: res.externalId, name } : null;
+    log.info('MB searchArtistMB', 'mb.searchArtistMB', { name, hit: !!out });
+    return out;
+  } catch (e: any) {
+    log.error('MB searchArtistMB failed', 'mb.searchArtistMB.fail', { name, err: e?.message || String(e) });
+    throw e;
+  }
 }
