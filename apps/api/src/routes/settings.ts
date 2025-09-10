@@ -6,8 +6,10 @@ import { prisma } from '../prisma';
 import { reloadJobs, getCronStatuses } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
+import { createLogger } from '../lib/logger';
 
 const r = Router();
+const log = createLogger({ scope: 'route.settings' });
 
 function stripTrailingSlashes(s?: string | null): string {
   const str = String(s ?? '');
@@ -154,7 +156,6 @@ function pickSettings(input: any) {
     'enableCronLidarrPull',
     'allowRepush',
     'qbtDeleteFiles',
-
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
 
   if ('qbtUrl' in out && typeof out.qbtUrl === 'string') {
@@ -245,58 +246,91 @@ async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: strin
 
 // helper, чтобы не дублировать POST/PUT
 async function saveSettingsHandler(req: any, res: any) {
-  const data = pickSettings(req.body);
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  try {
+    const data = pickSettings(req.body);
+    lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
 
-  const saved = await prisma.setting.upsert({
-    where: { id: 1 },
-    create: { id: 1, ...data },
-    update: { ...data },
-  });
+    const saved = await prisma.setting.upsert({
+      where: { id: 1 },
+      create: { id: 1, ...data },
+      update: { ...data },
+    });
 
-  setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
-  await reloadJobs();
+    setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+    await reloadJobs();
+    lg.info('settings saved and jobs reloaded', 'settings.save.done');
 
-  res.json({ ok: true });
+    res.json({ ok: true });
+  } catch (e: any) {
+    lg.error('save settings failed', 'settings.save.fail', { err: e?.message });
+    res.status(500).json({ ok: false, error: 'Failed to save settings' });
+  }
 }
 
 // GET /api/settings
-r.get('/', async (_req, res) => {
-  const s: any = await prisma.setting.findFirst({ where: { id: 1 } });
-  if (!s) return res.json({});
-  const safe = { ...s };
-  safe.qbtPass = '';
-  return res.json(safe);
+r.get('/', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('get settings requested', 'settings.get.start');
+
+  try {
+    const s: any = await prisma.setting.findFirst({ where: { id: 1 } });
+    if (!s) {
+      lg.debug('no settings found', 'settings.get.empty');
+      return res.json({});
+    }
+    const safe = { ...s };
+    safe.qbtPass = '';
+    lg.debug('settings loaded', 'settings.get.done', { hasSettings: true });
+    return res.json(safe);
+  } catch (e: any) {
+    lg.error('get settings failed', 'settings.get.fail', { err: e?.message });
+    res.status(500).json({ ok: false, error: 'Failed to fetch settings' });
+  }
 });
 
 // GET /api/settings/scheduler
-r.get('/scheduler', async (_req, res) => {
+r.get('/scheduler', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('get scheduler statuses requested', 'settings.scheduler.start');
+
   try {
     const jobs = await getCronStatuses();
+    lg.debug('scheduler statuses fetched', 'settings.scheduler.done', { count: Array.isArray(jobs) ? jobs.length : undefined });
     res.json({ ok: true, jobs });
   } catch (e: any) {
+    lg.error('get scheduler statuses failed', 'settings.scheduler.fail', { err: e?.message });
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
 // POST /api/settings/test/yandex  { token?: string }
 r.post('/test/yandex', testYandexLimiter, async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('test yandex requested', 'settings.test.yandex.start');
+
   try {
     const body = req.body || {};
     let token: string | undefined =
-        typeof body.token === 'string' && body.token.trim() ? body.token.trim() : undefined;
+      typeof body.token === 'string' && body.token.trim() ? body.token.trim() : undefined;
 
     if (!token) {
       const s = await prisma.setting.findFirst({ where: { id: 1 } });
       token = s?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN || undefined;
     }
-    if (!token) return res.status(400).json({ ok: false, error: 'No Yandex token' });
+    if (!token) {
+      lg.warn('no yandex token provided', 'settings.test.yandex.notoken');
+      return res.status(400).json({ ok: false, error: 'No Yandex token' });
+    }
 
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
     setPyproxyUrl(s?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
 
     const resp = await yandexVerifyToken(token);
+    lg.info('test yandex completed', 'settings.test.yandex.done', { ok: (resp as any)?.ok ?? true });
     res.json(resp);
   } catch (e: any) {
+    lg.error('test yandex failed', 'settings.test.yandex.fail', { err: e?.message });
     res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 });
@@ -305,6 +339,9 @@ r.post('/test/yandex', testYandexLimiter, async (req, res) => {
 // ТЕПЕРЬ: при успешном коннекте подбираем дефолтные root/profile и,
 // если поля ещё пустые — сохраняем их в БД.
 r.post('/test/lidarr', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('test lidarr requested', 'settings.test.lidarr.start');
+
   try {
     const body = req.body || {};
     let lidarrUrl = (typeof body.lidarrUrl === 'string' && body.lidarrUrl) || undefined;
@@ -316,6 +353,7 @@ r.post('/test/lidarr', async (req, res) => {
       lidarrApiKey = lidarrApiKey || s0?.lidarrApiKey || undefined;
     }
     if (!lidarrUrl || !lidarrApiKey) {
+      lg.warn('no lidarr url or api key', 'settings.test.lidarr.nocreds');
       return res.status(400).json({ ok: false, error: 'No Lidarr URL or API key' });
     }
 
@@ -365,8 +403,10 @@ r.post('/test/lidarr', async (req, res) => {
       }
     }
 
+    lg.info('test lidarr completed', 'settings.test.lidarr.done', { ok, status: r2.statusCode, appliedCount });
     res.json({ ok, status: r2.statusCode, data, defaults, applied, appliedCount });
   } catch (e: any) {
+    log.error('test lidarr failed', 'settings.test.lidarr.fail', { err: e?.message });
     res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 });
@@ -374,6 +414,9 @@ r.post('/test/lidarr', async (req, res) => {
 // POST /api/settings/lidarr/defaults  { overwrite?: boolean }
 // Ручное подтягивание дефолтов и сохранение (по желанию — с перезаписью).
 r.post('/lidarr/defaults', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('pull lidarr defaults requested', 'settings.lidarr.defaults.start', { overwrite: !!req.body?.overwrite });
+
   try {
     const body = req.body || {};
     const overwrite = !!body.overwrite;
@@ -383,6 +426,7 @@ r.post('/lidarr/defaults', async (req, res) => {
     const lidarrApiKey = s?.lidarrApiKey || '';
 
     if (!lidarrUrl || !lidarrApiKey) {
+      lg.warn('no lidarr creds in settings', 'settings.lidarr.defaults.nocreds');
       return res.status(400).json({ ok: false, error: 'No Lidarr URL or API key in settings' });
     }
 
@@ -405,20 +449,28 @@ r.post('/lidarr/defaults', async (req, res) => {
       await reloadJobs();
     }
 
+    lg.info('lidarr defaults applied', 'settings.lidarr.defaults.done', { appliedCount });
     res.json({ ok: true, defaults: d, applied: update, appliedCount });
   } catch (e: any) {
+    lg.error('pull lidarr defaults failed', 'settings.lidarr.defaults.fail', { err: e?.message });
     res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 });
 
-r.post('/test/qbt', async (_req, res) => {
+r.post('/test/qbt', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+  lg.info('test qbt requested', 'settings.test.qbt.start');
+
   try {
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
     const base = (s?.qbtUrl || '').replace(/\/+$/, '');
     const user = s?.qbtUser || '';
     const pass = s?.qbtPass || '';
 
-    if (!base) return res.status(400).json({ ok: false, error: 'qbtUrl is not set' });
+    if (!base) {
+      lg.warn('qbt url is not set', 'settings.test.qbt.nourl');
+      return res.status(400).json({ ok: false, error: 'qbtUrl is not set' });
+    }
 
     // webapiVersion (без auth)
     const r1 = await fetch(`${base}/api/v2/app/webapiVersion`);
@@ -432,8 +484,10 @@ r.post('/test/qbt', async (_req, res) => {
     });
     const okLogin = r2.ok;
 
+    lg.info('test qbt completed', 'settings.test.qbt.done', { ok: r1.ok && okLogin, webApi, loginOk: okLogin });
     res.json({ ok: r1.ok && okLogin, webApi, login: okLogin });
   } catch (e: any) {
+    lg.error('test qbt failed', 'settings.test.qbt.fail', { err: e?.message });
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
