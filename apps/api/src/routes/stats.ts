@@ -1,8 +1,10 @@
 // apps/api/src/routes/stats.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { createLogger } from '../lib/logger';
 
 const r = Router();
+const log = createLogger({ scope: 'route.stats' });
 
 function parseStats(stats?: string | null) {
     if (!stats) return null;
@@ -30,18 +32,18 @@ async function getRuns(kinds: string[]): Promise<{ active: RunDTO; last: RunDTO 
         orderBy: { startedAt: 'desc' },
     });
     const toDto = (x?: any): RunDTO =>
-        x && {
-            id: x.id,
-            kind: x.kind,
-            status: x.status,
-            message: x.message ?? null,
-            startedAt: x.startedAt,
-            finishedAt: x.finishedAt ?? null,
-            durationSec: x.finishedAt
-                ? Math.max(0, Math.round((+new Date(x.finishedAt) - +new Date(x.startedAt)) / 1000))
-                : null,
-            stats: parseStats(x.stats),
-        };
+      x && {
+          id: x.id,
+          kind: x.kind,
+          status: x.status,
+          message: x.message ?? null,
+          startedAt: x.startedAt,
+          finishedAt: x.finishedAt ?? null,
+          durationSec: x.finishedAt
+            ? Math.max(0, Math.round((+new Date(x.finishedAt) - +new Date(x.startedAt)) / 1000))
+            : null,
+          stats: parseStats(x.stats),
+      };
     return { active: toDto(active), last: toDto(last) };
 }
 
@@ -52,7 +54,10 @@ async function getBaseUrls() {
 }
 
 /** GET /api/stats — сводка для Overview */
-r.get('/', async (_req, res) => {
+r.get('/', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+    lg.info('overview stats requested', 'stats.overview.start');
+
     try {
         const { lidarrBase } = await getBaseUrls();
 
@@ -63,8 +68,11 @@ r.get('/', async (_req, res) => {
             prisma.yandexAlbum.count({ where: { present: true } }),
             prisma.yandexAlbum.count({ where: { present: true, rgMbid: { not: null } } }),
         ]);
+        lg.debug('yandex counters computed', 'stats.overview.yandex.counters', {
+            yArtistsTotal, yArtistsMatched, yAlbumsTotal, yAlbumsMatched
+        });
 
-        // Топ-5 «последних» альбомов из Yandex (эвристика: по ymId убыв.)
+        // Топ-5 «последних» альбомов из Yandex (по ymId убыв.)
         const latestYandexRaw = await prisma.yandexAlbum.findMany({
             where: { present: true },
             orderBy: [{ ymId: 'desc' }],
@@ -96,6 +104,9 @@ r.get('/', async (_req, res) => {
                 mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
             };
         });
+        lg.debug('yandex latest prepared', 'stats.overview.yandex.latest', {
+            albums: latestYandex.length, artists: latestYandexArtists.length
+        });
 
         // --- Lidarr counters (removed=false) ---
         const [lArtistsTotal, lArtistsMatched, lAlbumsTotal, lAlbumsMatched] = await Promise.all([
@@ -105,13 +116,22 @@ r.get('/', async (_req, res) => {
             prisma.lidarrAlbum.count({ where: { removed: false, mbid: { not: null } } }),
         ]);
 
-        // Топ-5 «последних» альбомов из Lidarr (по added desc; фолбэк — id desc)
-        const latestLidarrRaw = await prisma.lidarrAlbum.findMany({
-            where: { removed: false },
-            orderBy: [{ added: 'desc' }, { id: 'desc' }],
-            take: 5,
-            select: { id: true, title: true, artistName: true, added: true, mbid: true },
-        });
+        // Топ-5 последних альбомов и артистов из Lidarr
+        const [latestLidarrRaw, latestLidarrArtistsRaw] = await Promise.all([
+            prisma.lidarrAlbum.findMany({
+                where: { removed: false },
+                orderBy: [{ added: 'desc' }, { id: 'desc' }],
+                take: 5,
+                select: { id: true, title: true, artistName: true, added: true, mbid: true },
+            }),
+            prisma.lidarrArtist.findMany({
+                where: { removed: false },
+                orderBy: [{ added: 'desc' }, { id: 'desc' }],
+                take: 5,
+                select: { id: true, name: true, added: true, mbid: true },
+            }),
+        ]);
+
         const latestLidarr = latestLidarrRaw.map((x) => ({
             id: x.id,
             title: x.title || '',
@@ -120,14 +140,6 @@ r.get('/', async (_req, res) => {
             lidarrUrl: lidarrBase ? `${lidarrBase}/album/${x.mbid}` : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/release-group/${x.mbid}` : undefined,
         }));
-
-        // Топ-5 «последних» артистов из Lidarr (по added desc; фолбэк — id desc)
-        const latestLidarrArtistsRaw = await prisma.lidarrArtist.findMany({
-            where: { removed: false },
-            orderBy: [{ added: 'desc' }, { id: 'desc' }],
-            take: 5,
-            select: { id: true, name: true, added: true, mbid: true },
-        });
         const latestLidarrArtists = latestLidarrArtistsRaw.map((x) => ({
             id: x.id,
             name: x.name || '',
@@ -135,40 +147,50 @@ r.get('/', async (_req, res) => {
             lidarrUrl: lidarrBase ? `${lidarrBase}/artist/${x.mbid}` : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
         }));
+        lg.debug('lidarr counters/latest prepared', 'stats.overview.lidarr', {
+            lArtistsTotal, lArtistsMatched, lAlbumsTotal, lAlbumsMatched,
+            latestAlbums: latestLidarr.length, latestArtists: latestLidarrArtists.length
+        });
 
         // --- Custom (artists only) ---
-        const [cArtistsTotal, cArtistsMatched] = await Promise.all([
+        const [cArtistsTotal, cArtistsMatched, latestCustomArtistsRaw, lArtistsDownloaded] = await Promise.all([
             prisma.customArtist.count(),
             prisma.customArtist.count({ where: { mbid: { not: null } } }),
+            prisma.customArtist.findMany({
+                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                take: 5,
+                select: { id: true, name: true, mbid: true, createdAt: true },
+            }),
+            prisma.lidarrArtist.count({
+                where: {
+                    removed: false,
+                    OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
+                },
+            }),
         ]);
-        const cArtistsUnmatched = Math.max(0, cArtistsTotal - cArtistsMatched);
 
-        const latestCustomArtistsRaw = await prisma.customArtist.findMany({
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            take: 5,
-            select: { id: true, name: true, mbid: true, createdAt: true },
-        });
         const latestCustomArtists = latestCustomArtistsRaw.map((x) => ({
             id: x.id,
             name: x.name || '',
             createdAt: x.createdAt ? x.createdAt.toISOString() : undefined,
             mbUrl: x.mbid ? `https://musicbrainz.org/artist/${x.mbid}` : undefined,
         }));
-        const lArtistsDownloaded = await prisma.lidarrArtist.count({
-            where: {
-                removed: false,
-                OR: [
-                    { sizeOnDisk: { gt: 0 } },
-                    { tracks: { gt: 0 } },
-                ],
-            },
-        });
+        const cArtistsUnmatched = Math.max(0, cArtistsTotal - cArtistsMatched);
+
         const lArtistsWithoutDownloads = Math.max(0, lArtistsTotal - lArtistsDownloaded);
         const lArtistsDownloadedPct = lArtistsTotal ? lArtistsDownloaded / lArtistsTotal : 0;
+
         // учитываем оба вида kind для совместимости
-        const yandex = await getRuns(['yandex', 'yandex-pull']);
-        const lidarr = await getRuns(['lidarr', 'lidarr-pull']);
-        const match = await getRuns(['match']);
+        const [yandex, lidarr, match] = await Promise.all([
+            getRuns(['yandex', 'yandex-pull']),
+            getRuns(['lidarr', 'lidarr-pull']),
+            getRuns(['match']),
+        ]);
+
+        lg.info('overview stats computed', 'stats.overview.done', {
+            yArtistsTotal, yAlbumsTotal, lArtistsTotal, lAlbumsTotal,
+            customArtists: cArtistsTotal
+        });
 
         res.json({
             // (legacy) суммарные блоки как "yandex"
@@ -217,7 +239,7 @@ r.get('/', async (_req, res) => {
                 latestArtists: latestLidarrArtists,
             },
 
-            // ⬇️ добавили кастом
+            // ⬇️ кастом
             custom: {
                 artists: {
                     total: cArtistsTotal,
@@ -230,6 +252,7 @@ r.get('/', async (_req, res) => {
             runs: { yandex, lidarr, match },
         });
     } catch (e: any) {
+        log.error('overview stats failed', 'stats.overview.fail', { err: e?.message });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
