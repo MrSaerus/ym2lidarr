@@ -7,17 +7,16 @@ import { syncLidarrArtists, syncLidarrAlbums } from '../services/lidarr-cache';
 import { runLidarrSearchArtists } from '../workers';
 import { startRun } from '../log';
 import { ensureNotBusyOrThrow } from '../scheduler';
+import { createLogger } from '../lib/logger';
 
 const r = Router();
+const log = createLogger({ scope: 'route.lidarr.artists' });
 
 /** ===== list artists from DB with filters/sort/paging ===== */
 type SortField = 'name' | 'monitored' | 'albums' | 'tracks' | 'size' | 'path' | 'added';
 type LidarrSearchMode = 'fast' | 'normal' | 'slow';
-const SEARCH_DELAYS: Record<LidarrSearchMode, number> = {
-    fast: 50,
-    normal: 150,
-    slow: 500,
-};
+const SEARCH_DELAYS: Record<LidarrSearchMode, number> = { fast: 50, normal: 150, slow: 500 };
+
 function i(v: any, d: number) {
     const n = parseInt(String(v ?? ''), 10);
     return Number.isFinite(n) ? n : d;
@@ -27,11 +26,11 @@ async function getLidarrBase(): Promise<string> {
     const s = await prisma.setting.findFirst({ where: { id: 1 }, select: { lidarrUrl: true } });
     return String(s?.lidarrUrl || '').replace(/\/+$/, '');
 }
-function cleanMbid(v?: string | null) {
-    return v ? v.replace(/^mbid:/i, '') : '';
-}
+function cleanMbid(v?: string | null) { return v ? v.replace(/^mbid:/i, '') : ''; }
 
 r.get('/artists', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
     try {
         const page = Math.max(1, i(req.query.page, 1));
         const pageSize = Math.max(1, i(req.query.pageSize, 50));
@@ -39,6 +38,9 @@ r.get('/artists', async (req, res) => {
         const monitored = String(req.query.monitored ?? 'all'); // 'all'|'true'|'false'
         const sortBy = (String(req.query.sortBy ?? 'name') as SortField);
         const sortDir = String(req.query.sortDir ?? 'asc') === 'desc' ? 'desc' : 'asc';
+
+        lg.info('artists list requested', 'lidarr.artists.list.start',
+          { page, pageSize, q, monitored, sortBy, sortDir });
 
         const where: any = { removed: false };
         if (q) {
@@ -75,6 +77,8 @@ r.get('/artists', async (req, res) => {
             getLidarrBase(),
         ]);
 
+        lg.debug('artists fetched from DB', 'lidarr.artists.list.db', { total, rowsCount: rows.length });
+
         const items = rows.map((x) => ({
             id: x.id,
             name: x.name,
@@ -89,7 +93,9 @@ r.get('/artists', async (req, res) => {
         }));
 
         res.json({ page, pageSize, total, items });
+        lg.info('artists list completed', 'lidarr.artists.list.done', { returned: items.length, total });
     } catch (e: any) {
+        log.error('artists list failed', 'lidarr.artists.list.fail', { err: e?.message });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
@@ -98,25 +104,38 @@ r.get('/artists', async (req, res) => {
  * Блокируем, если идёт любой lidarr.pull.* (крон/ручной)
  */
 r.post('/artist/:id/refresh', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
     try {
         await ensureNotBusyOrThrow(['lidarr.pull.'], ['lidarrPull'] as any);
 
         const id = parseInt(String(req.params.id), 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ message: 'Bad artist id' });
+        if (!Number.isFinite(id)) {
+            lg.warn('bad artist id', 'lidarr.artists.refresh.badid', { raw: req.params.id });
+            return res.status(400).json({ message: 'Bad artist id' });
+        }
 
         const { lidarrUrl, lidarrApiKey } = await getLidarrCreds();
         const base = String(lidarrUrl || '').replace(/\/+$/, '');
         const url = `${base}/api/v1/artist/${id}?apikey=${encodeURIComponent(lidarrApiKey || '')}`;
 
+        lg.info('refresh artist requested', 'lidarr.artists.refresh.start', { id, urlBase: base });
+
         const resp = await request(url, { method: 'GET' });
         const text = await resp.body.text();
+
         if (resp.statusCode < 200 || resp.statusCode >= 300) {
+            lg.warn('lidarr responded with non-2xx', 'lidarr.artists.refresh.badresp',
+              { id, statusCode: resp.statusCode, snippet: text?.slice(0, 200) });
             return res.status(502).json({ message: `Lidarr error ${resp.statusCode}: ${text?.slice(0, 500)}` });
         }
 
         let a: any = null;
         try { a = JSON.parse(text); } catch {}
-        if (!a || typeof a !== 'object') return res.status(404).json({ message: 'Artist not found in Lidarr' });
+        if (!a || typeof a !== 'object') {
+            lg.warn('artist not found in lidarr', 'lidarr.artists.refresh.notfound', { id });
+            return res.status(404).json({ message: 'Artist not found in Lidarr' });
+        }
 
         await prisma.lidarrArtist.upsert({
             where: { id },
@@ -147,9 +166,14 @@ r.post('/artist/:id/refresh', async (req, res) => {
             },
         });
 
+        lg.info('artist refreshed and upserted', 'lidarr.artists.refresh.done', { id, mbid: a.foreignArtistId || null });
         res.json({ ok: true });
     } catch (e: any) {
-        if (e?.status === 409) return res.status(409).json({ message: e?.message || 'Busy' });
+        if (e?.status === 409) {
+            lg.warn('refresh rejected: busy', 'lidarr.artists.refresh.busy', { err: e?.message });
+            return res.status(409).json({ message: e?.message || 'Busy' });
+        }
+        lg.error('artist refresh failed', 'lidarr.artists.refresh.fail', { err: e?.message });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
@@ -158,41 +182,55 @@ r.post('/artist/:id/refresh', async (req, res) => {
  * Блокируем, если идёт любой lidarr.pull.* (крон/ручной)
  */
 r.post('/resync', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
     try {
         await ensureNotBusyOrThrow(['lidarr.pull.'], ['lidarrPull'] as any);
 
+        lg.info('resync requested', 'lidarr.resync.start');
         const artists = await syncLidarrArtists();
         const albums  = await syncLidarrAlbums();
+
         res.json({ ok: true, artists, albums });
+        lg.info('resync completed', 'lidarr.resync.done', { artists, albums });
     } catch (e: any) {
         const status = e?.status === 409 ? 409 : 500;
+        if (status === 409) lg.warn('resync rejected: busy', 'lidarr.resync.busy', { err: e?.message });
+        else lg.error('resync failed', 'lidarr.resync.fail', { err: e?.message });
         res.status(status).json({ ok: false, error: e?.message || String(e) });
     }
 });
 
-r.get('/stats/downloads', async (_req, res) => {
+r.get('/stats/downloads', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
     try {
+        lg.info('downloads stats requested', 'lidarr.stats.downloads.start');
+
         const [total, withDownloads] = await Promise.all([
             prisma.lidarrArtist.count({ where: { removed: false } }),
             prisma.lidarrArtist.count({
                 where: {
                     removed: false,
-                    OR: [
-                        { sizeOnDisk: { gt: 0 } },
-                        { tracks: { gt: 0 } },
-                    ],
+                    OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
                 },
             }),
         ]);
         const withoutDownloads = Math.max(0, total - withDownloads);
         const ratio = total ? withDownloads / total : 0;
+
         res.json({ total, withDownloads, withoutDownloads, ratio });
+        lg.info('downloads stats completed', 'lidarr.stats.downloads.done',
+          { total, withDownloads, withoutDownloads, ratio });
     } catch (e: any) {
+        lg.error('downloads stats failed', 'lidarr.stats.downloads.fail', { err: e?.message });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
 
 r.post('/search-artists', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
     try {
         await ensureNotBusyOrThrow(['lidarr.'], ['lidarrPull'] as any);
 
@@ -200,15 +238,24 @@ r.post('/search-artists', async (req, res) => {
         const mode: LidarrSearchMode = (['fast', 'normal', 'slow'].includes(modeRaw) ? modeRaw : 'normal') as LidarrSearchMode;
         const delayMs = SEARCH_DELAYS[mode];
 
+        lg.info('search artists requested', 'lidarr.search.artists.start', { mode, delayMs });
+
         const run = await startRun('lidarr.search.artists', {
             phase: 'search', total: 0, done: 0, ok: 0, failed: 0,
         });
 
-        runLidarrSearchArtists(run.id, { delayMs }).catch(() => {});
+        // пожаробезопасный запуск воркера
+        runLidarrSearchArtists(run.id, { delayMs }).catch((e) => {
+            lg.error('worker crash (search artists)', 'lidarr.search.artists.worker.fail', { runId: run.id, err: e?.message });
+        });
+
         res.json({ started: true, runId: run.id, mode, delayMs });
     } catch (e: any) {
         const status = e?.status === 409 ? 409 : 500;
+        if (status === 409) lg.warn('search artists rejected: busy', 'lidarr.search.artists.busy', { err: e?.message });
+        else lg.error('search artists failed', 'lidarr.search.artists.fail', { err: e?.message });
         res.status(status).json({ ok: false, error: e?.message || String(e) });
     }
 });
+
 export default r;

@@ -12,6 +12,12 @@ services:
       - QBT_PASS=adminadmin
       - QBT_DELETE_FILES=true
       - LIDARR_WEBHOOK_SECRET=xxxxx
+      - LOG_LEVEL=debug       # |info|warn|error|fatal|all|off
+      - LOG_TO_FILES=1        # включить запись в файлы
+      - LOG_DIR=/data/log/app  # каталог (дефолт /var/log/app)
+      - OG_MAX_SIZE=50M       # размер одного файла до ротации
+      - LOG_BACKUPS=14        # сколько бэкапов хранить/чистить
+    #      - LOG_DATE_PATTERN=yyyy-MM-dd — суффикс дневных файлов
     volumes:
       - ./data:/app/data
     ports:

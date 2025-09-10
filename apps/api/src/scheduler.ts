@@ -1,5 +1,4 @@
 // apps/api/src/scheduler.ts
-// apps/api/src/scheduler.ts
 import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
@@ -14,6 +13,9 @@ import {
   runYandexPush,
   runLidarrPullEx,
 } from './workers';
+import { createLogger } from './lib/logger';
+
+const log = createLogger({ scope: 'scheduler' });
 
 /* ====================== CRON-PARSER SAFE NEXT ====================== */
 /** Универсальный вызов cron-parser для v2…v5 */
@@ -23,15 +25,16 @@ function nextFromCron(expr: string, opts?: any): Date | null {
 
     // Подбираем доступную функцию парсинга в порядке приоритета
     const parseFn =
-        (typeof m?.parseExpression === 'function' && m.parseExpression) ||
-        (typeof m?.default?.parseExpression === 'function' && m.default.parseExpression) ||
-        (typeof m?.CronExpression?.parse === 'function' && m.CronExpression.parse) ||
-        (typeof m?.CronExpressionParser?.parse === 'function' && m.CronExpressionParser.parse) ||
-        null;
+      (typeof m?.parseExpression === 'function' && m.parseExpression) ||
+      (typeof m?.default?.parseExpression === 'function' && m.default.parseExpression) ||
+      (typeof m?.CronExpression?.parse === 'function' && m.CronExpression.parse) ||
+      (typeof m?.CronExpressionParser?.parse === 'function' && m.CronExpressionParser.parse) ||
+      null;
 
     if (!parseFn) {
-      // подробный одноразовый лог (на всякий)
-      console.warn('[scheduler] safeNext: cron-parser API not found; keys=', Object.keys(m || {}));
+      log.warn('cron-parser API not found', 'cron.safeNext.api.missing', {
+        keys: Object.keys(m || {}),
+      });
       return null;
     }
 
@@ -70,31 +73,47 @@ let jobs: {
 
 // Памятка: какие jobKeys сейчас запущены ИМЕННО кроном (для UI "State")
 type JobKey =
-    | 'yandexPull'
-    | 'yandexMatch'
-    | 'yandexPush'
-    | 'lidarrPull'
-    | 'customMatch'
-    | 'customPush'
-    | 'backup';
+  | 'yandexPull'
+  | 'yandexMatch'
+  | 'yandexPush'
+  | 'lidarrPull'
+  | 'customMatch'
+  | 'customPush'
+  | 'backup';
 
 const cronActivity: Partial<Record<JobKey, boolean>> = {};
 
-/* ====================== BACKUP HELPERS (как было) ====================== */
+/* ====================== BACKUP HELPERS ====================== */
+
+const blog = log.child({ scope: 'scheduler.backup' });
 
 function ts() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return (
-      d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '_' +
-      pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
+    d.getFullYear() +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    '_' +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds())
   );
 }
 
-export async function runBackupNow(): Promise<{ ok: boolean; file?: string; deleted?: string[]; error?: string; }> {
+export async function runBackupNow(): Promise<{
+  ok: boolean;
+  file?: string;
+  deleted?: string[];
+  error?: string;
+}> {
+  blog.info('backup run requested', 'cron.backup.request');
   try {
     const s = await prisma.setting.findFirst();
-    if (!s || !s.backupEnabled) return { ok: false, error: 'Backups are disabled in settings.' };
+    if (!s || !s.backupEnabled) {
+      blog.warn('backup disabled in settings', 'cron.backup.disabled');
+      return { ok: false, error: 'Backups are disabled in settings.' };
+    }
 
     const backupDir = s.backupDir || '/app/data/backups';
     const retention = s.backupRetention ?? 0;
@@ -102,32 +121,57 @@ export async function runBackupNow(): Promise<{ ok: boolean; file?: string; dele
     fs.mkdirSync(backupDir, { recursive: true });
     try {
       const probe = path.join(backupDir, '.write-test');
-      fs.writeFileSync(probe, 'ok'); fs.unlinkSync(probe);
+      fs.writeFileSync(probe, 'ok');
+      fs.unlinkSync(probe);
     } catch (e) {
       const msg = (e as Error).message || String(e);
+      blog.error('backup dir not writable', 'cron.backup.dir.unwritable', {
+        backupDir,
+        error: msg,
+      });
       return { ok: false, error: `Backup dir not writable: ${backupDir}. ${msg}` };
     }
 
-    try { await prisma.$queryRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE);`); } catch {}
+    try {
+      await prisma.$queryRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE);`);
+      blog.debug('sqlite wal checkpoint truncate', 'cron.backup.sqlite.checkpoint');
+    } catch (e: any) {
+      blog.warn('wal checkpoint failed (continuing)', 'cron.backup.sqlite.checkpoint.fail', {
+        error: e?.message || String(e),
+      });
+    }
 
     const fname = `backup_${ts()}.db`;
     const full = path.resolve(backupDir, fname);
     await prisma.$executeRawUnsafe(`VACUUM INTO '${full.replace(/'/g, "''")}';`);
+    blog.info('backup file created', 'cron.backup.ok', { file: fname, dir: backupDir });
 
     const deleted: string[] = [];
     if (retention && retention > 0) {
-      const entries = fs.readdirSync(backupDir)
-          .filter((f) => /^backup_\d{8}_\d{6}\.db$/i.test(f))
-          .map((f) => ({ f, m: fs.statSync(path.join(backupDir, f)).mtimeMs }))
-          .sort((a, b) => b.m - a.m);
+      const entries = fs
+        .readdirSync(backupDir)
+        .filter((f) => /^backup_\d{8}_\d{6}\.db$/i.test(f))
+        .map((f) => ({ f, m: fs.statSync(path.join(backupDir, f)).mtimeMs }))
+        .sort((a, b) => b.m - a.m);
       for (const x of entries.slice(retention)) {
-        try { fs.unlinkSync(path.join(backupDir, x.f)); deleted.push(x.f); } catch {}
+        try {
+          fs.unlinkSync(path.join(backupDir, x.f));
+          deleted.push(x.f);
+        } catch {}
+      }
+      if (deleted.length) {
+        blog.info('old backups pruned', 'cron.backup.pruned', {
+          kept: retention,
+          deleted,
+        });
       }
     }
 
     return { ok: true, file: fname, deleted };
   } catch (e) {
-    return { ok: false, error: (e as Error).message || String(e) };
+    const msg = (e as Error).message || String(e);
+    blog.error('backup failed', 'cron.backup.fail', { error: msg });
+    return { ok: false, error: msg };
   }
 }
 
@@ -142,18 +186,26 @@ export function listBackups(dir: string): { file: string; size: number; mtime: n
     }
     out.sort((a, b) => b.mtime - a.mtime);
     return out;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /* ====================== COMMON ====================== */
 
-export async function initScheduler() { await reloadJobs(); }
+export async function initScheduler() {
+  log.info('init scheduler', 'cron.init');
+  await reloadJobs();
+}
 
 /** true, если есть активный ран, kind начинается с любого из префиксов */
 async function hasActiveRunWithPrefixes(prefixes: string[]): Promise<boolean> {
   if (!prefixes.length) return false;
   const or = prefixes.map((p) => ({ kind: { startsWith: p } as any }));
-  const r = await prisma.syncRun.findFirst({ where: { status: 'running', OR: or }, orderBy: { startedAt: 'desc' } });
+  const r = await prisma.syncRun.findFirst({
+    where: { status: 'running', OR: or },
+    orderBy: { startedAt: 'desc' },
+  });
   return !!r;
 }
 
@@ -167,142 +219,147 @@ async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<
 /* ====================== RELOAD JOBS ====================== */
 
 export async function reloadJobs() {
+  log.info('reload scheduler jobs start', 'cron.reload.start');
+
   // стоп старые
   for (const k of Object.keys(jobs) as (keyof typeof jobs)[]) {
-    try { jobs[k]?.stop(); } catch {}
+    try {
+      jobs[k]?.stop();
+    } catch {}
     jobs[k] = undefined;
   }
 
   const s = await prisma.setting.findFirst();
-  if (!s) { console.log('[scheduler] no settings'); return; }
+  if (!s) {
+    log.warn('no settings, jobs not scheduled', 'cron.reload.no_settings');
+    return;
+  }
+
+  /* helper: обёртки запуска для единообразного логирования */
+  const wrap =
+    <T extends JobKey>(
+      key: T,
+      prefixes: string[],
+      runner: (...args: any[]) => Promise<any>,
+      startPayload?: Record<string, unknown>,
+    ) =>
+      async () => {
+        if (await hasActiveRunWithPrefixes(prefixes)) {
+          log.info('job skipped (busy)', 'cron.job.skip.busy', { key, prefixes });
+          return;
+        }
+        cronActivity[key] = true;
+        try {
+          log.info('job start', 'cron.job.start', { key, ...(startPayload || {}) });
+          await runner();
+          log.info('job end', 'cron.job.end', { key });
+        } catch (e: any) {
+          log.error('job failed', 'cron.job.fail', { key, error: e?.message || String(e) });
+        } finally {
+          cronActivity[key] = false;
+        }
+      };
 
   /* ---------- CUSTOM: match all ---------- */
   if (s.enableCronCustomMatch && s.cronCustomMatch && cron.validate(s.cronCustomMatch)) {
-    jobs.customMatch = cron.schedule(s.cronCustomMatch, async () => {
-      if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.match: skip (busy)'); return; }
-      cronActivity.customMatch = true;
-      try {
-        console.log('[cron] custom.match.start');
-        await runCustomMatchAll();
-      } catch (e) {
-        console.error('[cron] custom.match.failed:', (e as Error).message);
-      } finally {
-        cronActivity.customMatch = false;
-      }
-    });
+    jobs.customMatch = cron.schedule(s.cronCustomMatch, wrap('customMatch', ['custom.'], runCustomMatchAll));
+    log.debug('scheduled custom.match', 'cron.plan', { key: 'customMatch', cron: s.cronCustomMatch });
   }
 
   /* ---------- CUSTOM: push all ---------- */
   if (s.enableCronCustomPush && s.cronCustomPush && cron.validate(s.cronCustomPush)) {
-    jobs.customPush = cron.schedule(s.cronCustomPush, async () => {
-      if (await hasActiveRunWithPrefixes(['custom.'])) { console.log('[cron] custom.push: skip (busy)'); return; }
-      cronActivity.customPush = true;
-      try {
-        console.log('[cron] custom.push.start');
-        await runCustomPushAll();
-      } catch (e) {
-        console.error('[cron] custom.push.failed:', (e as Error).message);
-      } finally {
-        cronActivity.customPush = false;
-      }
-    });
+    jobs.customPush = cron.schedule(s.cronCustomPush, wrap('customPush', ['custom.'], runCustomPushAll));
+    log.debug('scheduled custom.push', 'cron.plan', { key: 'customPush', cron: s.cronCustomPush });
   }
 
   /* ---------- YANDEX: pull all ---------- */
-  if ( s.enableCronYandexPull && s.cronYandexPull && cron.validate(s.cronYandexPull) ) {
-    jobs.yandexPull = cron.schedule(s.cronYandexPull, async () => {
-      if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.pull: skip (busy)'); return; }
-      cronActivity.yandexPull = true;
-      try {
-        console.log('[cron] yandex.pull.start');
-        await runYandexPullAll();
-      } catch (e) {
-        console.error('[cron] yandex.pull.failed:', (e as Error).message);
-      } finally {
-        cronActivity.yandexPull = false;
-      }
-    });
+  if (s.enableCronYandexPull && s.cronYandexPull && cron.validate(s.cronYandexPull)) {
+    jobs.yandexPull = cron.schedule(s.cronYandexPull, wrap('yandexPull', ['yandex.'], runYandexPullAll));
+    log.debug('scheduled yandex.pull', 'cron.plan', { key: 'yandexPull', cron: s.cronYandexPull });
   }
 
   /* ---------- YANDEX: match ---------- */
-  if ( s.enableCronYandexMatch && s.cronYandexMatch && cron.validate(s.cronYandexMatch) ) {
-    const target = (s.yandexMatchTarget as 'artists'|'albums'|'both') || 'both';
-    jobs.yandexMatch = cron.schedule(s.cronYandexMatch, async () => {
-      if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.match: skip (busy)'); return; }
-      cronActivity.yandexMatch = true;
-      try {
-        console.log('[cron] yandex.match.start', target);
-        await runYandexMatch(target, { force: false });
-      } catch (e) {
-        console.error('[cron] yandex.match.failed:', (e as Error).message);
-      } finally {
-        cronActivity.yandexMatch = false;
-      }
-    });
+  if (s.enableCronYandexMatch && s.cronYandexMatch && cron.validate(s.cronYandexMatch)) {
+    const target = (s.yandexMatchTarget as 'artists' | 'albums' | 'both') || 'both';
+    jobs.yandexMatch = cron.schedule(
+      s.cronYandexMatch,
+      wrap('yandexMatch', ['yandex.'], () => runYandexMatch(target, { force: false }), { target }),
+    );
+    log.debug('scheduled yandex.match', 'cron.plan', { key: 'yandexMatch', cron: s.cronYandexMatch, target });
   }
 
   /* ---------- YANDEX: push ---------- */
-  if ( s.enableCronYandexPush && s.cronYandexPush && cron.validate(s.cronYandexPush) ) {
-    const target = (s.yandexPushTarget as 'artists'|'albums'|'both') || 'both';
-    jobs.yandexPush = cron.schedule(s.cronYandexPush, async () => {
-      if (await hasActiveRunWithPrefixes(['yandex.'])) { console.log('[cron] yandex.push: skip (busy)'); return; }
-      cronActivity.yandexPush = true;
-      try {
-        console.log('[cron] yandex.push.start', target);
-        await runYandexPush(target);
-      } catch (e) {
-        console.error('[cron] yandex.push.failed:', (e as Error).message);
-      } finally {
-        cronActivity.yandexPush = false;
-      }
-    });
+  if (s.enableCronYandexPush && s.cronYandexPush && cron.validate(s.cronYandexPush)) {
+    const target = (s.yandexPushTarget as 'artists' | 'albums' | 'both') || 'both';
+    jobs.yandexPush = cron.schedule(
+      s.cronYandexPush,
+      wrap('yandexPush', ['yandex.'], () => runYandexPush(target), { target }),
+    );
+    log.debug('scheduled yandex.push', 'cron.plan', { key: 'yandexPush', cron: s.cronYandexPush, target });
   }
 
   /* ---------- LIDARR: pull ---------- */
-  if ( s.enableCronLidarrPull && s.cronLidarrPull && cron.validate(s.cronLidarrPull) ) {
-    const target = (s.lidarrPullTarget as 'artists'|'albums'|'both') || 'both';
-    jobs.lidarrPull = cron.schedule(s.cronLidarrPull, async () => {
-      if (await hasActiveRunWithPrefixes(['lidarr.pull.'])) { console.log('[cron] lidarr.pull: skip (busy)'); return; }
-      cronActivity.lidarrPull = true;
-      try {
-        console.log('[cron] lidarr.pull.start', target);
-        await runLidarrPullEx(target);
-      } catch (e) {
-        console.error('[cron] lidarr.pull.failed:', (e as Error).message);
-      } finally {
-        cronActivity.lidarrPull = false;
-      }
-    });
+  if (s.enableCronLidarrPull && s.cronLidarrPull && cron.validate(s.cronLidarrPull)) {
+    const target = (s.lidarrPullTarget as 'artists' | 'albums' | 'both') || 'both';
+    jobs.lidarrPull = cron.schedule(
+      s.cronLidarrPull,
+      wrap('lidarrPull', ['lidarr.pull.'], () => runLidarrPullEx(target), { target }),
+    );
+    log.debug('scheduled lidarr.pull', 'cron.plan', { key: 'lidarrPull', cron: s.cronLidarrPull, target });
   }
 
   /* ---------- BACKUP ---------- */
   if (s.backupEnabled && s.backupCron && cron.validate(s.backupCron)) {
-    jobs.backup = cron.schedule(s.backupCron, async () => {
-      cronActivity.backup = true;
-      try {
-        console.log('[cron] backup.run');
-        await runBackupNow();
-      } catch (e) {
-        console.error('[cron] backup.failed:', (e as Error).message);
-      } finally {
-        cronActivity.backup = false;
-      }
-    });
+    jobs.backup = cron.schedule(s.backupCron, wrap('backup', [], runBackupNow));
+    log.debug('scheduled backup', 'cron.plan', { key: 'backup', cron: s.backupCron });
   }
 
-  console.log('[scheduler] jobs reloaded');
+  log.info('jobs reloaded', 'cron.reload.done');
 }
 
 /* ====================== STATUS (для фронта) ====================== */
 
-const JOB_META: Record<JobKey, { title: string; settingCron: string; enabledFlag?: string; prefixes: string[]; }> = {
-  yandexPull:  { title: 'Yandex: Pull all',       settingCron: 'cronYandexPull',    enabledFlag: 'enableCronYandexPull',  prefixes: ['yandex.pull.', 'yandex.'] },
-  yandexMatch: { title: 'Yandex: Match',          settingCron: 'cronYandexMatch',   enabledFlag: 'enableCronYandexMatch', prefixes: ['yandex.match.', 'yandex.'] },
-  yandexPush:  { title: 'Yandex: Push',           settingCron: 'cronYandexPush',    enabledFlag: 'enableCronYandexPush',  prefixes: ['yandex.push.', 'yandex.'] },
-  lidarrPull:  { title: 'Lidarr: Pull',           settingCron: 'cronLidarrPull',    enabledFlag: 'enableCronLidarrPull',  prefixes: ['lidarr.pull.'] },
-  customMatch: { title: 'Custom: Match MB',       settingCron: 'cronCustomMatch',   enabledFlag: 'enableCronCustomMatch', prefixes: ['custom.match.', 'custom.'] },
-  customPush:  { title: 'Custom: Push to Lidarr', settingCron: 'cronCustomPush',    enabledFlag: 'enableCronCustomPush',  prefixes: ['custom.push.', 'custom.'] },
-  backup:      { title: 'Backup',                 settingCron: 'backupCron',        enabledFlag: 'backupEnabled',         prefixes: [] },
+const JOB_META: Record<
+  JobKey,
+  { title: string; settingCron: string; enabledFlag?: string; prefixes: string[] }
+> = {
+  yandexPull: {
+    title: 'Yandex: Pull all',
+    settingCron: 'cronYandexPull',
+    enabledFlag: 'enableCronYandexPull',
+    prefixes: ['yandex.pull.', 'yandex.'],
+  },
+  yandexMatch: {
+    title: 'Yandex: Match',
+    settingCron: 'cronYandexMatch',
+    enabledFlag: 'enableCronYandexMatch',
+    prefixes: ['yandex.match.', 'yandex.'],
+  },
+  yandexPush: {
+    title: 'Yandex: Push',
+    settingCron: 'cronYandexPush',
+    enabledFlag: 'enableCronYandexPush',
+    prefixes: ['yandex.push.', 'yandex.'],
+  },
+  lidarrPull: {
+    title: 'Lidarr: Pull',
+    settingCron: 'cronLidarrPull',
+    enabledFlag: 'enableCronLidarrPull',
+    prefixes: ['lidarr.pull.'],
+  },
+  customMatch: {
+    title: 'Custom: Match MB',
+    settingCron: 'cronCustomMatch',
+    enabledFlag: 'enableCronCustomMatch',
+    prefixes: ['custom.match.', 'custom.'],
+  },
+  customPush: {
+    title: 'Custom: Push to Lidarr',
+    settingCron: 'cronCustomPush',
+    enabledFlag: 'enableCronCustomPush',
+    prefixes: ['custom.push.', 'custom.'],
+  },
+  backup: { title: 'Backup', settingCron: 'backupCron', enabledFlag: 'backupEnabled', prefixes: [] },
 };
 
 export async function getCronStatuses() {
@@ -352,6 +409,7 @@ export async function ensureNotBusyOrThrow(prefixes: string[], relatedJobKeys: J
   const busy = await isBusyNow(prefixes, relatedJobKeys);
   if (busy) {
     const p = prefixes.join(', ');
+    log.warn('busy: active run exists', 'cron.ensure.busy', { prefixes: p, relatedJobKeys });
     throw Object.assign(new Error(`Busy: active run for prefixes [${p}]`), { status: 409 });
   }
 }

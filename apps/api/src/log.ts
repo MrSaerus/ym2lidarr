@@ -1,9 +1,11 @@
 // apps/api/src/log.ts
 import { prisma } from './prisma';
 import { instanceId } from './instance';
+import { createLogger } from './lib/logger';
 
 type Json = Record<string, any>;
 const nowIso = () => new Date().toISOString();
+const syslog = createLogger({ scope: 'db.runlog' });
 
 export async function startRun(kind: string, initialStats: Json = {}) {
   const stats = {
@@ -11,57 +13,82 @@ export async function startRun(kind: string, initialStats: Json = {}) {
     instanceId,
     heartbeatAt: nowIso(),
   };
-  const run = await prisma.syncRun.create({
-    data: { kind, status: 'running', stats: JSON.stringify(stats) },
-  });
-  return run;
+  try {
+    const run = await prisma.syncRun.create({
+      data: { kind, status: 'running', stats: JSON.stringify(stats) },
+    });
+    syslog.info('run started', 'run.start', { runId: run.id, kind, statsKeys: Object.keys(initialStats || {}) });
+    return run;
+  } catch (e: any) {
+    syslog.error('run start failed', 'run.start.fail', { kind, err: e?.message || String(e) });
+    throw e;
+  }
 }
 
 export async function endRun(
-    runId: number,
-    status: 'ok' | 'error',
-    message?: string,
-    patchStats: Json = {},
+  runId: number,
+  status: 'ok' | 'error',
+  message?: string,
+  patchStats: Json = {},
 ) {
-  const run = await prisma.syncRun.findUnique({ where: { id: runId } });
-  const stats = safeMerge(run?.stats, { ...patchStats, heartbeatAt: nowIso() });
-  await prisma.syncRun.update({
-    where: { id: runId },
-    data: {
-      status,
-      message: message || undefined,
-      stats: JSON.stringify(stats),
-      finishedAt: new Date(),
-    },
-  });
+  try {
+    const run = await prisma.syncRun.findUnique({ where: { id: runId } });
+    const stats = safeMerge(run?.stats, { ...patchStats, heartbeatAt: nowIso() });
+    await prisma.syncRun.update({
+      where: { id: runId },
+      data: {
+        status,
+        message: message || undefined,
+        stats: JSON.stringify(stats),
+        finishedAt: new Date(),
+      },
+    });
+    syslog.info('run finished', 'run.end', { runId, status, hasMessage: !!message });
+  } catch (e: any) {
+    syslog.error('run finish failed', 'run.end.fail', { runId, status, err: e?.message || String(e) });
+    throw e;
+  }
 }
 
 export async function patchRunStats(runId: number, patch: Json) {
-  const run = await prisma.syncRun.findUnique({ where: { id: runId } });
-  const stats = safeMerge(run?.stats, { ...patch, heartbeatAt: nowIso() });
-  await prisma.syncRun.update({
-    where: { id: runId },
-    data: { stats: JSON.stringify(stats) },
-  });
+  try {
+    const run = await prisma.syncRun.findUnique({ where: { id: runId } });
+    const stats = safeMerge(run?.stats, { ...patch, heartbeatAt: nowIso() });
+    await prisma.syncRun.update({
+      where: { id: runId },
+      data: { stats: JSON.stringify(stats) },
+    });
+    syslog.debug('run stats patched', 'run.patch', { runId, keys: Object.keys(patch || {}) });
+  } catch (e: any) {
+    syslog.error('run patch failed', 'run.patch.fail', { runId, err: e?.message || String(e) });
+    throw e;
+  }
 }
 
 export async function log(
-    runId: number,
-    level: 'info' | 'warn' | 'error' | 'debug',
-    message: string,
-    data?: Json,
+  runId: number,
+  level: 'info' | 'warn' | 'error' | 'debug',
+  message: string,
+  data?: Json,
 ) {
-  await prisma.syncLog.create({
-    data: { runId, level, message, data: data ? JSON.stringify(data) : null },
-  });
+  try {
+    await prisma.syncLog.create({
+      data: { runId, level, message, data: data ? JSON.stringify(data) : null },
+    });
+    // echo в общий лог — чтобы было видно и вне UI
+    syslog.debug('run log appended', 'run.log.insert', { runId, level, hasData: !!data });
+  } catch (e: any) {
+    syslog.error('run log insert failed', 'run.log.insert.fail', { runId, level, err: e?.message || String(e) });
+    throw e;
+  }
 }
 
 function safeMerge(statsStr?: string | null, patch: Json = {}) {
   let base: Json = {};
   try {
     base = statsStr ? JSON.parse(statsStr) : {};
-  } catch (e) {
-    console.warn('[log] safeMerge parse failed:', e);
+  } catch (e: any) {
+    syslog.warn('stats parse failed, using empty base', 'run.stats.parse.fail', { err: e?.message || String(e) });
   }
   return { ...base, ...patch };
 }
