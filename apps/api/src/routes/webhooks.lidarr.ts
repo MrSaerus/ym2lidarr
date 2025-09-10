@@ -2,8 +2,10 @@
 import { Router } from 'express';
 import { QbtClient } from '../services/qbittorrent';
 import { prisma } from '../prisma';
+import { createLogger } from '../lib/logger';
 
 const r = Router();
+const log = createLogger({ scope: 'route.webhooks.lidarr' });
 
 /**
  * Минимальные типы под Lidarr webhook.
@@ -46,20 +48,35 @@ function normalizeHash(s?: string | null): string | null {
 }
 
 r.post('/lidarr', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
   try {
+    lg.info('incoming lidarr webhook', 'webhook.lidarr.start');
+
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
     const want = s?.qbtWebhookSecret;
     if (want) {
       const got = String(req.query.secret || '');
-        if (got !== want) return res.status(403).json({ ok: false, error: 'forbidden' });
+      if (got !== want) {
+        lg.warn('forbidden: secret mismatch', 'webhook.lidarr.forbidden');
+        return res.status(403).json({ ok: false, error: 'forbidden' });
+      }
     }
 
     const payload = req.body as LidarrDownloadEvent;
     if (!payload?.eventType) {
+      lg.warn('bad request: no eventType', 'webhook.lidarr.badpayload');
       return res.status(400).json({ ok: false, error: 'no eventType' });
     }
 
+    lg.debug('payload received', 'webhook.lidarr.payload', {
+      eventType: payload.eventType,
+      artist: payload.artist?.name,
+      album: payload.album?.title
+    });
+
     if (!isSuccessImport(payload)) {
+      lg.info('skipped non-success-import event', 'webhook.lidarr.skip.nonsuccess', { eventType: payload.eventType });
       return res.json({ ok: true, skipped: true, reason: 'not a success-import event' });
     }
 
@@ -69,13 +86,20 @@ r.post('/lidarr', async (req, res) => {
       normalizeHash(payload.torrentInfoHash || null);
 
     if (!hash) {
-      // Если хеш не пришёл, ничего не ломаем — просто логируем и отвечаем.
-      // (При желании тут можно сделать fallback-поиск по категории/пути.)
+      lg.info('skipped: no hash in payload', 'webhook.lidarr.skip.nohash', { eventType: payload.eventType });
       return res.json({ ok: true, skipped: true, reason: 'no hash in payload' });
     }
 
+    lg.info('deleting torrent in qbt', 'webhook.lidarr.qbt.delete.start', {
+      hash,
+      album: payload.album?.title,
+      artist: payload.artist?.name
+    });
+
     const { client, deleteFiles } = await QbtClient.fromDb();
     await client.deleteTorrents(hash, deleteFiles);
+
+    lg.info('qbt torrent deleted', 'webhook.lidarr.qbt.delete.done', { hash, deleteFiles });
 
     return res.json({
       ok: true,
@@ -86,6 +110,7 @@ r.post('/lidarr', async (req, res) => {
       album: payload.album?.title || null,
     });
   } catch (e: any) {
+    lg.error('webhook processing failed', 'webhook.lidarr.fail', { err: e?.message });
     return res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
