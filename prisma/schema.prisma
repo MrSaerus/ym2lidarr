@@ -57,6 +57,27 @@ model YandexAlbum {
   @@index([rgMbid])
 }
 
+model YandexTrack {
+  ymId        String    @id
+  title       String
+  artist      String?
+  album       String?
+  durationSec Int?
+  key         String    @unique
+  present     Boolean   @default(false)
+  lastSeenAt  DateTime?
+  yGone       Boolean   @default(false)
+  yGoneAt     DateTime?
+
+  // опционально для будущего матчинга
+  ymAlbumId  String?
+  ymArtistId String?
+  recMbid    String?
+  rgMbid     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
 // /* ===================== Ingest: Lidarr ===================== */
 
 model LidarrArtist {
