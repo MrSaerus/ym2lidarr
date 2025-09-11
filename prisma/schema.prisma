@@ -312,4 +312,12 @@ model Setting {
   qbtPass          String?
   qbtDeleteFiles   Boolean @default(true)
   qbtWebhookSecret String?
+
+  navidromeUrl              String?
+  navidromeUser             String?
+  navidromePass             String?
+  navidromeToken            String?
+  navidromeSalt             String?
+  navidromeSyncTarget       String? // 'artists' | 'albums' | 'tracks' | 'all'
+  likesPolicySourcePriority String? // 'yandex' | 'navidrome'
 }

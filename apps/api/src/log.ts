@@ -65,21 +65,34 @@ export async function patchRunStats(runId: number, patch: Json) {
   }
 }
 
+
 export async function log(
-  runId: number,
-  level: 'info' | 'warn' | 'error' | 'debug',
+  runId: number | null | undefined,
+  level: 'info'|'warn'|'error'|'debug',
   message: string,
-  data?: Json,
+  data?: any
 ) {
   try {
-    await prisma.syncLog.create({
-      data: { runId, level, message, data: data ? JSON.stringify(data) : null },
-    });
-    // echo в общий лог — чтобы было видно и вне UI
-    syslog.debug('run log appended', 'run.log.insert', { runId, level, hasData: !!data });
+    const payload: any = {
+      level,
+      message,
+      data: data != null ? JSON.stringify(data) : null,
+    };
+    if (typeof runId === 'number') {
+      payload.runId = runId; // только если есть валидный runId
+    }
+    await prisma.syncLog.create({ data: payload });
   } catch (e: any) {
-    syslog.error('run log insert failed', 'run.log.insert.fail', { runId, level, err: e?.message || String(e) });
-    throw e;
+    // чтобы сам логгер не падал маршруты: просто выведем в консоль
+    console.error(JSON.stringify({
+      ts: new Date().toISOString(),
+      level: 'info',
+      msg: 'run log insert failed',
+      scope: 'db.runlog',
+      evt: 'run.log.insert.fail',
+      runId: runId ?? null,
+      err: String(e?.message || e),
+    }));
   }
 }
 
