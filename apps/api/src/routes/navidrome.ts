@@ -4,6 +4,7 @@ import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
 import { runNavidromeApply } from '../workers/runNavidromeApply';
+import { startRun, patchRunStats } from '../log'; // ⟵ добавили
 
 export const navidromeRouter = Router();
 const log = createLogger({ scope: 'route.navidrome' });
@@ -24,6 +25,7 @@ function str(x: unknown): string {
   return typeof x === 'string' ? x.trim() : '';
 }
 
+/* ========== PLAN ========== */
 navidromeRouter.post(
   '/plan',
   async (req: Request<unknown, unknown, PlanBody>, res: Response, next: NextFunction) => {
@@ -47,6 +49,7 @@ navidromeRouter.post(
 
       log.info('navidrome plan requested', 'route.nav.plan.start', { target, policy, withNdState });
 
+      // План работает быстро — можем дождаться runId
       const runId = await runNavidromePlan({
         navUrl: url.replace(/\/+$/, ''),
         auth: token ? { user, token, salt } : { user, pass },
@@ -62,6 +65,7 @@ navidromeRouter.post(
   }
 );
 
+/* ========== APPLY (асинхронный ответ сразу) ========== */
 navidromeRouter.post(
   '/apply',
   async (req: Request<unknown, unknown, ApplyBody>, res: Response, next: NextFunction) => {
@@ -86,10 +90,34 @@ navidromeRouter.post(
 
       log.info('navidrome apply requested', 'route.nav.apply.start', { target, policy, withNdState, dryRun });
 
-      const runId = await runNavidromeApply({
-        navUrl: url,
-        auth: token ? { user, token, salt } : { user, pass },
-        target, policy, withNdState, dryRun,
+      // 1) сами создаём run заранее, чтобы вернуть runId сразу
+      const run = await startRun('navidrome.apply', {
+        phase: 'apply',
+        target, policy,
+        star_total: 0, star_done: 0,
+        unstar_total: 0, unstar_done: 0,
+        dryRun,
+      });
+      const runId = run?.id!;
+      if (!runId) {
+        res.status(500).json({ ok: false, error: 'failed to start run' });
+        return;
+      }
+
+      // (опционально) пометим начальные поля (если нужно)
+      await patchRunStats(runId, { phase: 'apply' });
+
+      // 2) запускаем работу асинхронно и сразу отвечаем клиенту
+      setImmediate(() => {
+        runNavidromeApply({
+          navUrl: url,
+          auth: token ? { user, token, salt } : { user, pass },
+          target, policy, withNdState, dryRun,
+          reuseRunId: runId,          // ⟵ важное нововведение
+        }).catch((e) => {
+          // логируем — чтобы не терять исключения
+          log.error('apply worker unhandled', 'route.nav.apply.spawn.fail', { err: e?.message || String(e) });
+        });
       });
 
       log.info('navidrome apply started', 'route.nav.apply.ok', { runId });

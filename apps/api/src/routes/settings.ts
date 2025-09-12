@@ -110,7 +110,7 @@ const ALLOWED_FIELDS = new Set([
   'qbtDeleteFiles',
   'qbtWebhookSecret',
 
-  // ===== Navidrome (новое) =====
+  // Navidrome
   'navidromeUrl',
   'navidromeUser',
   'navidromePass',
@@ -220,7 +220,7 @@ function pickSettings(input: any) {
   }
   if ('navidromeSyncTarget' in out) {
     const v = String(out.navidromeSyncTarget || '').toLowerCase();
-    out.navidromeSyncTarget = ['artists','albums'].includes(v) ? v : null;
+    out.navidromeSyncTarget = ['artists','albums','tracks','both'].includes(v) ? v : null;
   }
   if ('likesPolicySourcePriority' in out && typeof out.likesPolicySourcePriority === 'string') {
     out.likesPolicySourcePriority = out.likesPolicySourcePriority.trim() || null;
