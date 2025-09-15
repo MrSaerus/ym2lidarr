@@ -116,8 +116,8 @@ const ALLOWED_FIELDS = new Set([
   'navidromePass',
   'navidromeToken',
   'navidromeSalt',
-  'navidromeSyncTarget',            // 'artists' | 'albums'
-  'likesPolicySourcePriority',      // строка политики
+  'navidromeSyncTarget',            // 'artists' | 'albums' | 'tracks' | 'all'
+  'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
 ]);
 
 function trimToNull(v: unknown): string | null {
@@ -219,14 +219,16 @@ function pickSettings(input: any) {
     out.navidromeUrl = t || null;
   }
   if ('navidromeSyncTarget' in out) {
-    const v = String(out.navidromeSyncTarget || '').toLowerCase();
-    out.navidromeSyncTarget = ['artists','albums','tracks','both'].includes(v) ? v : null;
+    const v0 = String(out.navidromeSyncTarget || '').toLowerCase();
+    const v = (v0 === 'both') ? 'all' : v0;
+    out.navidromeSyncTarget = ['artists','albums','tracks','all'].includes(v) ? v : null;
   }
   if ('likesPolicySourcePriority' in out && typeof out.likesPolicySourcePriority === 'string') {
-    out.likesPolicySourcePriority = out.likesPolicySourcePriority.trim() || null;
+    const v = out.likesPolicySourcePriority.trim().toLowerCase();
+    out.likesPolicySourcePriority = ['yandex','navidrome'].includes(v) ? v : 'yandex';
   }
   if ('navidromeUser' in out)  out.navidromeUser  = trimToNull(out.navidromeUser);
-  if ('navidromePass' in out)  out.navidromePass  = typeof out.navidromePass === 'string' ? out.navidromePass : trimToNull(out.navidromePass);
+  if ('navidromePass' in out)  out.navidromePass  = trimToNull(out.navidromePass);          // пустая строка -> null
   if ('navidromeToken' in out) out.navidromeToken = trimToNull(out.navidromeToken);
   if ('navidromeSalt' in out)  out.navidromeSalt  = trimToNull(out.navidromeSalt);
 
@@ -285,8 +287,8 @@ async function saveSettingsHandler(req: any, res: any) {
   try {
     const data = pickSettings(req.body);
 
-    // Если хотите не затирать пароль Навидрома пустой строкой, раскомментируйте:
-    // if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
+    // не затираем пароль Навидрома пустой строкой
+    if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
 
     lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
 

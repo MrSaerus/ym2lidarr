@@ -1,4 +1,5 @@
 // apps/api/src/workers/runNavidromeApply.ts
+
 import { startRun, endRun, patchRunStats, log as dblog } from '../log';
 import { createLogger } from '../lib/logger';
 import { NavidromeClient, type NdAuth } from '../services/navidrome';
@@ -17,7 +18,8 @@ type ApplyOpts = {
   policy: Policy;
   withNdState?: boolean; // default true
   dryRun?: boolean;       // если true — только посчитать и залогировать
-  reuseRunId?: number;    // ⟵ новый: если есть — используем готовый run
+  reuseRunId?: number;    // если есть — используем готовый run
+  authPass?: string;      // необязательный пароль для фолбэка
 };
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -27,7 +29,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
 }
 
 export async function runNavidromeApply(opts: ApplyOpts) {
-  // если run уже создан роутом — используем его
   let runId: number;
   if (opts.reuseRunId) {
     runId = opts.reuseRunId;
@@ -51,6 +52,10 @@ export async function runNavidromeApply(opts: ApplyOpts) {
   }
 
   try {
+    // Ранний health-check авторизации, чтобы падать сразу, а не в середине
+    const preClient = new NavidromeClient(opts.navUrl, opts.auth, opts.authPass);
+    await preClient.ensureAuthHealthy();
+
     const plan = await computeNavidromePlan({
       navUrl: opts.navUrl,
       auth: opts.auth,
@@ -58,6 +63,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       policy: opts.policy,
       withNdState: opts.withNdState ?? true,
       resolveIds: true, // для apply резолвим ID
+      authPass: opts.authPass,
     });
 
     const starIds = plan.toStar;
@@ -75,9 +81,9 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
     await patchRunStats(runId, { star_total: starTotal, unstar_total: unTotal });
 
-    const client = new NavidromeClient(opts.navUrl, opts.auth);
+    const client = new NavidromeClient(opts.navUrl, opts.auth, opts.authPass);
+    await client.ensureAuthHealthy();
 
-    // промежуточные логи по подсекциям
     await dblog(runId, 'info', 'Apply plan prepared', {
       star: {
         artists: starIds.artistIds?.length || 0,
@@ -99,13 +105,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // STAR — artists
       if (starIds.artistIds?.length) {
-        await dblog(runId, 'info', 'Starring artists…', { count: starIds.artistIds.length });
+        await dblog(runId, 'info', 'Starring artists…', { count: starIds.artistIds.length, sample: starIds.artistIds.slice(0, 5) });
         for (const ids of chunk(starIds.artistIds, 200)) {
-          if (ids.length) await client.star({ artistIds: ids });
+          if (ids.length) {
+            const resp = await client.star({ artistIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Star artists batch', { size: ids.length, status });
+          }
           starDone += ids.length;
           if (starDone % 200 === 0) {
             await patchRunStats(runId, { star_done: starDone });
-            await dblog(runId, 'debug', 'Star artists progress', { done: starDone });
           }
         }
         await patchRunStats(runId, { star_done: starDone });
@@ -113,13 +122,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // STAR — albums
       if (starIds.albumIds?.length) {
-        await dblog(runId, 'info', 'Starring albums…', { count: starIds.albumIds.length });
+        await dblog(runId, 'info', 'Starring albums…', { count: starIds.albumIds.length, sample: starIds.albumIds.slice(0, 5) });
         for (const ids of chunk(starIds.albumIds, 200)) {
-          if (ids.length) await client.star({ albumIds: ids });
+          if (ids.length) {
+            const resp = await client.star({ albumIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Star albums batch', { size: ids.length, status });
+          }
           starDone += ids.length;
           if (starDone % 200 === 0) {
             await patchRunStats(runId, { star_done: starDone });
-            await dblog(runId, 'debug', 'Star albums progress', { done: starDone });
           }
         }
         await patchRunStats(runId, { star_done: starDone });
@@ -127,13 +139,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // STAR — songs
       if (starIds.songIds?.length) {
-        await dblog(runId, 'info', 'Starring songs…', { count: starIds.songIds.length });
+        await dblog(runId, 'info', 'Starring songs…', { count: starIds.songIds.length, sample: starIds.songIds.slice(0, 5) });
         for (const ids of chunk(starIds.songIds, 500)) {
-          if (ids.length) await client.star({ songIds: ids });
+          if (ids.length) {
+            const resp = await client.star({ songIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Star songs batch', { size: ids.length, status });
+          }
           starDone += ids.length;
           if (starDone % 500 === 0) {
             await patchRunStats(runId, { star_done: starDone });
-            await dblog(runId, 'debug', 'Star songs progress', { done: starDone });
           }
         }
         await patchRunStats(runId, { star_done: starDone });
@@ -141,13 +156,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // UNSTAR — artists
       if (unIds.artistIds?.length) {
-        await dblog(runId, 'info', 'Unstarring artists…', { count: unIds.artistIds.length });
+        await dblog(runId, 'info', 'Unstarring artists…', { count: unIds.artistIds.length, sample: unIds.artistIds.slice(0, 5) });
         for (const ids of chunk(unIds.artistIds, 200)) {
-          if (ids.length) await client.unstar({ artistIds: ids });
+          if (ids.length) {
+            const resp = await client.unstar({ artistIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Unstar artists batch', { size: ids.length, status });
+          }
           unDone += ids.length;
           if (unDone % 200 === 0) {
             await patchRunStats(runId, { unstar_done: unDone });
-            await dblog(runId, 'debug', 'Unstar artists progress', { done: unDone });
           }
         }
         await patchRunStats(runId, { unstar_done: unDone });
@@ -155,13 +173,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // UNSTAR — albums
       if (unIds.albumIds?.length) {
-        await dblog(runId, 'info', 'Unstarring albums…', { count: unIds.albumIds.length });
+        await dblog(runId, 'info', 'Unstarring albums…', { count: unIds.albumIds.length, sample: unIds.albumIds.slice(0, 5) });
         for (const ids of chunk(unIds.albumIds, 200)) {
-          if (ids.length) await client.unstar({ albumIds: ids });
+          if (ids.length) {
+            const resp = await client.unstar({ albumIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Unstar albums batch', { size: ids.length, status });
+          }
           unDone += ids.length;
           if (unDone % 200 === 0) {
             await patchRunStats(runId, { unstar_done: unDone });
-            await dblog(runId, 'debug', 'Unstar albums progress', { done: unDone });
           }
         }
         await patchRunStats(runId, { unstar_done: unDone });
@@ -169,13 +190,16 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
       // UNSTAR — songs
       if (unIds.songIds?.length) {
-        await dblog(runId, 'info', 'Unstarring songs…', { count: unIds.songIds.length });
+        await dblog(runId, 'info', 'Unstarring songs…', { count: unIds.songIds.length, sample: unIds.songIds.slice(0, 5) });
         for (const ids of chunk(unIds.songIds, 500)) {
-          if (ids.length) await client.unstar({ songIds: ids });
+          if (ids.length) {
+            const resp = await client.unstar({ songIds: ids });
+            const status = (resp as any)?.['subsonic-response']?.status || 'unknown';
+            await dblog(runId, 'debug', 'Unstar songs batch', { size: ids.length, status });
+          }
           unDone += ids.length;
           if (unDone % 500 === 0) {
             await patchRunStats(runId, { unstar_done: unDone });
-            await dblog(runId, 'debug', 'Unstar songs progress', { done: unDone });
           }
         }
         await patchRunStats(runId, { unstar_done: unDone });

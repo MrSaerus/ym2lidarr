@@ -1,10 +1,9 @@
-// apps/api/src/routes/navidrome.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
 import { runNavidromeApply } from '../workers/runNavidromeApply';
-import { startRun, patchRunStats } from '../log'; // ⟵ добавили
+import { startRun, patchRunStats } from '../log';
 
 export const navidromeRouter = Router();
 const log = createLogger({ scope: 'route.navidrome' });
@@ -15,7 +14,7 @@ type PlanBody = {
   navidromePass?: string;
   navidromeToken?: string;
   navidromeSalt?: string;
-  target?: 'artists' | 'albums' | 'tracks' | 'all';
+  target?: 'artists' | 'albums' | 'tracks' | 'all' | 'both'; // 'both' нормализуем в 'all'
   policy?: 'yandex' | 'navidrome';
   withNdState?: boolean;
 };
@@ -23,6 +22,20 @@ type ApplyBody = PlanBody & { dryRun?: boolean };
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x.trim() : '';
+}
+
+function normalizeTarget(t?: string | null): 'artists'|'albums'|'tracks'|'all' {
+  const v = String(t || '').toLowerCase();
+  const n = (v === 'both') ? 'all' : v;
+  return (['artists','albums','tracks','all'].includes(n) ? (n as any) : 'all');
+}
+
+function chooseAuth(user: string, pass: string, token: string, salt: string) {
+  // Приоритет — пароль, если он задан (надёжнее и подтверждён curl-тестом)
+  if (pass) return { user, pass } as const;
+  if (token && salt) return { user, token, salt } as const;
+  // fallback: если только token без salt — это заведомо плохо, не возвращаем
+  return { user, pass } as const; // пустой pass пусть отловится проверками выше
 }
 
 /* ========== PLAN ========== */
@@ -38,21 +51,20 @@ navidromeRouter.post(
       const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
       const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
 
-      if (!url || !user || (!pass && !token)) {
-        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass or token required' });
+      if (!url || !user || (!pass && !(token && salt))) {
+        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
         return;
       }
 
-      const target = (req.body?.target ?? setting?.navidromeSyncTarget ?? 'all') as 'artists'|'albums'|'tracks'|'all';
+      const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
       const policy = (req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex') as 'yandex'|'navidrome';
       const withNdState = req.body?.withNdState !== undefined ? !!req.body.withNdState : true;
 
       log.info('navidrome plan requested', 'route.nav.plan.start', { target, policy, withNdState });
 
-      // План работает быстро — можем дождаться runId
       const runId = await runNavidromePlan({
         navUrl: url.replace(/\/+$/, ''),
-        auth: token ? { user, token, salt } : { user, pass },
+        auth: chooseAuth(user, pass, token, salt),
         target, policy, withNdState,
       });
 
@@ -78,19 +90,18 @@ navidromeRouter.post(
       const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
       const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
 
-      if (!url || !user || (!pass && !token)) {
-        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass or token required' });
+      if (!url || !user || (!pass && !(token && salt))) {
+        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
         return;
       }
 
-      const target = (req.body?.target ?? setting?.navidromeSyncTarget ?? 'all') as 'artists'|'albums'|'tracks'|'all';
+      const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
       const policy = (req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex') as 'yandex'|'navidrome';
       const withNdState = req.body?.withNdState !== undefined ? !!req.body.withNdState : true;
       const dryRun = !!req.body?.dryRun;
 
       log.info('navidrome apply requested', 'route.nav.apply.start', { target, policy, withNdState, dryRun });
 
-      // 1) сами создаём run заранее, чтобы вернуть runId сразу
       const run = await startRun('navidrome.apply', {
         phase: 'apply',
         target, policy,
@@ -104,18 +115,19 @@ navidromeRouter.post(
         return;
       }
 
-      // (опционально) пометим начальные поля (если нужно)
       await patchRunStats(runId, { phase: 'apply' });
 
-      // 2) запускаем работу асинхронно и сразу отвечаем клиенту
+      const auth = chooseAuth(user, pass, token, salt);
+
       setImmediate(() => {
         runNavidromeApply({
           navUrl: url,
-          auth: token ? { user, token, salt } : { user, pass },
+          auth,
           target, policy, withNdState, dryRun,
-          reuseRunId: runId,          // ⟵ важное нововведение
-        }).catch((e) => {
-          // логируем — чтобы не терять исключения
+          reuseRunId: runId,
+          // пробросим пароль внутрь на случай фолбэка в сервисе
+          authPass: pass || undefined,
+        } as any).catch((e) => {
           log.error('apply worker unhandled', 'route.nav.apply.spawn.fail', { err: e?.message || String(e) });
         });
       });

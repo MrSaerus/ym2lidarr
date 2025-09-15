@@ -7,6 +7,13 @@ import { createLogger } from '../lib/logger';
 const log = createLogger({ scope: 'worker.nav.plan' });
 
 function nkey(s: string) { return (s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function songLooseKey(artist?: string | null, title?: string | null) {
+  return nkey(`${artist || ''}|||${title || ''}`);
+}
+function songFullKey(artist?: string | null, title?: string | null, dur?: number | null) {
+  const d = Number.isFinite(dur as any) ? (dur as number) : 0;
+  return nkey(`${artist || ''}|||${title || ''}|||${d}`);
+}
 
 async function parseRunStats(runId: number) {
   const r = await prisma.syncRun.findUnique({ where: { id: runId } });
@@ -27,10 +34,8 @@ export type PlanTarget = 'artists' | 'albums' | 'tracks' | 'all';
 export type Policy = 'yandex' | 'navidrome';
 
 export type ComputedPlan = {
-  // готовые ID к применению (могут быть пустыми, если resolveIds=false)
   toStar:   { artistIds: string[]; albumIds: string[]; songIds: string[] };
   toUnstar: { artistIds: string[]; albumIds: string[]; songIds: string[] };
-  // счётчики для лога
   counts: {
     wantArtists: number; wantAlbums: number; wantTracks: number;
     ndArtists: number; ndAlbums: number; ndSongs: number;
@@ -47,11 +52,14 @@ type ComputeOpts = {
   policy: Policy;
   withNdState?: boolean; // default true
   resolveIds?: boolean;  // default false — быстрый план
+  authPass?: string;     // необязательный пароль для фолбэка внутри клиента
 };
 
-/** Быстро считает дифф; по запросу может резолвить ID (для apply) */
 export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedPlan> {
-  const client = new NavidromeClient(opts.navUrl, opts.auth);
+  const client = new NavidromeClient(opts.navUrl, opts.auth, opts.authPass);
+
+  // 0) Проверим авторизацию заранее — паднёт рано, если что
+  await client.ensureAuthHealthy();
 
   // 1) желаемое состояние (ключи)
   const needArtists = opts.target === 'artists' || opts.target === 'all';
@@ -60,7 +68,10 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
 
   const wantArtists = new Set<string>();
   const wantAlbums  = new Set<string>();
-  const wantSongs   = new Set<string>();
+
+  // Для треков — два представления: loose (для диффа) и info (для резолва с длительностью)
+  const wantSongsLoose = new Set<string>();
+  const wantSongsInfo  = new Map<string, { artist: string, title: string, dur: number }>(); // looseKey -> info
 
   if (needArtists) {
     const rows = await prisma.yandexArtist.findMany({ where: { present: true, yGone: false }, select: { name: true } });
@@ -74,8 +85,11 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
     const rows = await prisma.yandexTrack.findMany({ where: { present: true, yGone: false }, select: { title: true, artist: true, durationSec: true } });
     for (const r of rows) {
       const dur = Number.isFinite(r.durationSec as any) ? (r.durationSec as number) : 0;
-      const k = nkey(`${r.artist}|||${r.title}|||${dur}`);
-      if (k) wantSongs.add(k);
+      const loose = songLooseKey(r.artist, r.title);
+      if (loose) {
+        wantSongsLoose.add(loose);
+        wantSongsInfo.set(loose, { artist: r.artist || '', title: r.title, dur });
+      }
     }
   }
 
@@ -83,15 +97,19 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const compareNd = !!(opts.withNdState ?? true);
   const ndArtists = new Map<string, string>();
   const ndAlbums  = new Map<string, string>();
-  const ndSongs   = new Map<string, string>();
+  const ndSongsLoose = new Map<string, string[]>(); // looseKey -> [songId...]
 
   if (compareNd) {
     const cur = await client.getStarred2();
     for (const a of cur.artists) ndArtists.set(nkey(a.name), a.id);
     for (const al of cur.albums) ndAlbums.set(nkey(`${al.artist}|||${al.name}`), al.id);
+
     for (const s of cur.songs) {
-      const dur = Number.isFinite(s.duration as any) ? (s.duration as number) : 0;
-      ndSongs.set(nkey(`${s.artist}|||${s.title}|||${dur}`), s.id);
+      const loose = songLooseKey(s.artist, s.title);
+      if (!loose) continue;
+      const arr = ndSongsLoose.get(loose) || [];
+      arr.push(s.id);
+      ndSongsLoose.set(loose, arr);
     }
   }
 
@@ -102,8 +120,9 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const starAlbumKeys = needAlbums
     ? (compareNd ? [...wantAlbums].filter(k => !ndAlbums.has(k)) : [...wantAlbums])
     : [];
-  const starSongKeys = needTracks
-    ? (compareNd ? [...wantSongs].filter(k => !ndSongs.has(k)) : [...wantSongs])
+  // треки — по looseKey
+  const starSongLoose = needTracks
+    ? (compareNd ? [...wantSongsLoose].filter(k => !ndSongsLoose.has(k)) : [...wantSongsLoose])
     : [];
 
   const unArtistKeys = compareNd && (opts.policy === 'yandex') && needArtists
@@ -112,8 +131,9 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const unAlbumKeys = compareNd && (opts.policy === 'yandex') && needAlbums
     ? [...ndAlbums.keys()].filter(k => !wantAlbums.has(k))
     : [];
-  const unSongKeys = compareNd && (opts.policy === 'yandex') && needTracks
-    ? [...ndSongs.keys()].filter(k => !wantSongs.has(k))
+  // треки — по looseKey
+  const unSongLoose = compareNd && (opts.policy === 'yandex') && needTracks
+    ? [...ndSongsLoose.keys()].filter(k => !wantSongsLoose.has(k))
     : [];
 
   // 4) при необходимости резолвим ID (для apply); для unstar ID берём из ND
@@ -121,12 +141,11 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const toUnstar = {
     artistIds: unArtistKeys.map(k => ndArtists.get(k)!).filter(Boolean),
     albumIds:  unAlbumKeys.map(k => ndAlbums.get(k)!).filter(Boolean),
-    songIds:   unSongKeys.map(k => ndSongs.get(k)!).filter(Boolean),
+    songIds:   unSongLoose.flatMap(k => ndSongsLoose.get(k) || []),
   };
 
   let unresolved = 0;
   if (opts.resolveIds) {
-    // artists
     if (starArtistKeys.length) {
       const map = await client.resolveArtistIdsByKeys(starArtistKeys);
       for (const k of starArtistKeys) {
@@ -134,7 +153,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
         if (id) toStar.artistIds.push(id); else unresolved++;
       }
     }
-    // albums
     if (starAlbumKeys.length) {
       const map = await client.resolveAlbumIdsByKeys(starAlbumKeys);
       for (const k of starAlbumKeys) {
@@ -142,11 +160,17 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
         if (id) toStar.albumIds.push(id); else unresolved++;
       }
     }
-    // songs
-    if (starSongKeys.length) {
-      const map = await client.resolveSongIdsByKeys(starSongKeys);
-      for (const k of starSongKeys) {
-        const id = map.get(k);
+    if (starSongLoose.length) {
+      // преобразуем в full-keys для резолвера (чтобы учесть длительность на этапе поиска ID)
+      const fullKeys: string[] = [];
+      for (const loose of starSongLoose) {
+        const info = wantSongsInfo.get(loose);
+        if (!info) { unresolved++; continue; }
+        fullKeys.push(songFullKey(info.artist, info.title, info.dur));
+      }
+      const map = await client.resolveSongIdsByKeys(fullKeys);
+      for (const fk of fullKeys) {
+        const id = map.get(fk);
         if (id) toStar.songIds.push(id); else unresolved++;
       }
     }
@@ -158,16 +182,16 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
     counts: {
       wantArtists: wantArtists.size,
       wantAlbums:  wantAlbums.size,
-      wantTracks:  wantSongs.size,
+      wantTracks:  wantSongsLoose.size,
       ndArtists:   ndArtists.size,
       ndAlbums:    ndAlbums.size,
-      ndSongs:     ndSongs.size,
+      ndSongs:     ndSongsLoose.size,
       toStarArtists:  starArtistKeys.length,
       toStarAlbums:   starAlbumKeys.length,
-      toStarSongs:    starSongKeys.length,
+      toStarSongs:    starSongLoose.length,
       toUnstarArtists: unArtistKeys.length,
       toUnstarAlbums:  unAlbumKeys.length,
-      toUnstarSongs:   unSongKeys.length,
+      toUnstarSongs:   unSongLoose.length,
       unresolved,
     },
   };
@@ -180,6 +204,7 @@ export async function runNavidromePlan(params: {
   target: PlanTarget;
   policy: Policy;
   withNdState?: boolean;
+  authPass?: string;
 }) {
   const run = await startRun('navidrome.plan', {
     phase: 'plan',
@@ -201,7 +226,8 @@ export async function runNavidromePlan(params: {
       target: params.target,
       policy: params.policy,
       withNdState: params.withNdState ?? true,
-      resolveIds: false, // ВАЖНО: быстрый план
+      resolveIds: false,
+      authPass: (params as any).authPass,
     });
 
     await patchRunStats(runId, {
