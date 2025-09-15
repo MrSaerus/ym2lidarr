@@ -1,4 +1,3 @@
-// apps/api/src/services/navidrome.ts
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
 
@@ -17,15 +16,14 @@ export class NavidromeClient {
   private auth: NdAuth;
   private client: string;
   private apiVer: string;
-  // необязательный пароль для фолбэка при неудаче по токену
-  private __passFallback?: string;
+  private authPass?: string;
 
-  constructor(baseUrl: string, auth: NdAuth, passFallback?: string) {
+  constructor(baseUrl: string, auth: NdAuth, authPass?: string) {
     this.base = (baseUrl || '').replace(/\/+$/, '');
     this.auth = auth;
     this.client = auth.client || 'YM2LIDARR';
     this.apiVer = auth.apiVer || '1.16.1';
-    this.__passFallback = passFallback;
+    this.authPass = authPass;
   }
 
   /** Базовые auth-параметры, чтобы можно было APPEND тех же ключей много раз */
@@ -85,29 +83,16 @@ export class NavidromeClient {
     }
   }
 
+  async ensureAuthHealthy() {
+    const r = await this.get('ping');
+    const ok = !!r?.['subsonic-response']?.status && r['subsonic-response'].status !== 'failed';
+    if (!ok) throw new Error('Navidrome auth failed');
+    log.info('Navidrome auth OK', 'nd.auth.ok', { via: ('pass' in this.auth) ? 'pass' : 'token' });
+  }
+
   async ping() {
     const r = await this.get('ping');
     return !!r?.['subsonic-response']?.status && r['subsonic-response'].status !== 'failed';
-  }
-
-  /** Проверяем авторизацию, при неудаче по токену фолбэкаемся на пароль (если есть) */
-  async ensureAuthHealthy(): Promise<'token'|'pass'> {
-    if (await this.ping()) {
-      const via = ('pass' in this.auth) ? 'pass' : 'token';
-      log.info('Navidrome auth OK', 'nd.auth.ok', { via });
-      return via;
-    }
-    // если сейчас token и есть запасной пароль — попробуем им
-    if (('token' in this.auth) && this.__passFallback) {
-      const prev = this.auth;
-      this.auth = { user: this.auth.user, pass: this.__passFallback, client: this.client, apiVer: this.apiVer };
-      if (await this.ping()) {
-        log.warn('Token auth failed, switched to pass', 'nd.auth.switch', { from: 'token', to: 'pass' });
-        return 'pass';
-      }
-      this.auth = prev;
-    }
-    throw new Error('Navidrome auth failed (ping status!=ok)');
   }
 
   async getStarred2() {
@@ -117,6 +102,20 @@ export class NavidromeClient {
     const albums: Array<{ id: string; name: string; artist: string }> = root.album || [];
     const songs: Array<{ id: string; title: string; artist: string; album?: string; duration?: number }> = root.song || [];
     return { artists, albums, songs };
+  }
+
+  // --- Метаданные по ID (для красивых логов) ---
+  async getSong(id: string) {
+    const r = await this.get('getSong', { id });
+    return r?.['subsonic-response']?.song;
+  }
+  async getAlbum(id: string) {
+    const r = await this.get('getAlbum', { id });
+    return r?.['subsonic-response']?.album;
+  }
+  async getArtist(id: string) {
+    const r = await this.get('getArtist', { id });
+    return r?.['subsonic-response']?.artist;
   }
 
   // Чуть увеличим выборку — резолв будет устойчивее
