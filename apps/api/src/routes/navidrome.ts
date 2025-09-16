@@ -39,107 +39,98 @@ function chooseAuth(user: string, pass: string, token: string, salt: string) {
   return { user, pass } as const; // пустой pass пусть отловится проверками выше
 }
 
-/* ========== PLAN ========== */
-navidromeRouter.post(
-  '/plan',
-  async (req: Request<unknown, unknown, PlanBody>, res: Response, next: NextFunction) => {
-    try {
-      const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+/* ========== PLAN (новая логика) ========== */
+navidromeRouter.post('/plan', async (req, res, next) => {
+  try {
+    const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-      const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl);
-      const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
-      const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
-      const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
-      const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
+    const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl);
+    const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
+    const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
+    const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
+    const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
 
-      if (!url || !user || (!pass && !(token && salt))) {
-        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
-        return;
-      }
-
-      const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
-      const policy = (req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex') as 'yandex'|'navidrome';
-      const withNdState = req.body?.withNdState !== undefined ? !!req.body.withNdState : true;
-
-      log.info('navidrome plan requested', 'route.nav.plan.start', { target, policy, withNdState });
-
-      const runId = await runNavidromePlan({
-        navUrl: url.replace(/\/+$/, ''),
-        auth: chooseAuth(user, pass, token, salt),
-        target, policy, withNdState,
-      });
-
-      log.info('navidrome plan started', 'route.nav.plan.ok', { runId });
-      res.json({ ok: true, runId });
-    } catch (e: any) {
-      log.error('plan route failed', 'route.nav.plan.fail', { err: e?.message || String(e) });
-      next(e);
+    if (!url || !user || (!pass && !(token && salt))) {
+      res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
+      return;
     }
+
+    const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
+    const auth = chooseAuth(user, pass, token, salt);
+
+    log.info('navidrome plan requested (new logic)', 'route.nav.plan.start', { target });
+
+    const runId = await runNavidromePlan({
+      navUrl: url.replace(/\/+$/, ''),
+      auth,
+      target,
+    });
+
+    log.info('navidrome plan started', 'route.nav.plan.ok', { runId });
+    res.json({ ok: true, runId });
+  } catch (e: any) {
+    log.error('plan route failed', 'route.nav.plan.fail', { err: e?.message || String(e) });
+    next(e);
   }
-);
+});
 
-/* ========== APPLY (асинхронный ответ сразу) ========== */
-navidromeRouter.post(
-  '/apply',
-  async (req: Request<unknown, unknown, ApplyBody>, res: Response, next: NextFunction) => {
-    try {
-      const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+/* ========== APPLY (новая логика) ========== */
+navidromeRouter.post('/apply', async (req, res, next) => {
+  try {
+    const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-      const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl).replace(/\/+$/, '');
-      const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
-      const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
-      const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
-      const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
+    const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl).replace(/\/+$/, '');
+    const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
+    const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
+    const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
+    const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
 
-      if (!url || !user || (!pass && !(token && salt))) {
-        res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
-        return;
-      }
+    if (!url || !user || (!pass && !(token && salt))) {
+      res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
+      return;
+    }
 
-      const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
-      const policy = (req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex') as 'yandex'|'navidrome';
-      const withNdState = req.body?.withNdState !== undefined ? !!req.body.withNdState : true;
-      const dryRun = !!req.body?.dryRun;
+    const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
+    const dryRun = !!req.body?.dryRun;
+    const auth = chooseAuth(user, pass, token, salt);
 
-      log.info('navidrome apply requested', 'route.nav.apply.start', { target, policy, withNdState, dryRun });
+    log.info('navidrome apply requested (new logic)', 'route.nav.apply.start', { target, dryRun });
 
-      const run = await startRun('navidrome.apply', {
-        phase: 'apply',
-        target, policy,
-        star_total: 0, star_done: 0,
-        unstar_total: 0, unstar_done: 0,
+    const run = await startRun('navidrome.apply', {
+      phase: 'apply',
+      target,
+      policy: 'n/a',
+      star_total: 0, star_done: 0,
+      unstar_total: 0, unstar_done: 0,
+      dryRun,
+    });
+    const runId = run?.id!;
+    if (!runId) {
+      res.status(500).json({ ok: false, error: 'failed to start run' });
+      return;
+    }
+
+    await patchRunStats(runId, { phase: 'apply' });
+
+    setImmediate(() => {
+      runNavidromeApply({
+        navUrl: url,
+        auth,
+        target,
         dryRun,
+        reuseRunId: runId,
+        authPass: pass || undefined,
+      } as any).catch((e) => {
+        log.error('apply worker unhandled', 'route.nav.apply.spawn.fail', { err: e?.message || String(e) });
       });
-      const runId = run?.id!;
-      if (!runId) {
-        res.status(500).json({ ok: false, error: 'failed to start run' });
-        return;
-      }
+    });
 
-      await patchRunStats(runId, { phase: 'apply' });
-
-      const auth = chooseAuth(user, pass, token, salt);
-
-      setImmediate(() => {
-        runNavidromeApply({
-          navUrl: url,
-          auth,
-          target, policy, withNdState, dryRun,
-          reuseRunId: runId,
-          // пробросим пароль внутрь на случай фолбэка в сервисе
-          authPass: pass || undefined,
-        } as any).catch((e) => {
-          log.error('apply worker unhandled', 'route.nav.apply.spawn.fail', { err: e?.message || String(e) });
-        });
-      });
-
-      log.info('navidrome apply started', 'route.nav.apply.ok', { runId });
-      res.json({ ok: true, runId });
-    } catch (e: any) {
-      log.error('apply route failed', 'route.nav.apply.fail', { err: e?.message || String(e) });
-      next(e);
-    }
+    log.info('navidrome apply started', 'route.nav.apply.ok', { runId });
+    res.json({ ok: true, runId });
+  } catch (e: any) {
+    log.error('apply route failed', 'route.nav.apply.fail', { err: e?.message || String(e) });
+    next(e);
   }
-);
+});
 
 export default navidromeRouter;

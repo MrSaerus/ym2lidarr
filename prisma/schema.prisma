@@ -24,12 +24,14 @@ model YandexArtist {
   createdAt  DateTime  @default(now())
 
   mbid String?
+  ndId String?
 
   albums YandexAlbum[]
 
   @@index([name])
   @@index([present])
   @@index([mbid])
+  @@index([ndId])
 }
 
 model YandexAlbum {
@@ -51,11 +53,13 @@ model YandexAlbum {
   artistRef      YandexArtist? @relation(fields: [yandexArtistId], references: [ymId], onDelete: SetNull)
 
   rgMbid String?
+  ndId   String?
 
   @@index([title])
   @@index([present])
   @@index([yandexArtistId])
   @@index([rgMbid])
+  @@index([ndId])
 }
 
 model YandexTrack {
