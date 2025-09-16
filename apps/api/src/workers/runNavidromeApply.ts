@@ -184,6 +184,36 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
     // ===== Подтверждение через getStarred2 + фиксация LikeSync
     const after = await client.getStarred2();
+
+    // Индексы метаданных по songId из getStarred2 (для STAR OK)
+    const songMetaById = new Map<string, { artist?: string; album?: string; title?: string }>();
+    for (const s of after.songs || []) {
+      songMetaById.set(s.id, { artist: s.artist, album: s.album, title: s.title });
+    }
+
+    // Кэш для точечного получения меты песни при FAIL
+    const getSongCache = new Map<string, { artist?: string; album?: string; title?: string }>();
+    async function getSongMeta(id: string) {
+      if (getSongCache.has(id)) return getSongCache.get(id)!;
+      try {
+        const s = await client.getSong(id);
+        const meta = { artist: s?.artist as (string|undefined), album: s?.album as (string|undefined), title: s?.title as (string|undefined) };
+        getSongCache.set(id, meta);
+        return meta;
+      } catch {
+        const meta = { artist: undefined, album: undefined, title: undefined };
+        getSongCache.set(id, meta);
+        return meta;
+      }
+    }
+
+    function fmtAAT(a?: string|null, al?: string|null, t?: string|null) {
+      const aa = (a ?? '').trim() || '-';
+      const alb = (al ?? '').trim() || '-';
+      const tt = (t ?? '').trim() || '-';
+      return `${aa} — ${alb} — ${tt}`;
+    }
+
     const starredSongIds = new Set((after.songs || []).map(s => s.id));
     await dblog(runId, 'info', 'Navidrome starred after-apply', { songs: after.songs?.length || 0 });
 
@@ -192,16 +222,19 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
     for (const row of plan.starSongMap) {
       if (!row.ndSongId) {
-        await dblog(runId, 'info', 'STAR SKIP (no ND id)', {
-          ymId: row.ymId, artist: row.artist, title: row.title, dur: row.durationSec,
+        const msgSuffix = fmtAAT(row.artist, '-', row.title);
+        await dblog(runId, 'info', `STAR SKIP (no ND id) — ${msgSuffix}`, {
+          ymId: row.ymId, artist: row.artist, album: null, title: row.title, dur: row.durationSec,
         });
         continue;
       }
       const ok = starredSongIds.has(row.ndSongId);
       if (ok) {
         perItemOk++;
-        await dblog(runId, 'info', 'STAR OK (song)', {
-          ymId: row.ymId, ndId: row.ndSongId, artist: row.artist, title: row.title, dur: row.durationSec,
+        const meta = songMetaById.get(row.ndSongId) || {};
+        const msgSuffix = fmtAAT(meta.artist ?? row.artist, meta.album, meta.title ?? row.title);
+        await dblog(runId, 'info', `STAR OK (song) — ${msgSuffix}`, {
+          ymId: row.ymId, ndId: row.ndSongId, artist: meta.artist ?? row.artist, album: meta.album ?? null, title: meta.title ?? row.title, dur: row.durationSec,
         });
         await prisma.yandexLikeSync.upsert({
           where: { kind_ymId: { kind: 'track', ymId: row.ymId } },
@@ -210,8 +243,10 @@ export async function runNavidromeApply(opts: ApplyOpts) {
         });
       } else {
         perItemFail++;
-        await dblog(runId, 'info', 'STAR FAIL (not starred in ND)', {
-          ymId: row.ymId, ndId: row.ndSongId, artist: row.artist, title: row.title, dur: row.durationSec,
+        const meta = await getSongMeta(row.ndSongId);
+        const msgSuffix = fmtAAT(meta.artist ?? row.artist, meta.album, meta.title ?? row.title);
+        await dblog(runId, 'info', `STAR FAIL (not starred in ND) — ${msgSuffix}`, {
+          ymId: row.ymId, ndId: row.ndSongId, artist: meta.artist ?? row.artist, album: meta.album ?? null, title: meta.title ?? row.title, dur: row.durationSec,
         });
         await prisma.yandexLikeSync.upsert({
           where: { kind_ymId: { kind: 'track', ymId: row.ymId } },
