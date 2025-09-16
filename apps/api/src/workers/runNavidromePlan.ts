@@ -7,28 +7,6 @@ import { createLogger } from '../lib/logger';
 const log = createLogger({ scope: 'worker.nav.plan' });
 
 function nkey(s: string) { return (s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
-function songLooseKey(artist?: string | null, title?: string | null) {
-  return nkey(`${artist || ''}|||${title || ''}`);
-}
-function songFullKey(artist?: string | null, title?: string | null, dur?: number | null) {
-  const d = Number.isFinite(dur as any) ? (dur as number) : 0;
-  return nkey(`${artist || ''}|||${title || ''}|||${d}`);
-}
-
-async function parseRunStats(runId: number) {
-  const r = await prisma.syncRun.findUnique({ where: { id: runId } });
-  try { return r?.stats ? JSON.parse(r.stats) : {}; } catch { return {}; }
-}
-async function bailIfCancelled(runId: number, phase?: string) {
-  const s = await parseRunStats(runId);
-  if (s?.cancel) {
-    await dblog(runId, 'warn', 'Cancelled by user', phase ? { phase } : undefined);
-    await patchRunStats(runId, { phase: 'cancelled' });
-    await endRun(runId, 'error', 'Cancelled by user');
-    return true;
-  }
-  return false;
-}
 
 export type PlanTarget = 'artists' | 'albums' | 'tracks' | 'all';
 export type Policy = 'yandex' | 'navidrome';
@@ -36,6 +14,15 @@ export type Policy = 'yandex' | 'navidrome';
 export type ComputedPlan = {
   toStar:   { artistIds: string[]; albumIds: string[]; songIds: string[] };
   toUnstar: { artistIds: string[]; albumIds: string[]; songIds: string[] };
+  /** YM→ND карта только для «к лайку» треков, чтобы красиво логировать и потом подтвердить */
+  starSongMap: Array<{
+    ymId: string;
+    key: string;
+    ndSongId?: string;
+    artist: string;
+    title: string;
+    durationSec: number;
+  }>;
   counts: {
     wantArtists: number; wantAlbums: number; wantTracks: number;
     ndArtists: number; ndAlbums: number; ndSongs: number;
@@ -51,17 +38,13 @@ type ComputeOpts = {
   target: PlanTarget;
   policy: Policy;
   withNdState?: boolean; // default true
-  resolveIds?: boolean;  // default false — быстрый план
-  authPass?: string;     // необязательный пароль для фолбэка внутри клиента
+  resolveIds?: boolean;  // default false
+  authPass?: string;
 };
 
 export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedPlan> {
-  const client = new NavidromeClient(opts.navUrl, opts.auth, opts.authPass);
+  const client = new NavidromeClient(opts.navUrl, opts.auth);
 
-  // 0) Проверим авторизацию заранее — паднёт рано, если что
-  await client.ensureAuthHealthy();
-
-  // 1) желаемое состояние (ключи)
   const needArtists = opts.target === 'artists' || opts.target === 'all';
   const needAlbums  = opts.target === 'albums'  || opts.target === 'all';
   const needTracks  = opts.target === 'tracks'  || opts.target === 'all';
@@ -69,60 +52,92 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const wantArtists = new Set<string>();
   const wantAlbums  = new Set<string>();
 
-  // Для треков — два представления: loose (для диффа) и info (для резолва с длительностью)
-  const wantSongsLoose = new Set<string>();
-  const wantSongsInfo  = new Map<string, { artist: string, title: string, dur: number }>(); // looseKey -> info
-
   if (needArtists) {
     const rows = await prisma.yandexArtist.findMany({ where: { present: true, yGone: false }, select: { name: true } });
     for (const r of rows) { const k = nkey(r.name); if (k) wantArtists.add(k); }
   }
+
   if (needAlbums) {
     const rows = await prisma.yandexAlbum.findMany({ where: { present: true, yGone: false }, select: { title: true, artist: true } });
     for (const r of rows) { const k = nkey(`${r.artist}|||${r.title}`); if (k) wantAlbums.add(k); }
   }
-  if (needTracks) {
-    const rows = await prisma.yandexTrack.findMany({ where: { present: true, yGone: false }, select: { title: true, artist: true, durationSec: true } });
-    for (const r of rows) {
-      const dur = Number.isFinite(r.durationSec as any) ? (r.durationSec as number) : 0;
-      const loose = songLooseKey(r.artist, r.title);
-      if (loose) {
-        wantSongsLoose.add(loose);
-        wantSongsInfo.set(loose, { artist: r.artist || '', title: r.title, dur });
-      }
-    }
-  }
 
-  // 2) текущее состояние ND (звёздочки)
+  // --- текущее состояние ND (нужно до треков, чтобы учитывать ndId из LikeSync)
   const compareNd = !!(opts.withNdState ?? true);
   const ndArtists = new Map<string, string>();
   const ndAlbums  = new Map<string, string>();
-  const ndSongsLoose = new Map<string, string[]>(); // looseKey -> [songId...]
+  const ndSongsByKey = new Map<string, string>();
+  const ndStarredIds = new Set<string>();
 
   if (compareNd) {
     const cur = await client.getStarred2();
     for (const a of cur.artists) ndArtists.set(nkey(a.name), a.id);
     for (const al of cur.albums) ndAlbums.set(nkey(`${al.artist}|||${al.name}`), al.id);
-
     for (const s of cur.songs) {
-      const loose = songLooseKey(s.artist, s.title);
-      if (!loose) continue;
-      const arr = ndSongsLoose.get(loose) || [];
-      arr.push(s.id);
-      ndSongsLoose.set(loose, arr);
+      const dur = Number.isFinite(s.duration as any) ? (s.duration as number) : 0;
+      const k = nkey(`${s.artist}|||${s.title}|||${dur}`);
+      ndSongsByKey.set(k, s.id);
+      ndStarredIds.add(s.id);
     }
   }
 
-  // 3) дифф по ключам
+  // --- треки: готовим метаданные + LikeSync, чтобы отсечь уже синхронизированные
+  const wantSongs = new Set<string>();
+  const trackMetaByKey = new Map<string, { ymId: string; artist: string; title: string; durationSec: number }>();
+  const ymRows = needTracks
+    ? await prisma.yandexTrack.findMany({
+      where: { present: true, yGone: false },
+      select: { ymId: true, title: true, artist: true, durationSec: true },
+    })
+    : [];
+
+  // LikeSync для этих YM
+  const lsRows = needTracks && ymRows.length
+    ? await prisma.yandexLikeSync.findMany({
+      where: { kind: 'track', ymId: { in: ymRows.map(r => r.ymId) } },
+      select: { ymId: true, status: true, ndId: true },
+    })
+    : [];
+
+  const lsByYm = new Map<string, { status?: string | null; ndId?: string | null }>();
+  for (const r of lsRows) lsByYm.set(r.ymId, { status: r.status, ndId: r.ndId });
+
+  if (needTracks) {
+    for (const r of ymRows) {
+      const dur = Number.isFinite(r.durationSec as any) ? (r.durationSec as number) : 0;
+      const k = nkey(`${r.artist || ''}|||${r.title}|||${dur}`);
+
+      const ls = lsByYm.get(r.ymId);
+      const alreadySynced =
+        ls?.status === 'synced' &&
+        // если есть ndId и он реально звёздный — точно пропускаем
+        (ls.ndId ? ndStarredIds.has(ls.ndId) || !compareNd : true);
+
+      if (alreadySynced) {
+        // ничего не хотим для этого YM — он уже подтверждён как синхронизированный
+        continue;
+      }
+
+      // иначе — включаем в цели
+      wantSongs.add(k);
+      trackMetaByKey.set(k, {
+        ymId: r.ymId,
+        artist: r.artist || '',
+        title: r.title,
+        durationSec: dur,
+      });
+    }
+  }
+
+  // --- дифф по ключам
   const starArtistKeys = needArtists
     ? (compareNd ? [...wantArtists].filter(k => !ndArtists.has(k)) : [...wantArtists])
     : [];
   const starAlbumKeys = needAlbums
     ? (compareNd ? [...wantAlbums].filter(k => !ndAlbums.has(k)) : [...wantAlbums])
     : [];
-  // треки — по looseKey
-  const starSongLoose = needTracks
-    ? (compareNd ? [...wantSongsLoose].filter(k => !ndSongsLoose.has(k)) : [...wantSongsLoose])
+  const starSongKeys = needTracks
+    ? (compareNd ? [...wantSongs].filter(k => !ndSongsByKey.has(k)) : [...wantSongs])
     : [];
 
   const unArtistKeys = compareNd && (opts.policy === 'yandex') && needArtists
@@ -131,47 +146,66 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const unAlbumKeys = compareNd && (opts.policy === 'yandex') && needAlbums
     ? [...ndAlbums.keys()].filter(k => !wantAlbums.has(k))
     : [];
-  // треки — по looseKey
-  const unSongLoose = compareNd && (opts.policy === 'yandex') && needTracks
-    ? [...ndSongsLoose.keys()].filter(k => !wantSongsLoose.has(k))
+  const unSongKeys = compareNd && (opts.policy === 'yandex') && needTracks
+    ? [...ndSongsByKey.keys()].filter(k => !wantSongs.has(k))
     : [];
 
-  // 4) при необходимости резолвим ID (для apply); для unstar ID берём из ND
+  // --- при необходимости резолвим ID
   const toStar = { artistIds: [] as string[], albumIds: [] as string[], songIds: [] as string[] };
   const toUnstar = {
     artistIds: unArtistKeys.map(k => ndArtists.get(k)!).filter(Boolean),
     albumIds:  unAlbumKeys.map(k => ndAlbums.get(k)!).filter(Boolean),
-    songIds:   unSongLoose.flatMap(k => ndSongsLoose.get(k) || []),
+    songIds:   unSongKeys.map(k => ndSongsByKey.get(k)!).filter(Boolean),
   };
 
+  const starSongMap: ComputedPlan['starSongMap'] = [];
   let unresolved = 0;
+
   if (opts.resolveIds) {
+    const client2 = client;
+
     if (starArtistKeys.length) {
-      const map = await client.resolveArtistIdsByKeys(starArtistKeys);
+      const map = await client2.resolveArtistIdsByKeys(starArtistKeys);
       for (const k of starArtistKeys) {
         const id = map.get(k);
         if (id) toStar.artistIds.push(id); else unresolved++;
       }
     }
     if (starAlbumKeys.length) {
-      const map = await client.resolveAlbumIdsByKeys(starAlbumKeys);
+      const map = await client2.resolveAlbumIdsByKeys(starAlbumKeys);
       for (const k of starAlbumKeys) {
         const id = map.get(k);
         if (id) toStar.albumIds.push(id); else unresolved++;
       }
     }
-    if (starSongLoose.length) {
-      // преобразуем в full-keys для резолвера (чтобы учесть длительность на этапе поиска ID)
-      const fullKeys: string[] = [];
-      for (const loose of starSongLoose) {
-        const info = wantSongsInfo.get(loose);
-        if (!info) { unresolved++; continue; }
-        fullKeys.push(songFullKey(info.artist, info.title, info.dur));
-      }
-      const map = await client.resolveSongIdsByKeys(fullKeys);
-      for (const fk of fullKeys) {
-        const id = map.get(fk);
-        if (id) toStar.songIds.push(id); else unresolved++;
+    if (starSongKeys.length) {
+      const map = await client2.resolveSongIdsByKeys(starSongKeys);
+      for (const k of starSongKeys) {
+        const id = map.get(k);
+        const meta = trackMetaByKey.get(k);
+        if (id && meta) {
+          toStar.songIds.push(id);
+          starSongMap.push({
+            ymId: meta.ymId,
+            key: k,
+            ndSongId: id,
+            artist: meta.artist,
+            title: meta.title,
+            durationSec: meta.durationSec,
+          });
+        } else {
+          if (meta) {
+            starSongMap.push({
+              ymId: meta.ymId,
+              key: k,
+              ndSongId: undefined,
+              artist: meta.artist,
+              title: meta.title,
+              durationSec: meta.durationSec,
+            });
+          }
+          unresolved++;
+        }
       }
     }
   }
@@ -179,32 +213,32 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   return {
     toStar,
     toUnstar,
+    starSongMap,
     counts: {
       wantArtists: wantArtists.size,
       wantAlbums:  wantAlbums.size,
-      wantTracks:  wantSongsLoose.size,
+      wantTracks:  wantSongs.size,
       ndArtists:   ndArtists.size,
       ndAlbums:    ndAlbums.size,
-      ndSongs:     ndSongsLoose.size,
+      ndSongs:     ndSongsByKey.size,
       toStarArtists:  starArtistKeys.length,
       toStarAlbums:   starAlbumKeys.length,
-      toStarSongs:    starSongLoose.length,
+      toStarSongs:    starSongKeys.length,
       toUnstarArtists: unArtistKeys.length,
       toUnstarAlbums:  unAlbumKeys.length,
-      toUnstarSongs:   unSongLoose.length,
+      toUnstarSongs:   unSongKeys.length,
       unresolved,
     },
   };
 }
 
-/** Джоб планирования — быстрый, только счётчики */
+/** Быстрый план — только счётчики, без resolveIds */
 export async function runNavidromePlan(params: {
   navUrl: string;
   auth: NdAuth;
   target: PlanTarget;
   policy: Policy;
   withNdState?: boolean;
-  authPass?: string;
 }) {
   const run = await startRun('navidrome.plan', {
     phase: 'plan',
@@ -227,7 +261,6 @@ export async function runNavidromePlan(params: {
       policy: params.policy,
       withNdState: params.withNdState ?? true,
       resolveIds: false,
-      authPass: (params as any).authPass,
     });
 
     await patchRunStats(runId, {
@@ -254,3 +287,4 @@ export async function runNavidromePlan(params: {
     throw e;
   }
 }
+

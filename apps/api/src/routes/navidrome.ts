@@ -1,3 +1,4 @@
+// apps/api/src/routes/navidrome.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';

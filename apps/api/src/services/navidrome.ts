@@ -1,3 +1,4 @@
+// apps/api/src/services/navidrome.ts
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
 

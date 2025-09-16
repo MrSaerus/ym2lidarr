@@ -1,3 +1,4 @@
+// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -76,34 +77,37 @@ model YandexTrack {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // обратная сторона связи для YandexLikeSync.trackRef
   likeSyncs YandexLikeSync[]
 }
 
 model YandexLikeSync {
-  id          Int       @id @default(autoincrement())
-  kind        String
-  ymId        String?
-  key         String?
-  ndId        String?
-  status      String    @default("pending")
-  source      String    @default("yandex")
-  firstSeenAt DateTime  @default(now())
-  lastSeenAt  DateTime  @default(now())
-  lastTriedAt DateTime?
-  lastError   String?
-  starredAt   DateTime?
-  unstarredAt DateTime?
-  starRunId   Int?
-  unstarRunId Int?
+  id                Int       @id @default(autoincrement())
+  kind              String
+  ymId              String?
+  key               String?
+  ndId              String?
+  status            String    @default("pending")
+  source            String    @default("yandex")
+  firstSeenAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  lastTriedAt       DateTime?
+  lastError         String?
+  starredAt         DateTime?
+  unstarredAt       DateTime?
+  starRunId         Int?
+  unstarRunId       Int?
+  starPlannedAt     DateTime?
+  starConfirmedAt   DateTime?
+  unstarPlannedAt   DateTime?
+  unstarConfirmedAt DateTime?
 
-  // связь на трек (может быть null после удаления YandexTrack)
-  trackRef YandexTrack? @relation(fields: [ymId], references: [ymId], onDelete: SetNull)
+  // связь на трек; при удалении YandexTrack мы ничего не делаем
+  trackRef YandexTrack? @relation(fields: [ymId], references: [ymId])
 
-  // индексы/уникальности
   @@index([status, lastTriedAt])
   @@index([kind, ymId])
-  // Если хотите "не больше одной записи на пару (kind, ymId)" — можно так:
-  // @@unique([kind, ymId])
+  @@unique([kind, ymId])
 }
 
 // /* ===================== Ingest: Lidarr ===================== */
