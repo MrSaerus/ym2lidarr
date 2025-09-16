@@ -113,7 +113,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
             await prisma.yandexLikeSync.upsert({
               where: { kind_ymId: { kind: 'track', ymId: p.ymId } },
               create: { kind: 'track', ymId: p.ymId, ndId: p.ndId, starPlannedAt: nowTs, lastTriedAt: nowTs, status: 'pending', starRunId: runId },
-              update: { ndId: p.ndId, starPlannedAt: nowTs, lastTriedAt: nowTs, status: 'pending', starRunId: runId },
+              update: { ndId: p.ndId, starPlannedAt: nowTs, lastTriedAt: nowTs, starRunId: runId },
             });
           }
         }

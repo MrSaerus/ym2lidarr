@@ -126,13 +126,14 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
 
       const ls = lsByYm.get(r.ymId);
       let alreadySynced = false;
-      if (ls?.status === 'synced') {
-        const ndId = ls.ndId ?? undefined; // сузим: либо string, либо undefined
-        if (ndId) {
-          alreadySynced = ndStarredIds.has(ndId) || !compareNd;
-        } else {
-          alreadySynced = true;
-        }
+      const ndId = ls?.ndId ?? undefined;
+
+      if (compareNd && ndId && ndStarredIds.has(ndId)) {
+        // Факт: в ND уже starred — считаем синхронизированным независимо от status
+        alreadySynced = true;
+      } else if (ls?.status === 'synced') {
+        // Без сравнения с ND (или если ndId отсутствует) — доверяем статусу synced
+        alreadySynced = true;
       }
 
       if (alreadySynced) {
