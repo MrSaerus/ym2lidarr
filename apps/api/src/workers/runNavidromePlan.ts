@@ -47,6 +47,10 @@ export type ComputedPlan = {
 
     // сколько не удалось зарезолвить (если resolveIds=true)
     unresolved: number;
+
+    // прогресс по трекам (добавочные поля)
+    alreadyStarredSongs?: number;
+    needToStarSongs?: number;
   };
 };
 
@@ -71,14 +75,15 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const a_rows = needArtists
     ? await prisma.yandexArtist.findMany({
       where: { present: true, yGone: false },
-      select: { key: true, name: true, ndId: true },
+      // ndId предполагается в схеме; если его нет — убери из select
+      select: { key: true, name: true, ndId: true } as any,
     })
     : [];
-  const a_have = a_rows.filter(r => !!r.ndId);
-  const a_need = a_rows.filter(r => !r.ndId);
-  const a_needKeys: string[] = a_need.map(r => (r.key ?? nkey(r.name)));
+  const a_have = a_rows.filter((r: any) => !!r.ndId);
+  const a_need = a_rows.filter((r: any) => !r.ndId);
+  const a_needKeys: string[] = a_need.map((r: any) => (r.key ?? nkey(r.name)));
   const a_resolved: Array<{ key: string; ndId: string }> = [];
-  const a_toStar: string[] = a_have.map(r => r.ndId!).filter(Boolean);
+  const a_toStar: string[] = a_have.map((r: any) => r.ndId!).filter(Boolean);
 
   if (doResolve && a_needKeys.length) {
     const m = await client.resolveArtistIdsByKeys(a_needKeys);
@@ -95,14 +100,15 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const al_rows = needAlbums
     ? await prisma.yandexAlbum.findMany({
       where: { present: true, yGone: false },
-      select: { key: true, title: true, artist: true, ndId: true },
+      // ndId предполагается в схеме; если его нет — убери из select
+      select: { key: true, title: true, artist: true, ndId: true } as any,
     })
     : [];
-  const al_have = al_rows.filter(r => !!r.ndId);
-  const al_need = al_rows.filter(r => !r.ndId);
-  const al_needKeys: string[] = al_need.map(r => (r.key ?? nkey(`${r.artist ?? ''}|||${r.title ?? ''}`)));
+  const al_have = al_rows.filter((r: any) => !!r.ndId);
+  const al_need = al_rows.filter((r: any) => !r.ndId);
+  const al_needKeys: string[] = al_need.map((r: any) => (r.key ?? nkey(`${r.artist ?? ''}|||${r.title ?? ''}`)));
   const al_resolved: Array<{ key: string; ndId: string }> = [];
-  const al_toStar: string[] = al_have.map(r => r.ndId!).filter(Boolean);
+  const al_toStar: string[] = al_have.map((r: any) => r.ndId!).filter(Boolean);
 
   if (doResolve && al_needKeys.length) {
     const m = await client.resolveAlbumIdsByKeys(al_needKeys);
@@ -116,7 +122,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   }
 
   // ===== TRACKS =====
-  // ND-ID трека храним в YandexLikeSync.ndId
   const t_rows = needTracks
     ? await prisma.yandexTrack.findMany({
       where: { present: true, yGone: false },
@@ -126,41 +131,47 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const likeRows = needTracks && t_rows.length
     ? await prisma.yandexLikeSync.findMany({
       where: { kind: 'track', ymId: { in: t_rows.map(r => r.ymId) } },
-      select: { ymId: true, ndId: true, key: true },
+      select: { ymId: true, ndId: true, key: true, status: true, starConfirmedAt: true },
     })
     : [];
 
-  type LsInfo = { ndId?: string; key?: string };
+  type LsInfo = { ndId?: string; key?: string; status?: string | null; starConfirmedAt?: Date | null };
   const lsByYm = new Map<string, LsInfo>();
 
-  // FIX: ymId может быть null — фильтруем и нормализуем
+  // ymId может быть null — фильтруем и нормализуем
   for (const r of likeRows) {
     const ym = r.ymId ?? undefined;
     if (!ym) continue;
     const info: LsInfo = {};
     if (r.ndId ?? null) info.ndId = r.ndId as string;
     if (r.key ?? null)  info.key  = r.key  as string;
+    info.status = r.status ?? null;
+    info.starConfirmedAt = r.starConfirmedAt ?? null;
     lsByYm.set(ym, info);
   }
 
-  const t_have: Array<{ ymId: string; ndId: string; meta: { artist: string; title: string; durationSec: number; key: string } }> = [];
+  const t_have: Array<{ ymId: string; ndId: string; meta: { artist: string; title: string; durationSec: number; key: string }; alreadySynced: boolean }> = [];
   const t_need: Array<{ ymId: string; meta: { artist: string; title: string; durationSec: number; key: string } }> = [];
 
   for (const r of t_rows) {
     const dur = Number.isFinite(r.durationSec as any) ? (r.durationSec as number) : 0;
     const computedKey = nkey(`${r.artist ?? ''}|||${r.title ?? ''}|||${dur}`);
-    const key = r.key ?? computedKey; // на всякий случай
+    const key = r.key ?? computedKey;
     const ls = lsByYm.get(r.ymId);
     const ndId = ls?.ndId || null;
+    const alreadySynced = (ls?.status === 'synced') || !!ls?.starConfirmedAt;
     const meta = { artist: r.artist ?? '', title: r.title ?? '', durationSec: dur, key };
     if (ndId) {
-      t_have.push({ ymId: r.ymId, ndId, meta });
+      t_have.push({ ymId: r.ymId, ndId, meta, alreadySynced });
     } else {
       t_need.push({ ymId: r.ymId, meta });
     }
   }
 
-  const t_toStar: string[] = t_have.map(x => x.ndId);
+  // what we can star right now (имеем ndId; часть из них может быть уже synced)
+  const t_toStar_allIds: string[] = t_have.map(x => x.ndId);
+  const t_alreadySyncedCount = t_have.filter(x => x.alreadySynced).length;
+
   const starSongMap: ComputedPlan['starSongMap'] = [];
   const t_resolved: Array<{ ymId: string; key: string; ndId: string }> = [];
 
@@ -183,7 +194,7 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
       const id = m.get(s.meta.key);
       if (id) {
         t_resolved.push({ ymId: s.ymId, key: s.meta.key, ndId: id });
-        t_toStar.push(id);
+        t_toStar_allIds.push(id);
         starSongMap.push({
           ymId: s.ymId,
           key: s.meta.key,
@@ -193,7 +204,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
           durationSec: s.meta.durationSec,
         });
       } else {
-        // оставим строку без ndSongId — пригодится для отчёта
         starSongMap.push({
           ymId: s.ymId,
           key: s.meta.key,
@@ -210,10 +220,10 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const toStar = {
     artistIds: [...new Set(a_toStar)],
     albumIds:  [...new Set(al_toStar)],
-    songIds:   [...new Set(t_toStar)],
+    songIds:   [...new Set(t_toStar_allIds)],
   };
 
-  const counts = {
+  const counts: ComputedPlan['counts'] = {
     wantArtists: a_rows.length,
     wantAlbums:  al_rows.length,
     wantTracks:  t_rows.length,
@@ -234,6 +244,9 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
       (doResolve ? (a_need.length - a_resolved.length) : 0) +
       (doResolve ? (al_need.length - al_resolved.length) : 0) +
       (doResolve ? (t_need.length - t_resolved.length) : 0),
+
+    alreadyStarredSongs: t_alreadySyncedCount,
+    needToStarSongs: Math.max(t_toStar_allIds.length - t_alreadySyncedCount, 0),
   };
 
   return {
@@ -244,7 +257,7 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   };
 }
 
-/** План (счётчики). Ничего не резолвит, только считает «есть ndId» / «нужно искать». */
+/** План (счётчики). Ничего не резолвит, только считает «есть ndId» / «нужно искать» и логирует прогресс. */
 export async function runNavidromePlan(params: {
   navUrl: string;
   auth: NdAuth;
@@ -264,7 +277,7 @@ export async function runNavidromePlan(params: {
   const runId = run.id;
 
   try {
-    await dblog(runId, 'info', 'Navidrome plan start (new logic)', { target: params.target });
+    await dblog(runId, 'info', 'Navidrome plan start...', { target: params.target });
 
     const plan = await computeNavidromePlan({
       navUrl: params.navUrl,
@@ -273,16 +286,66 @@ export async function runNavidromePlan(params: {
       resolveIds: false,
     });
 
+    // Сохраним расширенные статистики — могут понадобиться фронту
     await patchRunStats(runId, {
       a_total: plan.counts.wantArtists,
       al_total: plan.counts.wantAlbums,
       t_total: plan.counts.wantTracks,
+
+      haveNdArtists: plan.counts.haveNdArtists,
+      haveNdAlbums:  plan.counts.haveNdAlbums,
+      haveNdSongs:   plan.counts.haveNdSongs,
+
+      needSearchArtists: plan.counts.needSearchArtists,
+      needSearchAlbums:  plan.counts.needSearchAlbums,
+      needSearchSongs:   plan.counts.needSearchSongs,
+
+      toStarArtists: plan.counts.toStarArtists,
+      toStarAlbums:  plan.counts.toStarAlbums,
+      toStarSongs:   plan.counts.toStarSongs,
+
+      alreadyStarredTracks: plan.counts.alreadyStarredSongs ?? 0,
+      needToStarTracks:     plan.counts.needToStarSongs ?? Math.max(plan.counts.toStarSongs - (plan.counts.alreadyStarredSongs ?? 0), 0),
+
       toStar: plan.counts.toStarArtists + plan.counts.toStarAlbums + plan.counts.toStarSongs,
       toUnstar: 0,
       unresolved: plan.counts.unresolved,
     });
 
-    await dblog(runId, 'info', 'Plan (new): counts', plan.counts);
+    // Старый краткий формат одной строкой — фронт это точно видит
+    const S = plan.counts;
+    const already = S.alreadyStarredSongs ?? 0;
+    const need = S.needToStarSongs ?? Math.max(S.toStarSongs - already, 0);
+    await dblog(runId, 'info', `want A:${S.wantArtists} Al:${S.wantAlbums} T:${S.wantTracks} `);
+    await dblog(runId, 'info', `haveNd A:${S.haveNdArtists} Al:${S.haveNdAlbums} T:${S.haveNdSongs}`);
+    await dblog(runId, 'info', `needSearch A:${S.needSearchArtists} Al:${S.needSearchAlbums} T:${S.needSearchSongs}`);
+    await dblog(runId, 'info', `toStar A:${S.toStarArtists} Al:${S.toStarAlbums} T:${S.toStarSongs}`);
+    await dblog(runId, 'info', `tracks alreadyStarred:${already} needToStar:${need} unresolved:${S.unresolved}`);
+
+
+    // И оставим детальный снапшот чисел в data — если фронт научится их показывать
+    await dblog(runId, 'info', 'Plan: progress snapshot', {
+      tracks: {
+        totalWant: S.wantTracks,
+        withNdId: S.haveNdSongs,
+        withoutNdId: S.needSearchSongs,
+        canStarNow: S.toStarSongs,
+        alreadyStarred: already,
+        needToStar: need,
+      },
+      artists: {
+        totalWant: S.wantArtists,
+        withNdId: S.haveNdArtists,
+        needSearch: S.needSearchArtists,
+        canStarNow: S.toStarArtists,
+      },
+      albums: {
+        totalWant: S.wantAlbums,
+        withNdId: S.haveNdAlbums,
+        needSearch: S.needSearchAlbums,
+        canStarNow: S.toStarAlbums,
+      },
+    });
 
     await patchRunStats(runId, { phase: 'done' });
     await endRun(runId, 'ok');
