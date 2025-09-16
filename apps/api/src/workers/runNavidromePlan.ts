@@ -53,13 +53,26 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const wantAlbums  = new Set<string>();
 
   if (needArtists) {
-    const rows = await prisma.yandexArtist.findMany({ where: { present: true, yGone: false }, select: { name: true } });
-    for (const r of rows) { const k = nkey(r.name); if (k) wantArtists.add(k); }
+    const rows = await prisma.yandexArtist.findMany({
+      where: { present: true, yGone: false },
+      select: { name: true }
+    });
+    for (const r of rows) {
+      const k = nkey(r.name);
+      if (k) wantArtists.add(k);
+    }
   }
 
   if (needAlbums) {
-    const rows = await prisma.yandexAlbum.findMany({ where: { present: true, yGone: false }, select: { title: true, artist: true } });
-    for (const r of rows) { const k = nkey(`${r.artist}|||${r.title}`); if (k) wantAlbums.add(k); }
+    const rows = await prisma.yandexAlbum.findMany({
+      where: { present: true, yGone: false },
+      select: { title: true, artist: true }
+    });
+    for (const r of rows) {
+      // artist в схеме optional => string | null -> нормализуем к ''
+      const k = nkey(`${r.artist ?? ''}|||${r.title ?? ''}`);
+      if (k) wantAlbums.add(k);
+    }
   }
 
   // --- текущее состояние ND (нужно до треков, чтобы учитывать ndId из LikeSync)
@@ -71,11 +84,12 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
 
   if (compareNd) {
     const cur = await client.getStarred2();
-    for (const a of cur.artists) ndArtists.set(nkey(a.name), a.id);
-    for (const al of cur.albums) ndAlbums.set(nkey(`${al.artist}|||${al.name}`), al.id);
+    // 🔧 FIX: a.name может быть null -> нормализуем
+    for (const a of cur.artists) ndArtists.set(nkey(a.name ?? ''), a.id);
+    for (const al of cur.albums) ndAlbums.set(nkey(`${al.artist ?? ''}|||${al.name ?? ''}`), al.id);
     for (const s of cur.songs) {
       const dur = Number.isFinite(s.duration as any) ? (s.duration as number) : 0;
-      const k = nkey(`${s.artist}|||${s.title}|||${dur}`);
+      const k = nkey(`${s.artist ?? ''}|||${s.title ?? ''}|||${dur}`);
       ndSongsByKey.set(k, s.id);
       ndStarredIds.add(s.id);
     }
@@ -87,7 +101,7 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const ymRows = needTracks
     ? await prisma.yandexTrack.findMany({
       where: { present: true, yGone: false },
-      select: { ymId: true, title: true, artist: true, durationSec: true },
+      select: { ymId: true, title: true, artist: true, durationSec: true }
     })
     : [];
 
@@ -95,35 +109,41 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const lsRows = needTracks && ymRows.length
     ? await prisma.yandexLikeSync.findMany({
       where: { kind: 'track', ymId: { in: ymRows.map(r => r.ymId) } },
-      select: { ymId: true, status: true, ndId: true },
+      select: { ymId: true, status: true, ndId: true }
     })
     : [];
 
   const lsByYm = new Map<string, { status?: string | null; ndId?: string | null }>();
-  for (const r of lsRows) lsByYm.set(r.ymId, { status: r.status, ndId: r.ndId });
+  for (const r of lsRows) {
+    if (!r.ymId) continue;                // <- type guard: r.ymId теперь точно string
+    lsByYm.set(r.ymId, { status: r.status, ndId: r.ndId });
+  }
 
   if (needTracks) {
     for (const r of ymRows) {
       const dur = Number.isFinite(r.durationSec as any) ? (r.durationSec as number) : 0;
-      const k = nkey(`${r.artist || ''}|||${r.title}|||${dur}`);
+      const k = nkey(`${r.artist ?? ''}|||${r.title ?? ''}|||${dur}`);
 
       const ls = lsByYm.get(r.ymId);
-      const alreadySynced =
-        ls?.status === 'synced' &&
-        // если есть ndId и он реально звёздный — точно пропускаем
-        (ls.ndId ? ndStarredIds.has(ls.ndId) || !compareNd : true);
+      let alreadySynced = false;
+      if (ls?.status === 'synced') {
+        const ndId = ls.ndId ?? undefined; // сузим: либо string, либо undefined
+        if (ndId) {
+          alreadySynced = ndStarredIds.has(ndId) || !compareNd;
+        } else {
+          alreadySynced = true;
+        }
+      }
 
       if (alreadySynced) {
-        // ничего не хотим для этого YM — он уже подтверждён как синхронизированный
         continue;
       }
 
-      // иначе — включаем в цели
       wantSongs.add(k);
       trackMetaByKey.set(k, {
         ymId: r.ymId,
-        artist: r.artist || '',
-        title: r.title,
+        artist: (r.artist ?? ''),
+        title: r.title ?? '',
         durationSec: dur,
       });
     }
@@ -287,4 +307,3 @@ export async function runNavidromePlan(params: {
     throw e;
   }
 }
-
