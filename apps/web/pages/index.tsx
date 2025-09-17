@@ -231,15 +231,15 @@ export default function OverviewPage() {
   const yR = { total: toNum(stats?.yandex?.albums?.total ?? stats?.albums?.total ?? 0), matched: toNum(stats?.yandex?.albums?.matched ?? stats?.albums?.found ?? 0),
     unmatched: toNum(stats?.yandex?.albums?.unmatched ?? ((stats?.albums?.total != null && stats?.albums?.found != null) ? Number(stats.albums.total) - Number(stats.albums.found) : 0)) };
   const lA = { total: toNum(stats?.lidarr?.artists?.total ?? 0), matched: toNum(stats?.lidarr?.artists?.matched ?? 0), unmatched: toNum(stats?.lidarr?.artists?.unmatched ?? 0) };
-  const lR = { total: toNum(stats?.lidarr?.albums?.total ?? 0), matched: toNum(stats?.lidarr?.albums?.matched ?? 0), unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0) };
+  // const lR = { total: toNum(stats?.lidarr?.albums?.total ?? 0), matched: toNum(stats?.lidarr?.albums?.matched ?? 0), unmatched: toNum(stats?.lidarr?.albums?.unmatched ?? 0) };
 
   const cArtistPct = useMemo(() => pct(cA.matched, cA.total), [cA.matched, cA.total]);
   const yArtistPct = useMemo(() => pct(yA.matched, yA.total), [yA.matched, yA.total]);
   const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR.matched, yR.total]);
-  const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA.matched, lA.total]);
-  const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR.matched, lR.total]);
+  // const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA.matched, lA.total]);
+  // const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR.matched, lR.total]);
   const lAlbumsDownloaded = toNum(stats?.lidarr?.albums?.downloaded ?? 0);
-  const lAlbumsNotDownloaded = lR.total ? Math.max(0, lR.total - lAlbumsDownloaded) : 0;
+  // const lAlbumsNotDownloaded = lR.total ? Math.max(0, lR.total - lAlbumsDownloaded) : 0;
   const lDownloaded = toNum(stats?.lidarr?.artists?.downloaded ?? stats?.artists?.downloaded ?? 0);
   const lNotDownloaded = lA.total ? Math.round(lA.total - lDownloaded ) : 0;
   const lDownloadedFrac = lA.total ? (lDownloaded / lA.total) : 0;

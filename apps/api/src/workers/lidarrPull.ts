@@ -1,5 +1,4 @@
 // apps/api/src/workers/lidarrPull.ts
-import { request } from 'undici';
 import {
   prisma, startRunWithKind, patchRunStats, endRun, dblog,
   evStart, evFinish, evError, now, elapsedMs, bailIfCancelled, getRunWithRetry,

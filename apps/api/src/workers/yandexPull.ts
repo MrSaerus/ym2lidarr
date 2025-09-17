@@ -1,13 +1,10 @@
 // apps/api/src/workers/yandexPull.ts
 import { setPyproxyUrl, yandexPullLikes } from '../services/yandex';
-import { createLogger } from '../lib/logger';
 import {
   prisma, startRun, endRun, patchRunStats, dblog,
   nkey, evStart, evFinish, evError, now, elapsedMs, bailIfCancelled, getRunWithRetry,
 } from './_common';
 import { Prisma } from '@prisma/client';
-
-const log = createLogger({ scope: 'worker.yandex.pull' });
 
 export async function runYandexPull(tokenOverride?: string, reuseRunId?: number) {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });

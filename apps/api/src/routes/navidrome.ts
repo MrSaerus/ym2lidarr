@@ -1,26 +1,25 @@
 // apps/api/src/routes/navidrome.ts
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
 import { runNavidromeApply } from '../workers/runNavidromeApply';
 import { startRun, patchRunStats } from '../log';
-import { NavidromeClient, type NdAuth } from '../services/navidrome'; // <-- ДОБАВЛЕНО
+import { NavidromeClient } from '../services/navidrome'; // <-- ДОБАВЛЕНО
 
 export const navidromeRouter = Router();
 const log = createLogger({ scope: 'route.navidrome' });
 
-type PlanBody = {
-  navidromeUrl?: string;
-  navidromeUser?: string;
-  navidromePass?: string;
-  navidromeToken?: string;
-  navidromeSalt?: string;
-  target?: 'artists' | 'albums' | 'tracks' | 'all' | 'both'; // 'both' нормализуем в 'all'
-  policy?: 'yandex' | 'navidrome';
-  withNdState?: boolean;
-};
-type ApplyBody = PlanBody & { dryRun?: boolean };
+// type PlanBody = {
+//   navidromeUrl?: string;
+//   navidromeUser?: string;
+//   navidromePass?: string;
+//   navidromeToken?: string;
+//   navidromeSalt?: string;
+//   target?: 'artists' | 'albums' | 'tracks' | 'all' | 'both'; // 'both' нормализуем в 'all'
+//   policy?: 'yandex' | 'navidrome';
+//   withNdState?: boolean;
+// };
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x.trim() : '';

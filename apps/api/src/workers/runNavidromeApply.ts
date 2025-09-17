@@ -1,6 +1,5 @@
 // apps/api/src/workers/runNavidromeApply.ts
 import { startRun, endRun, patchRunStats, log as dblog } from '../log';
-import { createLogger } from '../lib/logger';
 import { NavidromeClient, type NdAuth } from '../services/navidrome';
 import {
   computeNavidromePlan,
@@ -8,8 +7,6 @@ import {
   type Policy,
 } from './runNavidromePlan';
 import { prisma } from '../prisma';
-
-const log = createLogger({ scope: 'worker.nav.apply' });
 
 type ApplyOpts = {
   navUrl: string;
