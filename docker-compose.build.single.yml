@@ -6,8 +6,8 @@ services:
     environment:
       - MB_RECHECK_HOURS=72
       - DATABASE_URL=file:/app/data/app.db
-      - YA_PYPROXY_URL=http://localhost:8080
-      - QBT_URL=http://94.41.86.101:9097
+      - YA_PYPROXY_URL=http://pyproxy:8080
+      - QBT_URL=http://qbittorrent:9097
       - QBT_USER=admin
       - QBT_PASS=adminadmin
       - QBT_DELETE_FILES=true
@@ -15,7 +15,7 @@ services:
       - PORT_API=4000
       - LOG_LEVEL=debug       # |info|warn|error|fatal|all|off
       - LOG_TO_FILES=1        # включить запись в файлы
-      - LOG_DIR=/data/log/app  # каталог (дефолт /var/log/app)
+      - LOG_DIR=/app/data/log  # каталог (дефолт /var/log/app)
       - OG_MAX_SIZE=50M       # размер одного файла до ротации
       - LOG_BACKUPS=14        # сколько бэкапов хранить/чистить
     #      - LOG_DATE_PATTERN=yyyy-MM-dd — суффикс дневных файлов
