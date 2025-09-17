@@ -118,6 +118,8 @@ const ALLOWED_FIELDS = new Set([
   'navidromeSalt',
   'navidromeSyncTarget',            // 'artists' | 'albums' | 'tracks' | 'all'
   'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
+  'cronNavidromePush',
+  'enableCronNavidromePush',
 ]);
 
 function trimToNull(v: unknown): string | null {

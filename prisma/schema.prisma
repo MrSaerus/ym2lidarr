@@ -330,12 +330,13 @@ model Setting {
   cronLidarrPull   String @default("0 3 * * *")
   lidarrPullTarget String @default("both") // 'both' | 'artists' | 'albums'
 
-  enableCronYandexPull  Boolean @default(true)
-  enableCronYandexMatch Boolean @default(true)
-  enableCronYandexPush  Boolean @default(true)
-  enableCronCustomMatch Boolean @default(true)
-  enableCronCustomPush  Boolean @default(true)
-  enableCronLidarrPull  Boolean @default(true)
+  enableCronYandexPull    Boolean @default(false)
+  enableCronYandexMatch   Boolean @default(false)
+  enableCronYandexPush    Boolean @default(false)
+  enableCronCustomMatch   Boolean @default(false)
+  enableCronCustomPush    Boolean @default(false)
+  enableCronLidarrPull    Boolean @default(false)
+  enableCronNavidromePush Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -356,4 +357,5 @@ model Setting {
   navidromeSalt             String?
   navidromeSyncTarget       String? // 'artists' | 'albums' | 'tracks' | 'all'
   likesPolicySourcePriority String? // 'yandex' | 'navidrome'
+  cronNavidromePush         String?
 }

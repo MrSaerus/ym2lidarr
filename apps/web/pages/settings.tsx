@@ -31,6 +31,8 @@ type Settings = {
   navidromeSalt?: string | null;
   navidromeSyncTarget?: 'both' | 'artists' | 'albums' | 'tracks';
   likesPolicySourcePriority?: 'yandex' | 'navidrome';
+  cronNavidromePush?: string | null;
+  enableCronNavidromePush?: boolean | null;
 
   // Lidarr
   lidarrUrl?: string | null;
@@ -105,6 +107,8 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     navidromeSalt: s.navidromeSalt ?? '',
     navidromeSyncTarget: (s.navidromeSyncTarget as any) || 'artists',
     likesPolicySourcePriority: (s.likesPolicySourcePriority as any) || 'yandex',
+    cronNavidromePush: s.cronNavidromePush ?? '15 */6 * * *',
+    enableCronNavidromePush: s.enableCronNavidromePush ?? false,
 
     // Lidarr
     lidarrUrl: s.lidarrUrl ?? 'http://lidarr:8686',
@@ -506,7 +510,27 @@ export default function SettingsPage() {
               <option value="navidrome">Prefer Navidrome</option>
             </select>
           </FormRow>
-
+          <FormRow
+            label="Navidrome push cron"
+            help={<><code>15 */6 * * *</code> — каждые 6 часов (пример)</>}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <input
+                className="input md:col-span-2"
+                value={settings.cronNavidromePush || ''}
+                onChange={(e) => setSettings({ ...settings, cronNavidromePush: e.target.value })}
+                placeholder="15 */6 * * *"
+              />
+              <label className="flex items-center gap-2 text-sm text-gray-400">
+                <input
+                  type="checkbox"
+                  checked={!!settings.enableCronNavidromePush}
+                  onChange={(e) => setSettings({ ...settings, enableCronNavidromePush: e.target.checked })}
+                />
+                Enabled
+              </label>
+            </div>
+          </FormRow>
           <div className="toolbar">
             <button className="btn btn-outline" onClick={testNavidrome}>Test Navidrome</button>
           </div>
