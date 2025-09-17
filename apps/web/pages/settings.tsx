@@ -158,6 +158,7 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState('');
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<number | null>(null);
+  const [navBusy, setNavBusy] = useState<{ plan: boolean; push: boolean }>({ plan: false, push: false });
 
   type StartRunRes = { started?: boolean; runId?: number; ok?: boolean; error?: string };
 
@@ -297,6 +298,43 @@ export default function SettingsPage() {
     }
   }
 
+  async function navidromePlan() {
+    setMsg('Navidrome plan — запускаю…');
+    setNavBusy((s) => ({ ...s, plan: true }));
+    try {
+      // строго как у тебя: без body
+      await api<any>('/api/navidrome/plan', { method: 'POST' });
+      setMsg('Navidrome plan started');
+    } catch (e: any) {
+      setMsg(`Navidrome plan error: ${e?.message || String(e)}`);
+    } finally {
+      setNavBusy((s) => ({ ...s, plan: false }));
+    }
+  }
+
+  async function navidromePush() {
+    setMsg('Navidrome push — запускаю…');
+    setNavBusy((s) => ({ ...s, push: true }));
+    try {
+      // строго как у тебя: /apply + { target, policy, dryRun:false }
+      const body = {
+        target: settings.navidromeSyncTarget || 'tracks',
+        policy: settings.likesPolicySourcePriority || 'yandex',
+        dryRun: false,
+      };
+      const r = await api<any>('/api/navidrome/apply', { method: 'POST', body });
+
+      const started = r?.ok || !!r?.runId;
+      if (!started) throw new Error(r?.error || 'apply: unknown error');
+
+      setMsg(r?.runId ? `Navidrome apply started (runId=${r.runId})` : 'Navidrome apply started');
+    } catch (e: any) {
+      setMsg(`Navidrome push error: ${e?.message || String(e)}`);
+    } finally {
+      setNavBusy((s) => ({ ...s, push: false }));
+    }
+  }
+
   return (
     <>
       <Nav />
@@ -371,7 +409,26 @@ export default function SettingsPage() {
         {/* Navidrome */}
         <section className="panel p-4 space-y-3">
           <div className="section-title">Navidrome</div>
-
+          <div className="toolbar">
+            <div className="flex gap-2 ml-2">
+              <button
+                className="btn btn-outline"
+                onClick={navidromePlan}
+                disabled={navBusy.plan}
+                title="Рассчитать план синхронизации (Navidrome → likes)"
+              >
+                {navBusy.plan ? 'Planning…' : 'Plan'}
+              </button>
+              <button
+                className="btn btn-outline"
+                onClick={navidromePush}
+                disabled={navBusy.push}
+                title="Применить план (push/apply)"
+              >
+                {navBusy.push ? 'Pushing…' : 'Push'}
+              </button>
+            </div>
+          </div>
           <FormRow label="Base URL" help="Базовый URL Navidrome (например http://navidrome:4533).">
             <input
               className="input"

@@ -5,6 +5,7 @@ import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
 import { runNavidromeApply } from '../workers/runNavidromeApply';
 import { startRun, patchRunStats } from '../log';
+import { NavidromeClient, type NdAuth } from '../services/navidrome'; // <-- ДОБАВЛЕНО
 
 export const navidromeRouter = Router();
 const log = createLogger({ scope: 'route.navidrome' });
@@ -133,4 +134,46 @@ navidromeRouter.post('/apply', async (req, res, next) => {
   }
 });
 
+/* ========== TEST ========== */
+navidromeRouter.post('/test', async (req, res, next) => {
+  try {
+    // Берём из БД дефолты, а body позволяет переопределить (как на фронте)
+    const setting = await prisma.setting.findFirst({ where: { id: 1 } });
+
+    const url   = str(req.body?.navidromeUrl   ?? setting?.navidromeUrl).replace(/\/+$/, '');
+    const user  = str(req.body?.navidromeUser  ?? setting?.navidromeUser);
+    const pass  = str(req.body?.navidromePass  ?? setting?.navidromePass);
+    const token = str(req.body?.navidromeToken ?? setting?.navidromeToken);
+    const salt  = str(req.body?.navidromeSalt  ?? setting?.navidromeSalt);
+
+    if (!url || !user || (!pass && !(token && salt))) {
+      res.status(400).json({
+        ok: false,
+        error: 'Navidrome is not configured: need url + user and pass OR token + salt',
+      });
+      return;
+    }
+
+    const auth = chooseAuth(user, pass, token, salt);
+    const nd = new NavidromeClient(url, auth, pass || undefined);
+
+    log.info('navidrome test requested', 'route.nav.test.start', { via: pass ? 'pass' : 'token' });
+
+    // Проверяем и отдаём подробности
+    const info = await nd.pingInfo();
+    if (!info.ok) {
+      const { ok: _ignored, ...rest } = info;
+      res.status(401).json({ ok: false, error: 'Auth failed', ...rest });
+      return;
+    }
+
+    log.info('navidrome test ok', 'route.nav.test.ok', { server: info.server, type: info.type, version: info.version });
+    res.json({ ok: true, server: info.server, type: info.type, version: info.version });
+  } catch (e: any) {
+    log.error('navidrome test failed', 'route.nav.test.fail', { err: e?.message || String(e) });
+    next(e);
+  }
+});
+
 export default navidromeRouter;
+

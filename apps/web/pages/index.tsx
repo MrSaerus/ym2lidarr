@@ -1,3 +1,4 @@
+// apps/web/pages/index.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Nav from '../components/Nav';
 import Footer from '../components/Footer';
@@ -24,10 +25,11 @@ type LatestYArtist = { id: number; name: string; yandexUrl?: string; mbUrl?: str
 type LatestLArtist = { id: number; name: string; added?: string | null; lidarrUrl?: string; mbUrl?: string; };
 type LatestCArtist = { id: number; name: string; mbUrl?: string; createdAt?: string | null; hasLidarr?: boolean; lidarrUrl?: string | null; };
 type LidarrArtistsStats = CountBlock & { downloaded?: number; noDownloads?: number; downloadedPct?: number; };
+type LidarrAlbumsStats = CountBlock & { downloaded?: number; noDownloads?: number; downloadedPct?: number; };
 
 type StatsResp = {
-  yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; };
-  lidarr?: { artists: LidarrArtistsStats; albums: CountBlock; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
+  yandex?: { artists: CountBlock; albums: CountBlock; latestAlbums?: LatestYA[]; latestArtists?: LatestYArtist[]; albumsDownloaded?: number; };
+  lidarr?: { artists: LidarrArtistsStats; albums: LidarrAlbumsStats; latestAlbums?: LatestLA[]; latestArtists?: LatestLArtist[]; };
   custom?: { artists: CountBlock; latestArtists?: LatestCArtist[]; };
 
   artists?: { total?: number; found?: number; unmatched?: number; downloaded?: number;  noDownloads?: number; downloadedPct?: number;};
@@ -236,11 +238,16 @@ export default function OverviewPage() {
   const yAlbumPct  = useMemo(() => pct(yR.matched, yR.total), [yR.matched, yR.total]);
   const lArtistPct = useMemo(() => pct(lA.matched, lA.total), [lA.matched, lA.total]);
   const lAlbumPct  = useMemo(() => pct(lR.matched, lR.total), [lR.matched, lR.total]);
+  const lAlbumsDownloaded = toNum(stats?.lidarr?.albums?.downloaded ?? 0);
+  const lAlbumsNotDownloaded = lR.total ? Math.max(0, lR.total - lAlbumsDownloaded) : 0;
   const lDownloaded = toNum(stats?.lidarr?.artists?.downloaded ?? stats?.artists?.downloaded ?? 0);
   const lNotDownloaded = lA.total ? Math.round(lA.total - lDownloaded ) : 0;
   const lDownloadedFrac = lA.total ? (lDownloaded / lA.total) : 0;
-
-  /* ----------------------- actions ----------------------- */
+  const ymAlbumsTotal = toNum(stats?.yandex?.albums?.total ?? stats?.albums?.total ?? 0);
+  const ymAlbumsDownloaded = toNum(stats?.yandex?.albumsDownloaded ?? 0);
+  const ymAlbumsPct = useMemo(() => pct(ymAlbumsDownloaded, ymAlbumsTotal), [ymAlbumsDownloaded, ymAlbumsTotal]);
+  const ymAlbumsNotDownloaded = ymAlbumsTotal-ymAlbumsDownloaded;
+    /* ----------------------- actions ----------------------- */
 
   // Lidarr PULL
   async function pullFromLidarrArtists() {
@@ -276,7 +283,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex artists…');
     markBusy('yandexMatchArtists');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'artists' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'artists' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -284,7 +291,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex albums…');
     markBusy('yandexMatchAlbums');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: false, target: 'albums' });
+      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'albums' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -353,11 +360,29 @@ export default function OverviewPage() {
       <main className="mx-auto max-w-6xl px-4 py-4 space-y-6">
         <h1 className="h1">Overview</h1>
 
+        {/* All stat exist */}
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="panel p-3 sm:p-4 space-y-2 text-center">
+            <div className="text-sm text-gray-500">Liked album in Yandex</div>
+            <div className="text-3xl font-bold">{ymAlbumsTotal}</div>
+          </div>
+
+          <div className="panel p-3 sm:p-4 space-y-2 text-center">
+            <div className="text-sm text-gray-500">Downloaded artists in Lidarr</div>
+            <div className="text-3xl font-bold">{lDownloaded}</div>
+          </div>
+
+          <div className="panel p-3 sm:p-4 space-y-2 text-center">
+            <div className="text-sm text-gray-500">Downloaded albums in Lidarr</div>
+            <div className="text-3xl font-bold">{lAlbumsDownloaded}</div>
+          </div>
+        </section>
+
         {/* Custom artists */}
         <section className="grid gap-4 md:grid-cols-1">
           <div className="panel p-3 sm:p-4">
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="section-title">Latest Custom artists</div>
+            <div className="section-title">Latest Custom artists</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
                 <button className="btn btn-outline shrink-0" onClick={matchCustomAll} disabled={isBusy('customMatch')}>
                   {isBusy('customMatch') ? 'Matching…' : 'Match MB'}
@@ -422,13 +447,16 @@ export default function OverviewPage() {
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="section-title">Latest Yandex albums</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                <button className="btn btn-outline shrink-0" onClick={pullFromYandexAlbums} disabled={isBusy('yandexPull')}>
+                <button className="btn btn-outline shrink-0" onClick={pullFromYandexAlbums}
+                        disabled={isBusy('yandexPull')}>
                   {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
                 </button>
-                <button className="btn btn-outline shrink-0" onClick={matchYandexAlbums} disabled={isBusy('yandexMatchAlbums')}>
+                <button className="btn btn-outline shrink-0" onClick={matchYandexAlbums}
+                        disabled={isBusy('yandexMatchAlbums')}>
                   {isBusy('yandexMatchAlbums') ? 'Matching…' : 'Matching YM'}
                 </button>
-                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('albums')} disabled={isBusy('yandexPushAlbums')}>
+                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('albums')}
+                        disabled={isBusy('yandexPushAlbums')}>
                   {isBusy('yandexPushAlbums') ? 'Pushing…' : 'Push to Lidarr'}
                 </button>
               </div>
@@ -456,10 +484,12 @@ export default function OverviewPage() {
                         <td className="py-1 links-col-2">
                           <div className="link-tray link-tray-2 link-tray-right">
                             {r.yandexUrl
-                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
                             {r.mbUrl
-                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--mb">MusicBrainz</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
                           </div>
                         </td>
@@ -476,7 +506,8 @@ export default function OverviewPage() {
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="section-title">Latest Lidarr albums</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrAlbums} disabled={isBusy('lidarrPullAlbums')}>
+                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrAlbums}
+                        disabled={isBusy('lidarrPullAlbums')}>
                   {isBusy('lidarrPullAlbums') ? 'Pulling…' : 'Pull from Lidarr'}
                 </button>
               </div>
@@ -534,13 +565,16 @@ export default function OverviewPage() {
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="section-title">Latest Yandex artists</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                <button className="btn btn-outline shrink-0" onClick={pullFromYandexArtists} disabled={isBusy('yandexPull')}>
+                <button className="btn btn-outline shrink-0" onClick={pullFromYandexArtists}
+                        disabled={isBusy('yandexPull')}>
                   {isBusy('yandexPull') ? 'Pulling…' : 'Pull from YM'}
                 </button>
-                <button className="btn btn-outline shrink-0" onClick={matchYandexArtists} disabled={isBusy('yandexMatchArtists')}>
+                <button className="btn btn-outline shrink-0" onClick={matchYandexArtists}
+                        disabled={isBusy('yandexMatchArtists')}>
                   {isBusy('yandexMatchArtists') ? 'Matching…' : 'Matching YM'}
                 </button>
-                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('artists')} disabled={isBusy('yandexPushArtists')}>
+                <button className="btn btn-outline shrink-0" onClick={() => pushYandexToLidarr('artists')}
+                        disabled={isBusy('yandexPushArtists')}>
                   {isBusy('yandexPushArtists') ? 'Pushing…' : 'Push to Lidarr'}
                 </button>
               </div>
@@ -566,10 +600,12 @@ export default function OverviewPage() {
                         <td className="py-1 links-col-2">
                           <div className="link-tray link-tray-2 link-tray-right">
                             {r.yandexUrl
-                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
+                              ? <a href={r.yandexUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--ym link-margin-right-5">Yandex</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">Yandex</span>}
                             {r.mbUrl
-                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--mb">MusicBrainz</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
                           </div>
                         </td>
@@ -586,7 +622,8 @@ export default function OverviewPage() {
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
               <div className="section-title">Latest Lidarr artists</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
-                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrArtists} disabled={isBusy('lidarrPullArtists')}>
+                <button className="btn btn-outline shrink-0" onClick={pullFromLidarrArtists}
+                        disabled={isBusy('lidarrPullArtists')}>
                   {isBusy('lidarrPullArtists') ? 'Pulling…' : 'Pull from Lidarr'}
                 </button>
               </div>
@@ -612,10 +649,12 @@ export default function OverviewPage() {
                         <td className="py-1 links-col-2">
                           <div className="link-tray link-tray-2 link-tray-right">
                             {r.lidarrUrl
-                              ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
+                              ? <a href={r.lidarrUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--lidarr link-margin-right-5">Lidarr</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">Lidarr</span>}
                             {r.mbUrl
-                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer" className="link-chip link-chip--mb">MusicBrainz</a>
+                              ? <a href={r.mbUrl} target="_blank" rel="noreferrer"
+                                   className="link-chip link-chip--mb">MusicBrainz</a>
                               : <span className="link-chip invisible select-none" aria-hidden="true">MusicBrainz</span>}
                           </div>
                         </td>
@@ -630,48 +669,40 @@ export default function OverviewPage() {
         </section>
 
         {/* KPI панели */}
+
         <section className="grid gap-4 md:grid-cols-2">
           <div className="panel p-3 sm:p-4 space-y-3">
             <div className="text-sm text-gray-500">Artists with downloads</div>
             <div className="text-2xl font-bold">{lDownloaded}/{lA.total}</div>
-            <ProgressBar value={lDownloadedFrac} color="ym" label={`${lDownloaded} / ${lA.total}`} />
+            <ProgressBar value={lDownloadedFrac} color="ym" />
             <div className="text-xs text-gray-500">Without tracks: {lNotDownloaded}</div>
           </div>
           <div className="panel p-3 sm:p-4 space-y-3">
             <div className="text-sm text-gray-500">Custom artists matched</div>
             <div className="text-2xl font-bold">{cA.matched}/{cA.total}</div>
-            <ProgressBar value={cArtistPct} color="accent"/>
+            <ProgressBar value={cArtistPct} color="accent" />
             <div className="text-xs text-gray-500">Unmatched: {cA.unmatched}</div>
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2">
+        <section className="grid gap-4 md:grid-cols-3">
           <div className="panel p-3 sm:p-4 space-y-3">
             <div className="text-sm text-gray-500">Artists matched (Yandex)</div>
             <div className="text-2xl font-bold">{yA.matched}/{yA.total}</div>
-            <ProgressBar value={yArtistPct} color="accent"/>
+            <ProgressBar value={yArtistPct} color="accent" />
             <div className="text-xs text-gray-500">Unmatched: {yA.unmatched}</div>
           </div>
           <div className="panel p-3 sm:p-4 space-y-3">
             <div className="text-sm text-gray-500">Albums matched (Yandex)</div>
             <div className="text-2xl font-bold">{yR.matched}/{yR.total}</div>
-            <ProgressBar value={yAlbumPct} color="primary"/>
+            <ProgressBar value={yAlbumPct} color="primary" />
             <div className="text-xs text-gray-500">Unmatched: {yR.unmatched}</div>
           </div>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2">
           <div className="panel p-3 sm:p-4 space-y-3">
-            <div className="text-sm text-gray-500">Artists (Lidarr, with MBID)</div>
-            <div className="text-2xl font-bold">{lA.matched}/{lA.total}</div>
-            <ProgressBar value={lArtistPct} color="accent"/>
-            <div className="text-xs text-gray-500">Without MBID: {lA.unmatched}</div>
-          </div>
-          <div className="panel p-3 sm:p-4 space-y-3">
-            <div className="text-sm text-gray-500">Albums (Lidarr, with RG MBID)</div>
-            <div className="text-2xl font-bold">{lR.matched}/{lR.total}</div>
-            <ProgressBar value={lAlbumPct} color="primary"/>
-            <div className="text-xs text-gray-500">Without RG MBID: {lR.unmatched}</div>
+            <div className="text-sm text-gray-500">Downloaded albums (from Yandex likes)</div>
+            <div className="text-2xl font-bold">{ymAlbumsDownloaded}/{ymAlbumsTotal}</div>
+            <ProgressBar value={ymAlbumsPct} color="ym" />
+            <div className="text-xs text-gray-500">Not downloaded {ymAlbumsNotDownloaded}</div>
           </div>
         </section>
 
@@ -749,9 +780,11 @@ export default function OverviewPage() {
                   <tr key={j.key} className="border-t border-white/5">
                     <td className="py-1 pr-2">{j.title}</td>
                     <td className="py-1 pr-2 font-mono text-xs">{j.cron || '—'}</td>
-                    <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="muted">off</Badge>}</td>
+                    <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> :
+                      <Badge tone="muted">off</Badge>}</td>
                     <td className="py-1 pr-2">
-                      {j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> : <Badge tone="err">invalid</Badge>) : <span className="text-gray-500">—</span>}
+                      {j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> : <Badge tone="err">invalid</Badge>) :
+                        <span className="text-gray-500">—</span>}
                     </td>
                     <td className="py-1 pr-2">{j.nextRun ? new Date(j.nextRun).toLocaleString() : '—'}</td>
                     <td className="py-1 pr-2">{humanCountdown(j.nextRun)}</td>

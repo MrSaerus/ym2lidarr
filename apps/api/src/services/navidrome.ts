@@ -96,6 +96,21 @@ export class NavidromeClient {
     return !!r?.['subsonic-response']?.status && r['subsonic-response'].status !== 'failed';
   }
 
+  async pingInfo(): Promise<{ ok: boolean; server?: string; type?: string; version?: string; serverVersion?: string }> {
+    const r = await this.get('ping');
+    const sr = r?.['subsonic-response'] || {};
+    const ok = !!sr?.status && sr.status !== 'failed';
+    const type = sr?.type || undefined;
+    const version = sr?.version || undefined;
+    const serverVersion = sr?.serverVersion || undefined;
+    const server =
+      (type && serverVersion) ? `${type} ${serverVersion}` :
+        (type && version)       ? `${type} ${version}` :
+          (type || version || undefined);
+
+    return { ok, server, type, version, serverVersion };
+  }
+
   async getStarred2() {
     const r = await this.get('getStarred2');
     const root = r?.['subsonic-response']?.starred2 || {};

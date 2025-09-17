@@ -32,7 +32,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
   let runId: number;
   if (opts.reuseRunId) {
     runId = opts.reuseRunId;
-    await dblog(runId, 'info', 'Navidrome apply continue (new logic)', {
+    await dblog(runId, 'info', 'Navidrome apply continue…', {
       target: opts.target, dryRun: !!opts.dryRun,
     });
   } else {
@@ -46,7 +46,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
     });
     if (!run) return;
     runId = run.id;
-    await dblog(runId, 'info', 'Navidrome apply start (new logic)', {
+    await dblog(runId, 'info', 'Navidrome apply start…', {
       target: opts.target, dryRun: !!opts.dryRun,
     });
   }
@@ -118,7 +118,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
 
     await patchRunStats(runId, { star_total: starTotal });
 
-    await dblog(runId, 'info', 'Apply plan prepared (new logic)', {
+    await dblog(runId, 'info', 'Apply plan prepared…', {
       star: {
         artists: starIds.artistIds?.length || 0,
         albums:  starIds.albumIds?.length  || 0,
@@ -229,7 +229,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       ndStarredNow: after.songs?.length || 0,
     });
 
-    await dblog(runId, 'info', 'Navidrome apply done (new logic)', {
+    await dblog(runId, 'info', 'Navidrome apply done', {
       target: opts.target,
       star_total: starTotal,
       unresolved: plan.counts.unresolved,
