@@ -8,8 +8,31 @@ export type NdAuth =
   | { user: string; pass: string; client?: string; apiVer?: string }
   | { user: string; token: string; salt: string; client?: string; apiVer?: string };
 
+function stripTrailingSlashes(s: string): string {
+  let i = s.length;
+  while (i > 0 && s.charCodeAt(i - 1) === 47 /* '/' */) i--;
+  return i === s.length ? s : s.slice(0, i);
+}
+
+function collapseWhitespace(src: string): string {
+  let out = '';
+  let inWs = false;
+  for (const ch of src) {
+    const isWs = ch.trim() === '';
+    if (isWs) {
+      if (!inWs && out.length > 0) out += ' ';
+      inWs = true;
+    } else {
+      out += ch;
+      inWs = false;
+    }
+  }
+  return out.trim();
+}
+
+// Нормализуем ключ для "мягких" сравнений: lowerCase + схлопывание пробелов
 function nkey(s: string) {
-  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return collapseWhitespace((s || '').toLowerCase());
 }
 
 export class NavidromeClient {
@@ -20,7 +43,7 @@ export class NavidromeClient {
   private authPass?: string;
 
   constructor(baseUrl: string, auth: NdAuth, authPass?: string) {
-    this.base = (baseUrl || '').replace(/\/+$/, '');
+    this.base = stripTrailingSlashes(baseUrl || '');
     this.auth = auth;
     this.client = auth.client || 'YM2LIDARR';
     this.apiVer = auth.apiVer || '1.16.1';
