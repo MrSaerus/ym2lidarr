@@ -1,6 +1,5 @@
 // apps/api/src/routes/navidrome.ts
 import { Router } from 'express';
-import RateLimit from 'express-rate-limit';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
@@ -11,26 +10,16 @@ import { NavidromeClient } from '../services/navidrome';
 
 export const navidromeRouter = Router();
 
-const navidromeLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-navidromeRouter.use(navidromeLimiter);
+/* ------------------------------------------------------------- */
+/* utils                                                         */
+/* ------------------------------------------------------------- */
 
-const log = createLogger({ scope: 'route.navidrome' });
-
-// type PlanBody = {
-//   navidromeUrl?: string;
-//   navidromeUser?: string;
-//   navidromePass?: string;
-//   navidromeToken?: string;
-//   navidromeSalt?: string;
-//   target?: 'artists' | 'albums' | 'tracks' | 'all' | 'both'; // 'both' нормализуем в 'all'
-//   policy?: 'yandex' | 'navidrome';
-//   withNdState?: boolean;
-// };
+// Безопасно убираем хвостовые слэши без регекспов (O(n))
+function stripTrailingSlashes(s: string): string {
+  let i = s.length;
+  while (i > 0 && s.charCodeAt(i - 1) === 47 /* '/' */) i--;
+  return i === s.length ? s : s.slice(0, i);
+}
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x.trim() : '';
@@ -49,6 +38,20 @@ function chooseAuth(user: string, pass: string, token: string, salt: string) {
   // fallback: если только token без salt — это заведомо плохо, не возвращаем
   return { user, pass } as const; // пустой pass пусть отловится проверками выше
 }
+
+/* ------------------------------------------------------------- */
+/* rate limiting                                                 */
+/* ------------------------------------------------------------- */
+
+const navidromeLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+navidromeRouter.use(navidromeLimiter);
+
+const log = createLogger({ scope: 'route.navidrome' });
 
 /* ========== PLAN (новая логика) ========== */
 navidromeRouter.post('/plan', async (req, res, next) => {
@@ -72,7 +75,7 @@ navidromeRouter.post('/plan', async (req, res, next) => {
     log.info('navidrome plan requested (new logic)', 'route.nav.plan.start', { target });
 
     const runId = await runNavidromePlan({
-      navUrl: url.replace(/\/+$/, ''),
+      navUrl: stripTrailingSlashes(url),
       auth,
       target,
     });
@@ -90,11 +93,12 @@ navidromeRouter.post('/apply', async (req, res, next) => {
   try {
     const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl).replace(/\/+$/, '');
-    const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
-    const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
-    const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
-    const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
+    const rawUrl = str(setting?.navidromeUrl ?? req.body?.navidromeUrl);
+    const url    = stripTrailingSlashes(rawUrl);
+    const user   = str(setting?.navidromeUser ?? req.body?.navidromeUser);
+    const pass   = str(setting?.navidromePass ?? req.body?.navidromePass);
+    const token  = str(setting?.navidromeToken ?? req.body?.navidromeToken);
+    const salt   = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
 
     if (!url || !user || (!pass && !(token && salt))) {
       res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
@@ -145,7 +149,7 @@ navidromeRouter.post('/apply', async (req, res, next) => {
 });
 
 /* ========== TEST ========== */
-const navTestLimiter = RateLimit({
+const navTestLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 10,
   standardHeaders: true,
@@ -156,11 +160,12 @@ navidromeRouter.post('/test', navTestLimiter, async (req, res, next) => {
     // Берём из БД дефолты, а body позволяет переопределить (как на фронте)
     const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    const url   = str(req.body?.navidromeUrl   ?? setting?.navidromeUrl).replace(/\/+$/, '');
-    const user  = str(req.body?.navidromeUser  ?? setting?.navidromeUser);
-    const pass  = str(req.body?.navidromePass  ?? setting?.navidromePass);
-    const token = str(req.body?.navidromeToken ?? setting?.navidromeToken);
-    const salt  = str(req.body?.navidromeSalt  ?? setting?.navidromeSalt);
+    const rawUrl = str(req.body?.navidromeUrl ?? setting?.navidromeUrl);
+    const url    = stripTrailingSlashes(rawUrl);
+    const user   = str(req.body?.navidromeUser  ?? setting?.navidromeUser);
+    const pass   = str(req.body?.navidromePass  ?? setting?.navidromePass);
+    const token  = str(req.body?.navidromeToken ?? setting?.navidromeToken);
+    const salt   = str(req.body?.navidromeSalt  ?? setting?.navidromeSalt);
 
     if (!url || !user || (!pass && !(token && salt))) {
       res.status(400).json({
@@ -192,4 +197,3 @@ navidromeRouter.post('/test', navTestLimiter, async (req, res, next) => {
 });
 
 export default navidromeRouter;
-
