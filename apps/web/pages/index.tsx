@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Nav from '../components/Nav';
 import Footer from '../components/Footer';
 import ProgressBar from '../components/ProgressBar';
-import { api } from '../lib/api';
+import { api, getApiBase } from '../lib/api';
 import { toastOk } from '../lib/toast';
 import { ResponsiveTable } from '../components/ResponsiveTable';
 
@@ -127,7 +127,11 @@ export default function OverviewPage() {
 
   const [cronJobs, setCronJobs] = useState<CronItem[]>([]);
   const [now, setNow] = useState<number>(Date.now());
-
+  const [apiBase, setApiBase] = useState<string>('/api'); // SSR fallback (если есть прокси)
+  useEffect(() => {
+    const b = (getApiBase() || '/api').replace(/\/+$/, '');
+    setApiBase(b);
+  }, []);
   const loadScheduler = useCallback(async () => {
     try {
       const r = await api<{ok:boolean;jobs:CronItem[]}>('/api/settings/scheduler');
@@ -382,7 +386,7 @@ export default function OverviewPage() {
         <section className="grid gap-4 md:grid-cols-1">
           <div className="panel p-3 sm:p-4">
             <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="section-title">Latest Custom artists</div>
+              <div className="section-title">Latest Custom artists</div>
               <div className="sm:ml-auto -mx-2 px-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
                 <button className="btn btn-outline shrink-0" onClick={matchCustomAll} disabled={isBusy('customMatch')}>
                   {isBusy('customMatch') ? 'Matching…' : 'Match MB'}
@@ -797,6 +801,46 @@ export default function OverviewPage() {
               </table>
             </ResponsiveTable>
           )}
+        </section>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="panel p-3 sm:p-4 text-center">
+            <div className="text-sm text-gray-500">JSON</div>
+            <div className="mt-3 flex justify-center gap-3 flex-wrap">
+              <a className="btn btn-outline" href={`${apiBase}/api/export/artists.json`} target="_blank"
+                 rel="noreferrer">
+                Artists JSON
+              </a>
+              <a className="btn btn-outline" href={`${apiBase}/api/export/albums.json`} target="_blank"
+                 rel="noreferrer">
+                Albums JSON
+              </a>
+            </div>
+          </div>
+
+          <div className="panel p-3 sm:p-4 text-center">
+            <div className="text-sm text-gray-500">CSV</div>
+            <div className="mt-3 flex justify-center gap-3 flex-wrap">
+              <a className="btn btn-outline" href={`${apiBase}/api/export/artists.csv`} download>
+                Artists CSV
+              </a>
+              <a className="btn btn-outline" href={`${apiBase}/api/export/albums.csv`} download>
+                Albums CSV
+              </a>
+            </div>
+          </div>
+
+          <div className="panel p-3 sm:p-4 text-center">
+            <div className="text-sm text-gray-500">Markdown</div>
+            <div className="mt-3 flex justify-center gap-3 flex-wrap">
+              <a className="btn btn-outline" href={`${apiBase}/api/export/artists.md`} target="_blank" rel="noreferrer">
+                Artists MD
+              </a>
+              <a className="btn btn-outline" href={`${apiBase}/api/export/albums.md`} target="_blank" rel="noreferrer">
+                Albums MD
+              </a>
+            </div>
+          </div>
         </section>
       </main>
       <Footer />
