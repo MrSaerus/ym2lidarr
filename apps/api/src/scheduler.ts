@@ -13,6 +13,7 @@ import {
   runYandexPush,
   runLidarrPullEx,
 } from './workers';
+import { runNavidromeApply } from './workers';
 import { createLogger } from './lib/logger';
 
 const log = createLogger({ scope: 'scheduler' });
@@ -69,6 +70,7 @@ let jobs: {
   lidarrPull?: cron.ScheduledTask;
 
   backup?: cron.ScheduledTask;
+  navidromePush?: cron.ScheduledTask;
 } = {};
 
 // Памятка: какие jobKeys сейчас запущены ИМЕННО кроном (для UI "State")
@@ -79,7 +81,8 @@ type JobKey =
   | 'lidarrPull'
   | 'customMatch'
   | 'customPush'
-  | 'backup';
+  | 'backup'
+  | 'navidromePush';
 
 const cronActivity: Partial<Record<JobKey, boolean>> = {};
 
@@ -216,6 +219,7 @@ async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<
   return dbBusy || cronBusy;
 }
 
+
 /* ====================== RELOAD JOBS ====================== */
 
 export async function reloadJobs() {
@@ -314,6 +318,50 @@ export async function reloadJobs() {
     log.debug('scheduled backup', 'cron.plan', { key: 'backup', cron: s.backupCron });
   }
 
+// ========== NAVIDROME PUSH ==========
+// управляется полями: enableCronNavidromePush + cronNavidromePush
+  if (s?.enableCronNavidromePush && s?.cronNavidromePush) {
+    const expr = String(s.cronNavidromePush);
+    if (cron.validate(expr)) {
+      jobs.navidromePush = cron.schedule(expr, async () => {
+        cronActivity.navidromePush = true;
+        const lg = log.child({ scope: 'scheduler.navidromePush' });
+        try {
+          // читаем текущие настройки для аутентификации и таргета/политики
+          const st = await prisma.setting.findFirst();
+          const navUrl  = (st?.navidromeUrl || '').replace(/\/+$/, '');
+          const user    = st?.navidromeUser || '';
+          const pass    = st?.navidromePass || '';
+          const token   = st?.navidromeToken || '';
+          const salt    = st?.navidromeSalt || '';
+          const target  = (st?.navidromeSyncTarget as any) || 'tracks';
+          const policy  = (st?.likesPolicySourcePriority as any) || 'yandex';
+          if (!navUrl || !user || (!pass && !(token && salt))) {
+            lg.warn('navidrome not configured, skip', 'cron.nav.push.skip.misconfig');
+          } else {
+            // сам воркер стартует run и ведёт логи (reuseRunId не нужен)
+            // dryRun=false — реальный пуш лайков
+            const auth = pass ? { user, pass } : { user, token, salt };
+            await runNavidromeApply({
+              navUrl,
+              auth,
+              target,
+              policy,
+              dryRun: false,
+            });
+            lg.info('navidrome push tick done', 'cron.nav.push.done', { target, policy });
+          }
+        } catch (e: any) {
+          log.error('navidrome push tick failed', 'cron.nav.push.fail', { err: e?.message });
+        } finally {
+          cronActivity.navidromePush = false;
+        }
+      });
+      jobs.navidromePush.start();
+    } else {
+      log.warn('invalid cron for navidromePush', 'cron.nav.push.invalid', { expr: expr });
+    }
+  }
   log.info('jobs reloaded', 'cron.reload.done');
 }
 
@@ -360,6 +408,12 @@ const JOB_META: Record<
     prefixes: ['custom.push.', 'custom.'],
   },
   backup: { title: 'Backup', settingCron: 'backupCron', enabledFlag: 'backupEnabled', prefixes: [] },
+  navidromePush: {
+    title: 'Navidrome: Push likes',
+    settingCron: 'cronNavidromePush',
+    enabledFlag: 'enableCronNavidromePush',
+    prefixes: ['nav.apply.', 'navidrome.'],
+  },
 };
 
 export async function getCronStatuses() {

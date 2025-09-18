@@ -116,7 +116,8 @@ r.post('/push', async (req, res) => {
 r.get('/artists', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
-    lg.info('yandex artists requested', 'yandex.artists.start', { page, pageSize, q, sortBy, sortDir });
+    const missingMb = String(req.query?.missingMb ?? '0') === '1';
+    lg.info('yandex artists requested', 'yandex.artists.start', { page, pageSize, q, sortBy, sortDir, missingMb });
 
     try {
         // Берём только present:true и только записи с ЧИСЛОВЫМ ymId
@@ -136,7 +137,9 @@ r.get('/artists', async (req, res) => {
                 String(a.ymId).includes(q),
             );
         }
-
+        if (missingMb) {
+            rows = rows.filter((a) => !a.mbid || a.mbid.trim() === '');
+        }
         // Сортировка
         rows.sort((a, b) => {
             if (sortBy === 'id') {
@@ -184,7 +187,8 @@ r.get('/artists', async (req, res) => {
 r.get('/albums', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
-    lg.info('yandex albums requested', 'yandex.albums.start', { page, pageSize, q, sortBy, sortDir });
+    const missingMb = String(req.query?.missingMb ?? '0') === '1';
+    lg.info('yandex albums requested', 'yandex.albums.start', { page, pageSize, q, sortBy, sortDir, missingMb });
 
     try {
         // Берём только present:true и только с ЧИСЛОВЫМ ymId
@@ -205,7 +209,9 @@ r.get('/albums', async (req, res) => {
                 String(r.ymId).includes(q),
             );
         }
-
+       if (missingMb) {
+           rows = rows.filter((r) => !r.rgMbid || r.rgMbid.trim() === '');
+       }
         // Сортировка
         rows.sort((a, b) => {
             let cmp = 0;
