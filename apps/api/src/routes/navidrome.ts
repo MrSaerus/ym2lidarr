@@ -1,5 +1,6 @@
 // apps/api/src/routes/navidrome.ts
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
@@ -8,6 +9,17 @@ import { startRun, patchRunStats } from '../log';
 import { NavidromeClient } from '../services/navidrome'; // <-- ДОБАВЛЕНО
 
 export const navidromeRouter = Router();
+
+// Apply rate limiting to all routes in navidromeRouter
+// Example: max 5 requests per minute per IP
+const navidromeLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 5, // limit each IP to 5 requests per windowMs
+  standardHeaders: true, // Return rate limit info in the RateLimit-* headers
+  legacyHeaders: false, // Disable the X-RateLimit-* headers
+});
+navidromeRouter.use(navidromeLimiter);
+
 const log = createLogger({ scope: 'route.navidrome' });
 
 // type PlanBody = {
