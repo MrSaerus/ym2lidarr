@@ -136,7 +136,6 @@ function pickSettings(input: any) {
     if (ALLOWED_FIELDS.has(k)) (out as any)[k] = (input as any)[k];
   }
 
-  // нормализации (существующие)
   if ('yandexMatchTarget' in out) {
     const v = String(out.yandexMatchTarget || '').toLowerCase();
     out.yandexMatchTarget = ['artists','albums','both'].includes(v) ? v : 'both';

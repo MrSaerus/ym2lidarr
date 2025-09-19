@@ -166,6 +166,27 @@ export default function SettingsPage() {
 
   type StartRunRes = { started?: boolean; runId?: number; ok?: boolean; error?: string };
 
+  // ---------- Jackett Indexers ----------
+  type JackettIndexer = {
+    id: number;
+    name: string;
+    enabled: boolean;
+    allowRss: boolean;
+    allowAuto: boolean;
+    allowInteractive: boolean;
+    baseUrl: string;
+    apiKey: string;                 // с бэка приходит пустым для безопасности
+    categories?: string[] | null;
+    tags?: string | null;
+    minSeeders?: number | null;
+    order: number;
+  };
+
+  const [idxs, setIdxs] = useState<JackettIndexer[]>([]);
+  const [idxLoading, setIdxLoading] = useState(false);
+  const [idxModalOpen, setIdxModalOpen] = useState(false);
+  const [idxEdit, setIdxEdit] = useState<Partial<JackettIndexer> | null>(null);
+
   useEffect(() => {
     if (!msg || !msg.trim()) return;
     if (/(error|failed|ошибка)/i.test(msg))      toastErr(msg);
@@ -306,7 +327,6 @@ export default function SettingsPage() {
     setMsg('Navidrome plan — запускаю…');
     setNavBusy((s) => ({ ...s, plan: true }));
     try {
-      // строго как у тебя: без body
       await api<any>('/api/navidrome/plan', { method: 'POST' });
       setMsg('Navidrome plan started');
     } catch (e: any) {
@@ -320,23 +340,94 @@ export default function SettingsPage() {
     setMsg('Navidrome push — запускаю…');
     setNavBusy((s) => ({ ...s, push: true }));
     try {
-      // строго как у тебя: /apply + { target, policy, dryRun:false }
       const body = {
         target: settings.navidromeSyncTarget || 'tracks',
         policy: settings.likesPolicySourcePriority || 'yandex',
         dryRun: false,
       };
       const r = await api<any>('/api/navidrome/apply', { method: 'POST', body });
-
       const started = r?.ok || !!r?.runId;
       if (!started) throw new Error(r?.error || 'apply: unknown error');
-
       setMsg(r?.runId ? `Navidrome apply started (runId=${r.runId})` : 'Navidrome apply started');
     } catch (e: any) {
       setMsg(`Navidrome push error: ${e?.message || String(e)}`);
     } finally {
       setNavBusy((s) => ({ ...s, push: false }));
     }
+  }
+
+  // ---- Jackett CRUD/Test ----
+  async function loadIndexers() {
+    setIdxLoading(true);
+    try {
+      const r = await api<JackettIndexer[]>('/api/jackett/indexers');
+      setIdxs(Array.isArray(r) ? r : []);
+    } catch (e:any) {
+      toastErr(e?.message || String(e));
+    } finally {
+      setIdxLoading(false);
+    }
+  }
+  useEffect(() => { loadIndexers(); }, []);
+
+  function idxOpenNew() {
+    setIdxEdit({
+      id: 0,
+      name: '',
+      enabled: true,
+      allowRss: true,
+      allowAuto: true,
+      allowInteractive: true,
+      baseUrl: '',
+      apiKey: '',
+      categories: ['3000','3010','3040'],
+      order: 100,
+    });
+    setIdxModalOpen(true);
+  }
+
+  function idxOpenEdit(it: JackettIndexer) {
+    setIdxEdit({ ...it, apiKey: '' }); // ключ не показываем, при необходимости вводим заново
+    setIdxModalOpen(true);
+  }
+
+  async function idxSave() {
+    if (!idxEdit) return;
+    const body: any = { ...idxEdit };
+    // гарантируем формат категорий
+    if (!Array.isArray(body.categories)) body.categories = null;
+    if (!body.name) body.name = 'indexer';
+    if (!body.baseUrl) { toastErr('baseUrl required'); return; }
+
+    try {
+      if (!idxEdit.id) {
+        await api('/api/jackett/indexers', { method: 'POST', body });
+      } else {
+        await api(`/api/jackett/indexers/${idxEdit.id}`, { method: 'PUT', body });
+      }
+      setIdxModalOpen(false);
+      await loadIndexers();
+      toastOk('Indexer saved');
+    } catch (e:any) { toastErr(e?.message || String(e)); }
+  }
+
+  async function idxDelete(id: number) {
+    if (!confirm('Delete indexer?')) return;
+    try {
+      await api(`/api/jackett/indexers/${id}`, { method: 'DELETE' });
+      await loadIndexers();
+      toastOk('Deleted');
+    } catch (e:any) { toastErr(e?.message || String(e)); }
+  }
+
+  async function idxTest(it: JackettIndexer) {
+    setMsg(`Testing ${it.name || it.baseUrl}…`);
+    try {
+      const r = await api<any>(`/api/jackett/indexers/${it.id}/test`, { method: 'POST' });
+      const ok = !!r?.ok;
+      setMsg(ok ? `Jackett OK${r?.version ? ` (v${r.version})` : ''}` : `Jackett failed: ${r?.error || 'unknown'}`);
+      ok ? toastOk('Jackett OK') : toastErr(r?.error || 'Jackett test failed');
+    } catch (e:any) { setMsg(e?.message || String(e)); toastErr(String(e)); }
   }
 
   return (
@@ -533,6 +624,39 @@ export default function SettingsPage() {
           </FormRow>
           <div className="toolbar">
             <button className="btn btn-outline" onClick={testNavidrome}>Test Navidrome</button>
+          </div>
+        </section>
+
+        {/* Jackett Indexers */}
+        <section className="panel p-4 space-y-3">
+          <div className="section-title flex items-center justify-between">
+            <span>Jackett Indexers</span>
+            <button className="btn btn-primary" onClick={idxOpenNew}>Add indexer</button>
+          </div>
+
+          {idxLoading ? <div className="text-sm text-gray-400">Loading…</div> : null}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {idxs.map((it) => (
+              <div key={it.id} className="border border-gray-700 rounded p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-medium">{it.name}</div>
+                  <div className="text-xs">{it.enabled ? 'ENABLED' : 'DISABLED'}</div>
+                </div>
+                <div className="text-xs text-gray-400 break-all">{it.baseUrl}</div>
+                <div className="text-xs">
+                  {['RSS:' + (it.allowRss ? 'on' : 'off'),
+                    'Auto:' + (it.allowAuto ? 'on' : 'off'),
+                    'Interactive:' + (it.allowInteractive ? 'on' : 'off')].join(' · ')}
+                </div>
+                <div className="text-xs">Cats: {(it.categories || []).join(', ') || '—'}</div>
+                <div className="flex gap-2">
+                  <button className="btn btn-outline" onClick={() => idxTest(it)}>Test</button>
+                  <button className="btn btn-outline" onClick={() => idxOpenEdit(it)}>Edit</button>
+                  <button className="btn btn-outline" onClick={() => idxDelete(it.id)}>Delete</button>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -749,6 +873,65 @@ export default function SettingsPage() {
         <div className="toolbar">
           <button className="btn btn-primary" onClick={save} disabled={loading}>{loading ? 'Saving…' : 'Save settings'}</button>
         </div>
+
+        {/* Jackett modal */}
+        {idxModalOpen && idxEdit ? (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+            <div className="bg-gray-900 w-full max-w-2xl rounded-xl p-4 space-y-3">
+              <div className="text-lg font-semibold">{idxEdit.id ? 'Edit indexer' : 'Add indexer'}</div>
+
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-2">
+                <FormRow label="Name">
+                  <input className="input" value={idxEdit.name || ''} onChange={(e)=>setIdxEdit({ ...idxEdit, name: e.target.value })}/>
+                </FormRow>
+              </div>
+                <div className="grid grid-cols-1 md:grid-cols-1 gap-2">
+                <FormRow label="Order">
+                  <input className="input" type="number" value={idxEdit.order ?? 100}
+                         onChange={(e)=>setIdxEdit({ ...idxEdit, order: Number(e.target.value || 100) })}/>
+                </FormRow>
+                </div>
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-2">
+                <FormRow label="Base URL" help="Torznab endpoint (без хвостового /)">
+                  <input className="input" value={idxEdit.baseUrl || ''}
+                         onChange={(e)=>setIdxEdit({ ...idxEdit, baseUrl: e.target.value.replace(/\/+$/,'') })}/>
+                </FormRow>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-2">
+                <FormRow label="API Key">
+                  <input className="input" value={idxEdit.apiKey || ''} onChange={(e)=>setIdxEdit({ ...idxEdit, apiKey: e.target.value })} placeholder="********"/>
+                </FormRow>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-1 gap-2">
+                <FormRow label="Categories" help="Через запятую: 3000,3010,3040">
+                  <input className="input"
+                         value={Array.isArray(idxEdit.categories) ? idxEdit.categories.join(',') : ''}
+                         onChange={(e)=>{
+                           const raw = e.target.value.trim();
+                           setIdxEdit({ ...idxEdit,
+                             categories: raw ? raw.split(',').map(s=>s.trim()).filter(Boolean) : null });
+                         }}/>
+                </FormRow>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                <label className="flex items-center gap-2"><input type="checkbox"
+                                                                  checked={!!idxEdit.enabled} onChange={(e)=>setIdxEdit({ ...idxEdit, enabled: e.target.checked })}/> Enabled</label>
+                <label className="flex items-center gap-2"><input type="checkbox"
+                                                                  checked={!!idxEdit.allowRss} onChange={(e)=>setIdxEdit({ ...idxEdit, allowRss: e.target.checked })}/> RSS</label>
+                <label className="flex items-center gap-2"><input type="checkbox"
+                                                                  checked={!!idxEdit.allowAuto} onChange={(e)=>setIdxEdit({ ...idxEdit, allowAuto: e.target.checked })}/> Auto</label>
+                <label className="flex items-center gap-2"><input type="checkbox"
+                                                                  checked={!!idxEdit.allowInteractive} onChange={(e)=>setIdxEdit({ ...idxEdit, allowInteractive: e.target.checked })}/> Interactive</label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button className="btn btn-outline" onClick={()=>setIdxModalOpen(false)}>Cancel</button>
+                <button className="btn btn-primary" onClick={idxSave}>Save</button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     </>
   );

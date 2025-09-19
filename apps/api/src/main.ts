@@ -25,6 +25,7 @@ import { createLogger } from './lib/logger';
 import { prisma } from './prisma';
 import { instanceId } from './instance';
 import { navidromeRouter } from './routes/navidrome'
+import jackettIndexers from './routes/jackett';
 
 const app = express();
 app.use(requestLogger);
@@ -152,6 +153,7 @@ app.use('/api/custom-artists', customArtistsRoute);
 app.use('/api/webhooks', lidarrWebhook);
 app.use('/api/debug', qbtDebug);
 app.use('/api/navidrome', navidromeRouter);
+app.use('/api/jackett/indexers', jackettIndexers)
 
 // Runs/logs router (supports /runs and /api/runs internally)
 app.use(runsRouter);

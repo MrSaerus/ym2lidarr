@@ -278,6 +278,80 @@ model SyncLog {
   @@index([level, ts])
 }
 
+// ===================== Torrents: enums =====================
+enum TorrentScope {
+  artist
+  album
+  custom
+}
+
+enum TorrentStatus {
+  queued
+  searching
+  found
+  added
+  downloading
+  downloaded
+  moving
+  moved
+  failed
+  cancelled
+}
+
+enum MoveCollisionPolicy {
+  ask
+  replace
+  skip
+  merge
+}
+
+// ===================== Torrents: core models =====================
+model TorrentTask {
+  id         Int                  @id @default(autoincrement())
+  scope      TorrentScope
+  artistId   Int?
+  albumId    Int?
+  query      String?
+  status     TorrentStatus
+  qbitHash   String?              @unique
+  indexer    String?
+  title      String?
+  size       BigInt?
+  seeders    Int?
+  quality    String?
+  finalPath  String?
+  movePolicy MoveCollisionPolicy?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  lastError  String?
+  retries    Int                  @default(0)
+
+  releases TorrentRelease[]
+
+  @@index([status])
+  @@index([artistId])
+  @@index([albumId])
+}
+
+model TorrentRelease {
+  id       Int       @id @default(autoincrement())
+  taskId   Int
+  indexer  String
+  title    String
+  link     String?
+  magnet   String?
+  size     BigInt?
+  seeders  Int?
+  leechers Int?
+  pubDate  DateTime?
+  quality  String?
+  score    Float
+
+  task TorrentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
 // /* ===================== Settings ===================== */
 
 model Setting {
@@ -358,4 +432,28 @@ model Setting {
   navidromeSyncTarget       String? // 'artists' | 'albums' | 'tracks' | 'all'
   likesPolicySourcePriority String? // 'yandex' | 'navidrome'
   cronNavidromePush         String?
+}
+
+model JackettIndexer {
+  id               Int     @id @default(autoincrement())
+  name             String
+  enabled          Boolean @default(true)
+  allowRss         Boolean @default(true)
+  allowAuto        Boolean @default(true)
+  allowInteractive Boolean @default(true)
+
+  baseUrl String
+  apiKey  String
+
+  categories Json?
+
+  tags       String? // необязательные теги (через запятую), для будущих фильтров
+  minSeeders Int? // опциональный минимум сидов на индексер
+
+  order     Int      @default(100) // порядок в списке
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, order])
+  @@index([name])
 }
