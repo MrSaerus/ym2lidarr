@@ -1,3 +1,4 @@
+// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -23,12 +24,14 @@ model YandexArtist {
   createdAt  DateTime  @default(now())
 
   mbid String?
+  ndId String?
 
   albums YandexAlbum[]
 
   @@index([name])
   @@index([present])
   @@index([mbid])
+  @@index([ndId])
 }
 
 model YandexAlbum {
@@ -50,11 +53,65 @@ model YandexAlbum {
   artistRef      YandexArtist? @relation(fields: [yandexArtistId], references: [ymId], onDelete: SetNull)
 
   rgMbid String?
+  ndId   String?
 
   @@index([title])
   @@index([present])
   @@index([yandexArtistId])
   @@index([rgMbid])
+  @@index([ndId])
+}
+
+model YandexTrack {
+  ymId        String    @id
+  title       String
+  artist      String?
+  album       String?
+  durationSec Int?
+  key         String    @unique
+  present     Boolean   @default(false)
+  lastSeenAt  DateTime?
+  yGone       Boolean   @default(false)
+  yGoneAt     DateTime?
+
+  ymAlbumId  String?
+  ymArtistId String?
+  recMbid    String?
+  rgMbid     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // обратная сторона связи для YandexLikeSync.trackRef
+  likeSyncs YandexLikeSync[]
+}
+
+model YandexLikeSync {
+  id                Int       @id @default(autoincrement())
+  kind              String
+  ymId              String?
+  key               String?
+  ndId              String?
+  status            String    @default("pending")
+  source            String    @default("yandex")
+  firstSeenAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  lastTriedAt       DateTime?
+  lastError         String?
+  starredAt         DateTime?
+  unstarredAt       DateTime?
+  starRunId         Int?
+  unstarRunId       Int?
+  starPlannedAt     DateTime?
+  starConfirmedAt   DateTime?
+  unstarPlannedAt   DateTime?
+  unstarConfirmedAt DateTime?
+
+  // связь на трек; при удалении YandexTrack мы ничего не делаем
+  trackRef YandexTrack? @relation(fields: [ymId], references: [ymId])
+
+  @@index([status, lastTriedAt])
+  @@index([kind, ymId])
+  @@unique([kind, ymId])
 }
 
 // /* ===================== Ingest: Lidarr ===================== */
@@ -273,12 +330,13 @@ model Setting {
   cronLidarrPull   String @default("0 3 * * *")
   lidarrPullTarget String @default("both") // 'both' | 'artists' | 'albums'
 
-  enableCronYandexPull  Boolean @default(true)
-  enableCronYandexMatch Boolean @default(true)
-  enableCronYandexPush  Boolean @default(true)
-  enableCronCustomMatch Boolean @default(true)
-  enableCronCustomPush  Boolean @default(true)
-  enableCronLidarrPull  Boolean @default(true)
+  enableCronYandexPull    Boolean @default(false)
+  enableCronYandexMatch   Boolean @default(false)
+  enableCronYandexPush    Boolean @default(false)
+  enableCronCustomMatch   Boolean @default(false)
+  enableCronCustomPush    Boolean @default(false)
+  enableCronLidarrPull    Boolean @default(false)
+  enableCronNavidromePush Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -291,4 +349,13 @@ model Setting {
   qbtPass          String?
   qbtDeleteFiles   Boolean @default(true)
   qbtWebhookSecret String?
+
+  navidromeUrl              String?
+  navidromeUser             String?
+  navidromePass             String?
+  navidromeToken            String?
+  navidromeSalt             String?
+  navidromeSyncTarget       String? // 'artists' | 'albums' | 'tracks' | 'all'
+  likesPolicySourcePriority String? // 'yandex' | 'navidrome'
+  cronNavidromePush         String?
 }

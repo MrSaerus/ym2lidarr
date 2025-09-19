@@ -24,6 +24,7 @@ import { requestLogger, errorHandler } from './middleware/logging';
 import { createLogger } from './lib/logger';
 import { prisma } from './prisma';
 import { instanceId } from './instance';
+import { navidromeRouter } from './routes/navidrome'
 
 const app = express();
 app.use(requestLogger);
@@ -150,6 +151,7 @@ app.use('/api/unified', unifiedRouter);
 app.use('/api/custom-artists', customArtistsRoute);
 app.use('/api/webhooks', lidarrWebhook);
 app.use('/api/debug', qbtDebug);
+app.use('/api/navidrome', navidromeRouter);
 
 // Runs/logs router (supports /runs and /api/runs internally)
 app.use(runsRouter);

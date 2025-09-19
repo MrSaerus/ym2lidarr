@@ -16,6 +16,7 @@ type YArtistRow = {
     mbid?: string | null;
     mbUrl?: string | null;
 };
+
 type YAlbumRow = {
     id: number;
     title: string;
@@ -46,15 +47,15 @@ function LinkSlot({
 }) {
     if (!href) {
         return (
-            <span className={`link-chip ${className} invisible select-none`} aria-hidden="true">
+          <span className={`link-chip ${className} invisible select-none`} aria-hidden="true">
         {label}
       </span>
         );
     }
     return (
-        <a href={href} target="_blank" rel="noreferrer" className={`link-chip ${className}`}>
-            {label}
-        </a>
+      <a href={href} target="_blank" rel="noreferrer" className={`link-chip ${className}`}>
+          {label}
+      </a>
     );
 }
 
@@ -66,10 +67,10 @@ function LinksFixedRow({
     mbUrl?: string | null;
 }) {
     return (
-        <div className={`grid grid-cols-2 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
-            <LinkSlot href={yandexUrl} label="Yandex" className="link-chip--ym" />
-            <LinkSlot href={mbUrl} label="MusicBrainz" className="link-chip--mb" />
-        </div>
+      <div className={`grid grid-cols-2 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
+          <LinkSlot href={yandexUrl} label="Yandex" className="link-chip--ym" />
+          <LinkSlot href={mbUrl} label="MusicBrainz" className="link-chip--mb" />
+      </div>
     );
 }
 /* ================================================ */
@@ -92,6 +93,9 @@ export default function YandexPage() {
     const [sortByAlbums, setSortByAlbums] = useState<SortFieldAlbums>('title');
     const [sortDirAlbums, setSortDirAlbums] = useState<'asc' | 'desc'>('asc');
 
+    /** NEW: filter to show only entries that do NOT have MusicBrainz mapped */
+    const [onlyMissingMb, setOnlyMissingMb] = useState<boolean>(false);
+
     useEffect(() => {
         if (!router.isReady) return;
         const t = router.query.target as string | undefined;
@@ -106,6 +110,9 @@ export default function YandexPage() {
         const sbb = router.query.sortByAlbums as string | undefined;
         const sdb = router.query.sortDirAlbums as string | undefined;
 
+        // NEW: read filter from URL (?missingMb=1)
+        const qMissingMb = router.query.missingMb as string | undefined;
+
         if (qp) setPage(Math.max(1, parseInt(qp, 10) || 1));
         if (qs) setPageSize(Math.max(1, parseInt(qs, 10) || 50));
         if (typeof qq === 'string') setQ(qq);
@@ -114,6 +121,8 @@ export default function YandexPage() {
         if (sda === 'asc' || sda === 'desc') setSortDirArtists(sda);
         if (sbb === 'title' || sbb === 'artist' || sbb === 'id') setSortByAlbums(sbb as SortFieldAlbums);
         if (sdb === 'asc' || sdb === 'desc') setSortDirAlbums(sdb);
+
+        setOnlyMissingMb(qMissingMb === '1');
     }, [
         router.isReady,
         router.query.target,
@@ -124,45 +133,61 @@ export default function YandexPage() {
         router.query.sortDirArtists,
         router.query.sortByAlbums,
         router.query.sortDirAlbums,
+        router.query.missingMb,
     ]);
 
     const load = useCallback(
-        async (p = page) => {
-            setLoading(true);
-            setErrorMsg('');
-            try {
-                const params = new URLSearchParams({
-                    page: String(p),
-                    pageSize: String(pageSize),
-                    q,
-                    sortBy: target === 'artists' ? sortByArtists : sortByAlbums,
-                    sortDir: target === 'artists' ? sortDirArtists : sortDirAlbums,
-                } as Record<string, string>);
+      async (p = page) => {
+          setLoading(true);
+          setErrorMsg('');
+          try {
+              const params = new URLSearchParams({
+                  page: String(p),
+                  pageSize: String(pageSize),
+                  q,
+                  sortBy: target === 'artists' ? (sortByArtists as string) : (sortByAlbums as string),
+                  sortDir: target === 'artists' ? sortDirArtists : sortDirAlbums,
+              } as Record<string, string>);
 
-                const path =
-                    target === 'artists'
-                        ? `/api/yandex/artists?${params.toString()}`
-                        : `/api/yandex/albums?${params.toString()}`;
+              // NEW: pass filter flag to API
+              if (onlyMissingMb) params.set('missingMb', '1');
 
-                const r = await api<ApiResp<YArtistRow | YAlbumRow>>(path);
-                setRows(r.items || []);
-                setPage(p);
-                setTotal(r.total || 0);
-            } catch (e: any) {
-                setErrorMsg(e?.message || String(e));
-                setRows([]);
-                setTotal(0);
-            } finally {
-                setLoading(false);
-            }
-        },
-        [page, pageSize, q, target, sortByArtists, sortDirArtists, sortByAlbums, sortDirAlbums],
+              const path =
+                target === 'artists'
+                  ? `/api/yandex/artists?${params.toString()}`
+                  : `/api/yandex/albums?${params.toString()}`;
+
+              const r = await api<ApiResp<YArtistRow | YAlbumRow>>(path);
+              setRows(r.items || []);
+              setPage(p);
+              setTotal(r.total || 0);
+          } catch (e: any) {
+              setErrorMsg(e?.message || String(e));
+              setRows([]);
+              setTotal(0);
+          } finally {
+              setLoading(false);
+          }
+      },
+      [page, pageSize, q, target, sortByArtists, sortDirArtists, sortByAlbums, sortDirAlbums, onlyMissingMb]
     );
 
     useEffect(() => {
         if (!router.isReady) return;
         load(page);
-    }, [router.isReady, page, q, pageSize, target, sortByArtists, sortDirArtists, sortByAlbums, sortDirAlbums, load]);
+    }, [
+        router.isReady,
+        page,
+        q,
+        pageSize,
+        target,
+        sortByArtists,
+        sortDirArtists,
+        sortByAlbums,
+        sortDirAlbums,
+        onlyMissingMb,
+        load,
+    ]);
 
     function updateUrl(params: Record<string, string>) {
         if (!router.isReady) return;
@@ -170,6 +195,7 @@ export default function YandexPage() {
             shallow: true,
         });
     }
+
     function setTargetAndUrl(t: Target) {
         setTarget(t);
         setPage(1);
@@ -182,8 +208,10 @@ export default function YandexPage() {
             sortDirArtists,
             sortByAlbums,
             sortDirAlbums,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
+
     function setPageAndUrl(p: number) {
         setPage(p);
         updateUrl({
@@ -195,8 +223,10 @@ export default function YandexPage() {
             sortDirArtists,
             sortByAlbums,
             sortDirAlbums,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
+
     function setPageSizeAndUrl(ps: number) {
         setPageSize(ps);
         setPage(1);
@@ -209,8 +239,10 @@ export default function YandexPage() {
             sortDirArtists,
             sortByAlbums,
             sortDirAlbums,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
+
     function setQAndUrl(newQ: string) {
         setQ(newQ);
         setPage(1);
@@ -223,6 +255,7 @@ export default function YandexPage() {
             sortDirArtists,
             sortByAlbums,
             sortDirAlbums,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
 
@@ -240,8 +273,10 @@ export default function YandexPage() {
             sortDirArtists: dir,
             sortByAlbums,
             sortDirAlbums,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
+
     function setSortAlbumsAndUrl(field: SortFieldAlbums) {
         const dir = sortByAlbums === field ? (sortDirAlbums === 'asc' ? 'desc' : 'asc') : 'asc';
         setSortByAlbums(field);
@@ -256,169 +291,222 @@ export default function YandexPage() {
             sortDirArtists,
             sortByAlbums: field,
             sortDirAlbums: dir,
+            missingMb: onlyMissingMb ? '1' : '0',
         });
     }
 
+    // NEW: toggle helpers for Missing MB filter
+    function setMissingMbAndUrl(val: boolean) {
+        setOnlyMissingMb(val);
+        setPage(1);
+        updateUrl({
+            target,
+            page: '1',
+            pageSize: String(pageSize),
+            q,
+            sortByArtists,
+            sortDirArtists,
+            sortByAlbums,
+            sortDirAlbums,
+            missingMb: val ? '1' : '0',
+        });
+    }
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const headerArrow = (active: boolean) =>
-        active ? (
-            <span className="text-xs text-gray-500">
+      active ? (
+        <span className="text-xs text-gray-500">
         {(target === 'artists' ? sortDirArtists : sortDirAlbums) === 'asc' ? '▲' : '▼'}
       </span>
-        ) : null;
+      ) : null;
 
     return (
-        <>
-            <Nav />
-            <main className="mx-auto max-w-6xl px-4 py-4">
-                <h1 className="h1">Yandex</h1>
-                <div className="toolbar">
-                    <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
-                        <button
-                            className={`btn ${target === 'artists' ? 'btn-primary' : 'btn-outline'}`}
-                            onClick={() => setTargetAndUrl('artists')}
-                        >
-                            Artists
-                        </button>
-                        <button
-                            className={`btn ${target === 'albums' ? 'btn-primary' : 'btn-outline'}`}
-                            onClick={() => setTargetAndUrl('albums')}
-                        >
-                            Albums
-                        </button>
-                    </div>
-                </div>
-                <div className="toolbar">
-                    <input
-                        placeholder={target === 'albums' ? 'Search title or artist…' : 'Search by name…'}
-                        className="input w-80"
-                        value={q}
-                        onChange={(e) => setQAndUrl(e.target.value)}
-                    />
-                    <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
-                        {loading ? 'Refreshing…' : 'Refresh'}
-                    </button>
-                </div>
-                <div className="toolbar">
-                    <div className="ml-auto flex items-center gap-2">
-                        <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
-                        <select className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1" value={pageSize}
-                                onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}>
-                            {[25, 50, 100, 200].map((n) => (
-                                <option key={n} value={n}>
-                                    {n}
-                                </option>
-                            ))}
-                        </select>
-                        <div className="flex items-center gap-1">
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>
-                                {'«'}
-                            </button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(Math.max(1, page - 1))}
-                                    disabled={page <= 1}>
-                                {'‹'}
-                            </button>
-                            <span className="text-xs text-gray-500 px-2">Page {page}/{pageCount}</span>
-                            <button className="btn btn-outline"
-                                    onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))}
-                                    disabled={page >= pageCount}>
-                                {'›'}
-                            </button>
-                            <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)}
-                                    disabled={page >= pageCount}>
-                                {'»'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+      <>
+          <Nav />
+          <main className="mx-auto max-w-6xl px-4 py-4">
+              <h1 className="h1">Yandex</h1>
 
-                {errorMsg && <div className="panel p-3 text-red-500 text-sm">{errorMsg}</div>}
+              <div className="toolbar">
+                  <div className="inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
+                      <button
+                        className={`btn ${target === 'artists' ? 'btn-primary' : 'btn-outline'}`}
+                        onClick={() => setTargetAndUrl('artists')}
+                      >
+                          Artists
+                      </button>
+                      <button
+                        className={`btn ${target === 'albums' ? 'btn-primary' : 'btn-outline'}`}
+                        onClick={() => setTargetAndUrl('albums')}
+                      >
+                          Albums
+                      </button>
+                  </div>
 
-                <div className="panel overflow-x-auto">
-                    <Table className="table-default">
-                        <thead>
+                  {/* NEW: Missing MB toggle */}
+                  <div className="ml-3 inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
+                      <button
+                        className={`btn ${!onlyMissingMb ? 'btn-primary' : 'btn-outline'}`}
+                        onClick={() => setMissingMbAndUrl(false)}
+                        title="Show all"
+                      >
+                          All
+                      </button>
+                      <button
+                        className={`btn ${onlyMissingMb ? 'btn-primary' : 'btn-outline'}`}
+                        onClick={() => setMissingMbAndUrl(true)}
+                        title="Show only entries without MusicBrainz mapping"
+                      >
+                          No MusicBrainz
+                      </button>
+                  </div>
+              </div>
+
+              <div className="toolbar">
+                  <input
+                    placeholder={target === 'albums' ? 'Search title or artist…' : 'Search by name…'}
+                    className="input w-80"
+                    value={q}
+                    onChange={(e) => setQAndUrl(e.target.value)}
+                  />
+                  <button className="btn btn-outline" onClick={() => load(page)} disabled={loading}>
+                      {loading ? 'Refreshing…' : 'Refresh'}
+                  </button>
+              </div>
+
+              <div className="toolbar">
+                  <div className="ml-auto flex items-center gap-2">
+                      <span className="text-xs text-gray-500 text-nowrap">Rows per page:</span>
+                      <select
+                        className="bg-slate-900 text-slate-100 text-sm border border-slate-700 rounded px-2 py-1"
+                        value={pageSize}
+                        onChange={(e) => setPageSizeAndUrl(Number(e.target.value))}
+                      >
+                          {[25, 50, 100, 200].map((n) => (
+                            <option key={n} value={n}>
+                                {n}
+                            </option>
+                          ))}
+                      </select>
+                      <div className="flex items-center gap-1">
+                          <button className="btn btn-outline" onClick={() => setPageAndUrl(1)} disabled={page <= 1}>
+                              {'«'}
+                          </button>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => setPageAndUrl(Math.max(1, page - 1))}
+                            disabled={page <= 1}
+                          >
+                              {'‹'}
+                          </button>
+                          <span className="text-xs text-gray-500 px-2">Page {page}/{pageCount}</span>
+                          <button
+                            className="btn btn-outline"
+                            onClick={() => setPageAndUrl(Math.min(pageCount, page + 1))}
+                            disabled={page >= pageCount}
+                          >
+                              {'›'}
+                          </button>
+                          <button className="btn btn-outline" onClick={() => setPageAndUrl(pageCount)} disabled={page >= pageCount}>
+                              {'»'}
+                          </button>
+                      </div>
+                  </div>
+              </div>
+
+              {errorMsg && <div className="panel p-3 text-red-500 text-sm">{errorMsg}</div>}
+
+              <div className="panel overflow-x-auto">
+                  <Table className="table-default">
+                      <thead>
+                      <tr>
+                          <Th>#</Th>
+                          {target === 'artists' ? (
+                            <>
+                                <Th className="select-none">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSortArtistsAndUrl('name')}
+                                      className="inline-flex items-center gap-1 hover:underline"
+                                    >
+                                        Name {headerArrow(sortByArtists === 'name')}
+                                    </button>
+                                </Th>
+                                <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
+                            </>
+                          ) : (
+                            <>
+                                <Th className="select-none">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSortAlbumsAndUrl('title')}
+                                      className="inline-flex items-center gap-1 hover:underline"
+                                    >
+                                        Album {headerArrow(sortByAlbums === 'title')}
+                                    </button>
+                                </Th>
+                                <Th className="select-none">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSortAlbumsAndUrl('artist')}
+                                      className="inline-flex items-center gap-1 hover:underline"
+                                    >
+                                        Artist {headerArrow(sortByAlbums === 'artist')}
+                                    </button>
+                                </Th>
+                                <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
+                            </>
+                          )}
+                      </tr>
+                      </thead>
+                      <tbody>
+                      {rows.length === 0 ? (
                         <tr>
-                            <Th>#</Th>
-                            {target === 'artists' ? (
-                                <>
-                                    <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortArtistsAndUrl('name')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
-                                            Name {headerArrow(sortByArtists === 'name')}
-                                        </button>
-                                    </Th>
-                                    <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
-                                </>
-                            ) : (
-                                <>
-                                    <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortAlbumsAndUrl('title')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
-                                            Album {headerArrow(sortByAlbums === 'title')}
-                                        </button>
-                                    </Th>
-                                    <Th className="select-none">
-                                        <button
-                                            type="button"
-                                            onClick={() => setSortAlbumsAndUrl('artist')}
-                                            className="inline-flex items-center gap-1 hover:underline"
-                                        >
-                                            Artist {headerArrow(sortByAlbums === 'artist')}
-                                        </button>
-                                    </Th>
-                                    <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
-                                </>
-                            )}
+                            <Td colSpan={target === 'artists' ? 3 : 4}>
+                                <div className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
+                            </Td>
                         </tr>
-                        </thead>
-                        <tbody>
-                        {rows.length === 0 ? (
-                            <tr>
-                                <Td colSpan={target === 'artists' ? 3 : 4}>
-                                    <div
-                                        className="p-4 text-center text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
-                                </Td>
-                            </tr>
-                        ) : target === 'artists' ? (
-                            (rows as YArtistRow[]).map((r, i) => (
-                                <tr key={`${r.yandexArtistId}-${i}`}>
-                                    <Td>{i + 1 + (page - 1) * pageSize}</Td>
-                                    <Td>{r.name || '—'}</Td>
-                                    <Td className="text-center">
-                                        <LinksFixedRow
-                                            yandexUrl={r.yandexUrl}
-                                            mbUrl={(r.mbid ? r.mbUrl : undefined) || undefined}
-                                        />
-                                    </Td>
-                                </tr>
-                            ))
-                        ) : (
-                            (rows as YAlbumRow[]).map((r, i) => (
-                                <tr key={`${r.yandexAlbumId}-${i}`}>
-                                    <Td>{i + 1 + (page - 1) * pageSize}</Td>
-                                    <Td>{r.title || '—'}</Td>
-                                    <Td>{r.artistName || '—'}</Td>
-                                    <Td className="text-center">
-                                        <LinksFixedRow
-                                            yandexUrl={r.yandexUrl}
-                                            mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined}
-                                        />
-                                    </Td>
-                                </tr>
-                            ))
-                        )}
-                        </tbody>
-                    </Table>
-                </div>
-            </main>
-            <Footer />
-        </>
+                      ) : target === 'artists' ? (
+                        (rows as YArtistRow[]).map((r, i) => {
+                            const missing = !r.mbid;
+                            return (
+                              <tr key={`${r.yandexArtistId}-${i}`} className={missing ? 'opacity-100' : ''}>
+                                  <Td>{i + 1 + (page - 1) * pageSize}</Td>
+                                  <Td>
+                                      <div className="flex items-center gap-2">
+                                          <span>{r.name || '—'}</span>
+
+                                      </div>
+                                  </Td>
+                                  <Td className="text-center">
+                                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.mbid ? r.mbUrl : undefined) || undefined} />
+                                  </Td>
+                              </tr>
+                            );
+                        })
+                      ) : (
+                        (rows as YAlbumRow[]).map((r, i) => {
+                            const missing = !r.rgMbid;
+                            return (
+                              <tr key={`${r.yandexAlbumId}-${i}`} className={missing ? 'opacity-100' : ''}>
+                                  <Td>{i + 1 + (page - 1) * pageSize}</Td>
+                                  <Td>
+                                      <div className="flex items-center gap-2">
+                                          <span>{r.title || '—'}</span>
+                                      </div>
+                                  </Td>
+                                  <Td>{r.artistName || '—'}</Td>
+                                  <Td className="text-center">
+                                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined} />
+                                  </Td>
+                              </tr>
+                            );
+                        })
+                      )}
+                      </tbody>
+                  </Table>
+              </div>
+          </main>
+          <Footer />
+      </>
     );
 }
