@@ -153,7 +153,7 @@ r.get('/', async (req, res) => {
         });
 
         // --- Custom (artists only) ---
-        const [cArtistsTotal, cArtistsMatched, latestCustomArtistsRaw, lArtistsDownloaded] = await Promise.all([
+        const [cArtistsTotal, cArtistsMatched, latestCustomArtistsRaw, lArtistsDownloaded, lAlbumsDownloaded] = await Promise.all([
             prisma.customArtist.count(),
             prisma.customArtist.count({ where: { mbid: { not: null } } }),
             prisma.customArtist.findMany({
@@ -162,6 +162,12 @@ r.get('/', async (req, res) => {
                 select: { id: true, name: true, mbid: true, createdAt: true },
             }),
             prisma.lidarrArtist.count({
+                where: {
+                    removed: false,
+                    OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
+                },
+            }),
+            prisma.lidarrAlbum.count({
                 where: {
                     removed: false,
                     OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
@@ -179,14 +185,43 @@ r.get('/', async (req, res) => {
 
         const lArtistsWithoutDownloads = Math.max(0, lArtistsTotal - lArtistsDownloaded);
         const lArtistsDownloadedPct = lArtistsTotal ? lArtistsDownloaded / lArtistsTotal : 0;
-
+        const lAlbumsWithoutDownloads = Math.max(0, lAlbumsTotal - lAlbumsDownloaded);
+        const lAlbumsDownloadedPct = lAlbumsTotal ? lAlbumsDownloaded / lAlbumsTotal : 0;
         // учитываем оба вида kind для совместимости
         const [yandex, lidarr, match] = await Promise.all([
             getRuns(['yandex', 'yandex-pull']),
             getRuns(['lidarr', 'lidarr-pull']),
             getRuns(['match']),
         ]);
+        const [ymLikedWithRgMbids, lidarrDownloadedMbids] = await Promise.all([
+            prisma.yandexAlbum.findMany({
+                where: { present: true, rgMbid: { not: null } },
+                // берем только RG MBID
+                select: { rgMbid: true },
+            }),
+            prisma.lidarrAlbum.findMany({
+                where: {
+                    removed: false,
+                    mbid: { not: null },
+                    OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
+                },
+                // distinct по mbid, чтобы не считать дубликаты релизов в Lidarr
+                select: { mbid: true },
+                distinct: ['mbid'],
+            }),
+        ]);
 
+        const ymRgSet = new Set<string>(ymLikedWithRgMbids.map(x => x.rgMbid as string));
+        let ymAlbumsDownloaded = 0;
+        for (const r of lidarrDownloadedMbids) {
+            if (r.mbid && ymRgSet.has(r.mbid)) ymAlbumsDownloaded++;
+        }
+        log.debug('yandex downloaded intersect computed', 'stats.overview.yandex.downloaded', {
+            ymLikedTotal: yAlbumsTotal,
+            ymLikedWithRg: ymRgSet.size,
+            lidarrDownloadedDistinct: lidarrDownloadedMbids.length,
+            ymAlbumsDownloaded,
+        });
         lg.info('overview stats computed', 'stats.overview.done', {
             yArtistsTotal, yAlbumsTotal, lArtistsTotal, lAlbumsTotal,
             customArtists: cArtistsTotal
@@ -219,6 +254,7 @@ r.get('/', async (req, res) => {
                 },
                 latestAlbums: latestYandex,
                 latestArtists: latestYandexArtists,
+                albumsDownloaded: ymAlbumsDownloaded,
             },
 
             lidarr: {
@@ -234,6 +270,9 @@ r.get('/', async (req, res) => {
                     total: lAlbumsTotal,
                     matched: lAlbumsMatched,
                     unmatched: Math.max(0, lAlbumsTotal - lAlbumsMatched),
+                    downloaded: lAlbumsDownloaded,
+                    noDownloads: lAlbumsWithoutDownloads,
+                    downloadedPct: lAlbumsDownloadedPct,
                 },
                 latestAlbums: latestLidarr,
                 latestArtists: latestLidarrArtists,

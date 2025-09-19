@@ -224,12 +224,57 @@ export default function LogsPage() {
         </>;
       case 'album:not_found':
         return <>✗ Album not found — <b>{d.artist}</b> — <i>{d.title}</i> <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">YM</a></>;
-      case 'start':
-        return <>Fetch likes from Yandex: artists {d.artists}, albums {d.albums} (driver: {d.driver})</>;
-      case 'finish':
-        return d.target
-            ? <>Added to Lidarr: {d.added} new {d.target}, failed {d.failed}</>
-            : <>Matching finished — artists {d.artists?.matched}/{d.artists?.total} (skipped {d.artists?.skipped}); albums {d.albums?.matched}/{d.albums?.total} (skipped {d.albums?.skipped})</>;
+      case 'start': {
+        const k = d.kind || '';
+        if (k === 'yandex.pull') {
+          return <>Yandex pull started (driver: {d.driver || '—'})</>;
+        }
+        if (k === 'mb.match') {
+          return <>MB Match ({d.target || 'both'}) started{d.force ? ' — force' : ''}</>;
+        }
+        if (k.startsWith('lidarr.search')) {
+          return <>Lidarr search started</>;
+        }
+        if (k.startsWith('lidarr.push')) {
+          return <>Lidarr push started — target: {d.target || '—'}</>;
+        }
+        return <>Started — {k || l.message}</>;
+      }
+      case 'finish': {
+        const k = d.kind || '';
+
+        // MB match: нет added/failed — показываем, что реально есть
+        if (k === 'mb.match') {
+          // Можно дернуть из stats текущие счётчики, если нужно — но тут просто флаг завершения
+          return <>MB Match ({d.target || 'both'}) finished{d.force ? ' — force' : ''}</>;
+        }
+
+        // Lidarr push(+ex): totals.ok/failed/skipped
+        if (k === 'lidarr.push' || k === 'lidarr.push.ex') {
+          const tt = d.totals || {};
+          return <>Lidarr push finished — {d.target || 'items'}: ok {toNum(tt.ok)} / failed {toNum(tt.failed)} / skipped {toNum(tt.skipped)}</>;
+        }
+
+        // Lidarr pull: totalArtists/totalAlbums
+        if (k.startsWith('lidarr.pull')) {
+          if (d.totalArtists != null || d.totalAlbums != null) {
+            return <>Lidarr pull finished — artists {toNum(d.totalArtists)}; albums {toNum(d.totalAlbums)}</>;
+          }
+          return <>Lidarr pull finished</>;
+        }
+
+        // Старый кейс “matching summary” (оставляем как fallback)
+        if (!d.target) {
+          return <>Matching finished — artists {toNum(d.artists?.matched)}/{toNum(d.artists?.total)}; albums {toNum(d.albums?.matched)}/{toNum(d.albums?.total)}</>;
+        }
+
+        // На случай старых логов, где реально были added/failed
+        if (d.added != null || d.failed != null) {
+          return <>Added to Lidarr: {toNum(d.added)} new {d.target}, failed {toNum(d.failed)}</>;
+        }
+
+        return <>Finished — target: {d.target}</>;
+      }
       default:
         return <>{l.message}</>;
     }
@@ -305,13 +350,25 @@ export default function LogsPage() {
             <div className="border-b border-slate-800 px-4 py-2 text-sm text-slate-300 sticky top-0 bg-slate-900/80 backdrop-blur">
               {sel ? `Run #${sel}` : 'Live Logs'}
               {finishLine && (
-                  <span className="ml-3 text-xs text-slate-400">
-                {parseData(finishLine).target ? (
-                    <>• finished summary: added {parseData(finishLine).added} {parseData(finishLine).target}, failed {parseData(finishLine).failed}</>
-                ) : (
-                    <>• matching summary: artists {parseData(finishLine).artists?.matched}/{parseData(finishLine).artists?.total}, albums {parseData(finishLine).albums?.matched}/{parseData(finishLine).albums?.total}</>
-                )}
-              </span>
+                <span className="ml-3 text-xs text-slate-400">
+                  {(() => {
+                    const d = parseData(finishLine);
+                    const k = d.kind || '';
+                    if (k === 'mb.match') return <>• finished: MB Match ({d.target || 'both'})</>;
+                    if (k === 'lidarr.push' || k === 'lidarr.push.ex') {
+                      const tt = d.totals || {};
+                      return <>• finished: {d.target || 'items'} — ok {toNum(tt.ok)}, failed {toNum(tt.failed)}, skipped {toNum(tt.skipped)}</>;
+                    }
+                    if (k.startsWith('lidarr.pull')) {
+                      if (d.totalArtists != null || d.totalAlbums != null)
+                        return <>• finished: artists {toNum(d.totalArtists)}, albums {toNum(d.totalAlbums)}</>;
+                      return <>• finished</>;
+                    }
+                    if (d.added != null || d.failed != null && d.target)
+                      return <>• finished: added {toNum(d.added)} {d.target}, failed {toNum(d.failed)}</>;
+                    return <>• finished</>;
+                  })()}
+                </span>
               )}
             </div>
 

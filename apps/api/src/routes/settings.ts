@@ -109,7 +109,24 @@ const ALLOWED_FIELDS = new Set([
   'qbtPass',
   'qbtDeleteFiles',
   'qbtWebhookSecret',
+
+  // Navidrome
+  'navidromeUrl',
+  'navidromeUser',
+  'navidromePass',
+  'navidromeToken',
+  'navidromeSalt',
+  'navidromeSyncTarget',            // 'artists' | 'albums' | 'tracks' | 'all'
+  'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
+  'cronNavidromePush',
+  'enableCronNavidromePush',
 ]);
+
+function trimToNull(v: unknown): string | null {
+  if (typeof v !== 'string') return v == null ? null : String(v);
+  const t = v.trim();
+  return t.length ? t : null;
+}
 
 function pickSettings(input: any) {
   const out: any = {};
@@ -119,7 +136,7 @@ function pickSettings(input: any) {
     if (ALLOWED_FIELDS.has(k)) (out as any)[k] = (input as any)[k];
   }
 
-  // нормализации
+  // нормализации (существующие)
   if ('yandexMatchTarget' in out) {
     const v = String(out.yandexMatchTarget || '').toLowerCase();
     out.yandexMatchTarget = ['artists','albums','both'].includes(v) ? v : 'both';
@@ -144,6 +161,7 @@ function pickSettings(input: any) {
     const v = String(out.mode || '').toLowerCase();
     out.mode = v === 'albums' ? 'albums' : 'artists';
   }
+
   // bools
   [
     'lidarrAllowNoMetadata',
@@ -158,20 +176,10 @@ function pickSettings(input: any) {
     'qbtDeleteFiles',
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
 
+  // URL/пути
   if ('qbtUrl' in out && typeof out.qbtUrl === 'string') {
     out.qbtUrl = stripTrailingSlashes(out.qbtUrl);
   }
-
-  if ('backupRetention' in out && out.backupRetention != null) {
-    const n = parseInt(String(out.backupRetention), 10);
-    if (!Number.isFinite(n) || n < 1) delete out.backupRetention;
-    else out.backupRetention = n;
-  }
-  if ('notifyType' in out) {
-    const v = String(out.notifyType || '').toLowerCase();
-    out.notifyType = ['telegram', 'webhook', 'none', 'disabled'].includes(v) ? (v === 'disabled' ? 'none' : v) : 'none';
-  }
-
   if ('pyproxyUrl' in out && typeof out.pyproxyUrl === 'string') {
     out.pyproxyUrl = stripTrailingSlashes(out.pyproxyUrl);
   }
@@ -182,6 +190,12 @@ function pickSettings(input: any) {
     out.rootFolderPath = stripTrailingSlashes(out.rootFolderPath);
   }
 
+  // числовые
+  if ('backupRetention' in out && out.backupRetention != null) {
+    const n = parseInt(String(out.backupRetention), 10);
+    if (!Number.isFinite(n) || n < 1) delete out.backupRetention;
+    else out.backupRetention = n;
+  }
   if ('qualityProfileId' in out && out.qualityProfileId != null) {
     const n = parseInt(String(out.qualityProfileId), 10);
     if (Number.isFinite(n)) out.qualityProfileId = n; else delete out.qualityProfileId;
@@ -190,10 +204,35 @@ function pickSettings(input: any) {
     const n = parseInt(String(out.metadataProfileId), 10);
     if (Number.isFinite(n)) out.metadataProfileId = n; else delete out.metadataProfileId;
   }
+
+  // enum
+  if ('notifyType' in out) {
+    const v = String(out.notifyType || '').toLowerCase();
+    out.notifyType = ['telegram', 'webhook', 'none', 'disabled'].includes(v) ? (v === 'disabled' ? 'none' : v) : 'none';
+  }
   if ('monitor' in out) {
     const v = String(out.monitor || '').toLowerCase();
     out.monitor = ['all', 'future', 'none'].includes(v) ? v : 'all';
   }
+
+  // ===== Navidrome normalization =====
+  if ('navidromeUrl' in out && typeof out.navidromeUrl === 'string') {
+    const t = stripTrailingSlashes(out.navidromeUrl.trim());
+    out.navidromeUrl = t || null;
+  }
+  if ('navidromeSyncTarget' in out) {
+    const v0 = String(out.navidromeSyncTarget || '').toLowerCase();
+    const v = (v0 === 'both') ? 'all' : v0;
+    out.navidromeSyncTarget = ['artists','albums','tracks','all'].includes(v) ? v : null;
+  }
+  if ('likesPolicySourcePriority' in out && typeof out.likesPolicySourcePriority === 'string') {
+    const v = out.likesPolicySourcePriority.trim().toLowerCase();
+    out.likesPolicySourcePriority = ['yandex','navidrome'].includes(v) ? v : 'yandex';
+  }
+  if ('navidromeUser' in out)  out.navidromeUser  = trimToNull(out.navidromeUser);
+  if ('navidromePass' in out)  out.navidromePass  = trimToNull(out.navidromePass);          // пустая строка -> null
+  if ('navidromeToken' in out) out.navidromeToken = trimToNull(out.navidromeToken);
+  if ('navidromeSalt' in out)  out.navidromeSalt  = trimToNull(out.navidromeSalt);
 
   return out;
 }
@@ -249,6 +288,10 @@ async function saveSettingsHandler(req: any, res: any) {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
   try {
     const data = pickSettings(req.body);
+
+    // не затираем пароль Навидрома пустой строкой
+    if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
+
     lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
 
     const saved = await prisma.setting.upsert({
@@ -281,6 +324,7 @@ r.get('/', async (req, res) => {
     }
     const safe = { ...s };
     safe.qbtPass = '';
+    safe.navidromePass = ''; // маскируем пароль Навидрома
     lg.debug('settings loaded', 'settings.get.done', { hasSettings: true });
     return res.json(safe);
   } catch (e: any) {
@@ -412,7 +456,6 @@ r.post('/test/lidarr', async (req, res) => {
 });
 
 // POST /api/settings/lidarr/defaults  { overwrite?: boolean }
-// Ручное подтягивание дефолтов и сохранение (по желанию — с перезаписью).
 r.post('/lidarr/defaults', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
   lg.info('pull lidarr defaults requested', 'settings.lidarr.defaults.start', { overwrite: !!req.body?.overwrite });
