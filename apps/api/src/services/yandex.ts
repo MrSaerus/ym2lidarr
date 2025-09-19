@@ -110,6 +110,19 @@ export async function yandexPullLikes(
 ): Promise<{
   artists: Array<{ id?: number; name: string; mbid?: string | null }>;
   albums: Array<{ id?: number; title: string; artistName: string; year?: number; artistId?: number; rgMbid?: string | null }>;
+  // NEW: треки
+  tracks: Array<{
+    id?: number;
+    title: string;
+    artistName: string;
+    albumTitle?: string;
+    durationSec?: number;
+    albumId?: number;
+    artistId?: number;
+    // опциональные поля на будущее для точного матчинга
+    recMbid?: string | null;
+    rgMbid?: string | null;
+  }>;
 }> {
   if (!PY) {
     log.error('pyproxy is not configured', 'ya.py.likes.nopy');
@@ -138,12 +151,16 @@ export async function yandexPullLikes(
 
     const artistsRaw: any[] = Array.isArray(raw?.artists) ? raw.artists : [];
     const albumsRaw: any[] = Array.isArray(raw?.albums) ? raw.albums : [];
+    // NEW: разные возможные поля от pyproxy
+    const tracksRaw: any[] =
+      Array.isArray(raw?.tracks) ? raw.tracks
+        : Array.isArray(raw?.songs) ? raw.songs
+          : Array.isArray(raw?.likedTracks) ? raw.likedTracks
+            : [];
 
     const artists = artistsRaw
       .map((x) => {
-        if (typeof x === 'string') {
-          return { name: x } as { id?: number; name: string; mbid?: string | null };
-        }
+        if (typeof x === 'string') return { name: x } as { id?: number; name: string; mbid?: string | null };
         const id =
           typeof x?.id === 'number'
             ? x.id
@@ -183,12 +200,60 @@ export async function yandexPullLikes(
       })
       .filter((a) => a.title || a.artistName);
 
+    // нормализация треков
+    const tracks = tracksRaw
+      .map((x) => {
+        const id =
+          typeof x?.id === 'number'
+            ? x.id
+            : Number.isFinite(Number(x?.yandexTrackId))
+              ? Number(x.yandexTrackId)
+              : Number.isFinite(Number(x?.trackId))
+                ? Number(x.trackId)
+                : undefined;
+
+        const title = String(x?.title || x?.name || '').trim();
+        const artistName = String(x?.artistName || x?.artist || x?.artists?.[0]?.name || '').trim();
+        const albumTitle = String(x?.albumTitle || x?.album || x?.release?.title || '').trim();
+
+        const durationSec =
+          typeof x?.durationSec === 'number'
+            ? x.durationSec
+            : Number.isFinite(Number(x?.duration))
+              ? Math.round(Number(x.duration))
+              : undefined;
+
+        const albumId =
+          typeof x?.albumId === 'number'
+            ? x.albumId
+            : Number.isFinite(Number(x?.yandexAlbumId))
+              ? Number(x.yandexAlbumId)
+              : Number.isFinite(Number(x?.album?.id))
+                ? Number(x.album.id)
+                : undefined;
+
+        const artistId =
+          typeof x?.artistId === 'number'
+            ? x.artistId
+            : Number.isFinite(Number(x?.yandexArtistId))
+              ? Number(x.yandexArtistId)
+              : Number.isFinite(Number(x?.artists?.[0]?.id))
+                ? Number(x.artists[0].id)
+                : undefined;
+
+        const recMbid = typeof x?.recMbid === 'string' ? x.recMbid : null;
+        const rgMbid  = typeof x?.rgMbid  === 'string' ? x.rgMbid  : null;
+
+        return { id, title, artistName, albumTitle, durationSec, albumId, artistId, recMbid, rgMbid };
+      })
+      .filter((t) => t.title && t.artistName);
+
     const durMs = Date.now() - startedAt;
     log.info('pyproxy /likes done', 'ya.py.likes.done', {
-      artists: artists.length, albums: albums.length, durMs
+      artists: artists.length, albums: albums.length, tracks: tracks.length, durMs
     });
 
-    return { artists, albums };
+    return { artists, albums, tracks };
   } catch (e: any) {
     const durMs = Date.now() - startedAt;
     log.error('pyproxy /likes failed', 'ya.py.likes.fail', { err: e?.message || String(e), durMs });
@@ -196,9 +261,6 @@ export async function yandexPullLikes(
   }
 }
 
-/**
- * Проверка токена — через pyproxy, если он есть; иначе нативно.
- */
 export async function yandexVerifyToken(token: string) {
   if (PY) {
     try {
