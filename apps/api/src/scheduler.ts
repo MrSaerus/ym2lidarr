@@ -3,7 +3,7 @@ import cron from 'node-cron';
 import fs from 'fs';
 import path from 'path';
 import * as cronParser from 'cron-parser';
-
+import { computeProgress } from './utils/progress';
 import { prisma } from './prisma';
 import {
   runCustomMatchAll,
@@ -12,8 +12,11 @@ import {
   runYandexMatch,
   runYandexPush,
   runLidarrPullEx,
+  runNavidromeApply,
+  runTorrentsUnmatched,
+  runTorrentsPoll,
+  runTorrentsCopyDownloaded,
 } from './workers';
-import { runNavidromeApply } from './workers';
 import { createLogger } from './lib/logger';
 
 const log = createLogger({ scope: 'scheduler' });
@@ -71,6 +74,11 @@ let jobs: {
 
   backup?: cron.ScheduledTask;
   navidromePush?: cron.ScheduledTask;
+
+  // Новые задачи по торрентам
+  torrentsUnmatched?: cron.ScheduledTask;
+  torrentsPoll?: cron.ScheduledTask;
+  torrentsCopy?: cron.ScheduledTask;
 } = {};
 
 // Памятка: какие jobKeys сейчас запущены ИМЕННО кроном (для UI "State")
@@ -82,7 +90,11 @@ type JobKey =
   | 'customMatch'
   | 'customPush'
   | 'backup'
-  | 'navidromePush';
+  | 'navidromePush'
+  // новые ключи
+  | 'torrentsUnmatched'
+  | 'torrentsPoll'
+  | 'torrentsCopy';
 
 const cronActivity: Partial<Record<JobKey, boolean>> = {};
 
@@ -219,7 +231,6 @@ async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<
   return dbBusy || cronBusy;
 }
 
-
 /* ====================== RELOAD JOBS ====================== */
 
 export async function reloadJobs() {
@@ -287,7 +298,7 @@ export async function reloadJobs() {
     const target = (s.yandexMatchTarget as 'artists' | 'albums' | 'both') || 'both';
     jobs.yandexMatch = cron.schedule(
       s.cronYandexMatch,
-      wrap('yandexMatch', ['yandex.'], () => runYandexMatch(target, { force: false }), { target }),
+      wrap('yandexMatch', ['yandex.'], () => runYandexMatch(target), { target }),
     );
     log.debug('scheduled yandex.match', 'cron.plan', { key: 'yandexMatch', cron: s.cronYandexMatch, target });
   }
@@ -318,8 +329,8 @@ export async function reloadJobs() {
     log.debug('scheduled backup', 'cron.plan', { key: 'backup', cron: s.backupCron });
   }
 
-// ========== NAVIDROME PUSH ==========
-// управляется полями: enableCronNavidromePush + cronNavidromePush
+  // ========== NAVIDROME PUSH ==========
+  // управляется полями: enableCronNavidromePush + cronNavidromePush
   if (s?.enableCronNavidromePush && s?.cronNavidromePush) {
     const expr = String(s.cronNavidromePush);
     if (cron.validate(expr)) {
@@ -329,13 +340,13 @@ export async function reloadJobs() {
         try {
           // читаем текущие настройки для аутентификации и таргета/политики
           const st = await prisma.setting.findFirst();
-          const navUrl  = (st?.navidromeUrl || '').replace(/\/+$/, '');
-          const user    = st?.navidromeUser || '';
-          const pass    = st?.navidromePass || '';
-          const token   = st?.navidromeToken || '';
-          const salt    = st?.navidromeSalt || '';
-          const target  = (st?.navidromeSyncTarget as any) || 'tracks';
-          const policy  = (st?.likesPolicySourcePriority as any) || 'yandex';
+          const navUrl = (st?.navidromeUrl || '').replace(/\/+$/, '');
+          const user = st?.navidromeUser || '';
+          const pass = st?.navidromePass || '';
+          const token = st?.navidromeToken || '';
+          const salt = st?.navidromeSalt || '';
+          const target = (st?.navidromeSyncTarget as any) || 'tracks';
+          const policy = (st?.likesPolicySourcePriority as any) || 'yandex';
           if (!navUrl || !user || (!pass && !(token && salt))) {
             lg.warn('navidrome not configured, skip', 'cron.nav.push.skip.misconfig');
           } else {
@@ -362,6 +373,49 @@ export async function reloadJobs() {
       log.warn('invalid cron for navidromePush', 'cron.nav.push.invalid', { expr: expr });
     }
   }
+
+  /* ---------- TORRENTS: run unmatched ---------- */
+  if (s.enableCronTorrentRunUnmatched && s.cronTorrentRunUnmatched && cron.validate(s.cronTorrentRunUnmatched)) {
+    jobs.torrentsUnmatched = cron.schedule(
+      s.cronTorrentRunUnmatched,
+      wrap('torrentsUnmatched', ['torrents:unmatched', 'torrents:'], async () => {
+        await runTorrentsUnmatched();
+      }),
+    );
+    log.debug('scheduled torrents.unmatched', 'cron.plan', {
+      key: 'torrentsUnmatched',
+      cron: s.cronTorrentRunUnmatched,
+    });
+  }
+
+  /* ---------- TORRENTS: qBittorrent poll ---------- */
+  if (s.enableCronTorrentQbtPoll && s.cronTorrentQbtPoll && cron.validate(s.cronTorrentQbtPoll)) {
+    jobs.torrentsPoll = cron.schedule(
+      s.cronTorrentQbtPoll,
+      wrap('torrentsPoll', ['torrents:poll', 'torrents:'], async () => {
+        await runTorrentsPoll();
+      }),
+    );
+    log.debug('scheduled torrents.poll', 'cron.plan', {
+      key: 'torrentsPoll',
+      cron: s.cronTorrentQbtPoll,
+    });
+  }
+
+  /* ---------- TORRENTS: copy downloaded ---------- */
+  if (s.enableCronTorrentCopyDownloaded && s.cronTorrentCopyDownloaded && cron.validate(s.cronTorrentCopyDownloaded)) {
+    jobs.torrentsCopy = cron.schedule(
+      s.cronTorrentCopyDownloaded,
+      wrap('torrentsCopy', ['torrents:copy', 'torrents:'], async () => {
+        await runTorrentsCopyDownloaded();
+      }),
+    );
+    log.debug('scheduled torrents.copy', 'cron.plan', {
+      key: 'torrentsCopy',
+      cron: s.cronTorrentCopyDownloaded,
+    });
+  }
+
   log.info('jobs reloaded', 'cron.reload.done');
 }
 
@@ -407,19 +461,54 @@ const JOB_META: Record<
     enabledFlag: 'enableCronCustomPush',
     prefixes: ['custom.push.', 'custom.'],
   },
-  backup: { title: 'Backup', settingCron: 'backupCron', enabledFlag: 'backupEnabled', prefixes: [] },
+  backup: {
+    title: 'Backup',
+    settingCron: 'backupCron',
+    enabledFlag: 'backupEnabled',
+    prefixes: [],
+  },
   navidromePush: {
     title: 'Navidrome: Push likes',
     settingCron: 'cronNavidromePush',
     enabledFlag: 'enableCronNavidromePush',
     prefixes: ['nav.apply.', 'navidrome.'],
   },
+
+  // Новые задачи по торрентам
+  torrentsUnmatched: {
+    title: 'Torrents: Run unmatched',
+    settingCron: 'cronTorrentRunUnmatched',
+    enabledFlag: 'enableCronTorrentRunUnmatched',
+    prefixes: ['torrents.unmatched', 'torrents:'],
+  },
+  torrentsPoll: {
+    title: 'Torrents: qBittorrent poll',
+    settingCron: 'cronTorrentQbtPoll',
+    enabledFlag: 'enableCronTorrentQbtPoll',
+    prefixes: ['torrents.poll', 'torrents:'],
+  },
+  torrentsCopy: {
+    title: 'Torrents: Copy downloaded',
+    settingCron: 'cronTorrentCopyDownloaded',
+    enabledFlag: 'enableCronTorrentCopyDownloaded',
+    prefixes: ['torrents.copy', 'torrents:'],
+  },
 };
+
+function safeParseStats(stats?: string | null): any | null {
+  if (!stats) return null;
+  try { return JSON.parse(stats); } catch { return null; }
+}
 
 export async function getCronStatuses() {
   const s = await prisma.setting.findFirst();
   const now = new Date();
-
+  // 1) одним запросом забираем все активные ранны (для быстрого матчинга по prefixes)
+  const activeRuns = await prisma.syncRun.findMany({
+    where: { status: 'running' },
+    orderBy: { startedAt: 'desc' },
+    select: { id: true, kind: true, startedAt: true, stats: true },
+  });
   const out: Array<{
     key: JobKey;
     title: string;
@@ -427,7 +516,10 @@ export async function getCronStatuses() {
     cron?: string | null;
     valid: boolean;
     nextRun?: Date | null;
-    running: boolean; // показываем только «крон сейчас выполняет»
+    running: boolean;
+    runId?: number | null;
+    runStartedAt?: Date | null;
+    progress?: { total: number; done: number; pct: number } | null;
   }> = [];
 
   for (const key of Object.keys(JOB_META) as JobKey[]) {
@@ -442,6 +534,11 @@ export async function getCronStatuses() {
     }
 
     const running = !!cronActivity[key];
+    const run =
+      activeRuns.find((r) => meta.prefixes.some((p) => r.kind?.startsWith(p))) || null;
+
+    const parsed = run ? safeParseStats(run.stats) : null;
+    const progress = parsed ? computeProgress(parsed) : null;
 
     out.push({
       key,
@@ -451,6 +548,9 @@ export async function getCronStatuses() {
       valid,
       nextRun,
       running,
+      runId: run?.id ?? null,
+      runStartedAt: run?.startedAt ?? null,
+      progress,
     });
   }
 

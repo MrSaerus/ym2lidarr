@@ -164,7 +164,7 @@ RUN set -x \
     && mkdir /docker-entrypoint.d
 
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl tini python3 python3-pip python3-venv build-essential wget nginx && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl tini python3 python3-pip python3-venv build-essential wget nginx ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 COPY apps/api/package.json ./apps/api/package.json

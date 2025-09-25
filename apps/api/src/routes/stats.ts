@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
-
+import { computeProgress } from '../utils/progress';
 const r = Router();
 const log = createLogger({ scope: 'route.stats' });
 
@@ -20,6 +20,7 @@ type RunDTO = {
     finishedAt: Date | null;
     durationSec: number | null;
     stats: any;
+    progress: { total: number; done: number; pct: number } | null;
 } | null;
 
 async function getRuns(kinds: string[]): Promise<{ active: RunDTO; last: RunDTO }> {
@@ -43,6 +44,10 @@ async function getRuns(kinds: string[]): Promise<{ active: RunDTO; last: RunDTO 
             ? Math.max(0, Math.round((+new Date(x.finishedAt) - +new Date(x.startedAt)) / 1000))
             : null,
           stats: parseStats(x.stats),
+          progress: (() => {
+            const st = parseStats(x.stats);
+            return st ? computeProgress(st) : null;
+          })(),
       };
     return { active: toDto(active), last: toDto(last) };
 }
@@ -75,10 +80,11 @@ r.get('/', async (req, res) => {
         // Топ-5 «последних» альбомов из Yandex (по ymId убыв.)
         const latestYandexRaw = await prisma.yandexAlbum.findMany({
             where: { present: true },
-            orderBy: [{ ymId: 'desc' }],
+            orderBy: [{ id: 'desc' }],
             take: 5,
-            select: { ymId: true, title: true, artist: true, rgMbid: true, year: true },
+            select: { id: true, ymId: true,title: true, artist: true, rgMbid: true, year: true },
         });
+
         const latestYandex = latestYandexRaw.map((x) => ({
             id: Number(x.ymId) || 0,
             title: x.title || '',
@@ -91,9 +97,9 @@ r.get('/', async (req, res) => {
         // Топ-5 «последних» артистов из Yandex (по ymId убыв.)
         const latestYandexArtistsRaw = await prisma.yandexArtist.findMany({
             where: { present: true },
-            orderBy: [{ ymId: 'desc' }],
+            orderBy: [{ id: 'desc' }],
             take: 5,
-            select: { ymId: true, name: true, mbid: true },
+            select: { id: true, ymId: true,name: true, mbid: true },
         });
         const latestYandexArtists = latestYandexArtistsRaw.map((x) => {
             const id = Number(x.ymId) || 0;

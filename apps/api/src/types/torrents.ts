@@ -2,7 +2,7 @@
 export type TorrentTaskKind = 'artist' | 'album';
 export type TorrentTaskStatus = 'pending' | 'searching' | 'downloading' | 'importing' | 'done' | 'failed' | 'canceled';
 export type CollisionPolicy = 'ask' | 'replace' | 'skip';
-export type TorrentReleaseStatus = 'new' | 'queued' | 'downloading' | 'downloaded' | 'imported' | 'rejected' | 'failed';
+export type TorrentReleaseStatus = 'new' | 'chosen' | 'queued' | 'downloading' | 'downloaded' | 'imported' | 'rejected' | 'failed';
 
 export const isTaskKind = (x: any): x is TorrentTaskKind =>
   x === 'artist' || x === 'album';

@@ -5,9 +5,9 @@ import { startRun } from '../log';
 import { runCustomArtistsMatch } from '../workers';
 import type { Prisma } from '@prisma/client';
 
-// НОВОЕ: взаимная блокировка с кроном custom.*
 import { ensureNotBusyOrThrow } from '../scheduler';
 import { createLogger } from '../lib/logger';
+import { mbGetArtistAlbumsCount } from '../services/mb';
 
 const r = Router();
 const log = createLogger({ scope: 'route.custom-artists' });
@@ -252,13 +252,44 @@ r.patch('/:id', async (req, res) => {
             data.nkey = nkey(name);
         }
         if ('mbid' in req.body) {
-            const mbid = req.body.mbid ? String(req.body.mbid) : null;
-            data.mbid = mbid;
-            data.matchedAt = mbid ? new Date() : null;
+            const raw = req.body.mbid;
+            const mbid =
+              raw === null || raw === undefined
+                ? null
+                : String(raw).trim() || null;
+
+            if (!mbid) {
+                data.mbid = null;
+                data.matchedAt = null;
+                (data as any).mbAlbumsCount = 0;
+            } else {
+                data.mbid = mbid;
+                data.matchedAt = new Date();
+
+                try {
+                    const albumsCount = await mbGetArtistAlbumsCount(mbid);
+                    (data as any).mbAlbumsCount = albumsCount;
+                    lg.info('mbAlbumsCount resolved for custom artist', 'custom.artists.patch.mbalbums.ok', {
+                        id,
+                        mbid,
+                        albumsCount,
+                    });
+                } catch (e: any) {
+                    lg.warn('mbAlbumsCount resolve failed, keeping previous value', 'custom.artists.patch.mbalbums.fail', {
+                        id,
+                        mbid,
+                        err: e?.message || String(e),
+                    });
+                }
+            }
         }
 
         const updated = await prisma.customArtist.update({ where: { id }, data });
-        lg.info('custom artist updated', 'custom.artists.patch.done', { id, changedName: !!data.name, changedMbid: 'mbid' in data });
+        lg.info('custom artist updated', 'custom.artists.patch.done', {
+            id,
+            changedName: !!data.name,
+            changedMbid: 'mbid' in data,
+        });
         res.json(updated);
     } catch (e: any) {
         lg.error('custom artist patch failed', 'custom.artists.patch.fail', { id, err: e?.message });
@@ -283,10 +314,6 @@ r.delete('/:id', async (req, res) => {
         res.status(500).json({ ok: false, error: 'Failed to delete custom artist' });
     }
 });
-
-/** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ----------
- *  БЛОКИРУЕМ, если идёт любой custom.match.* / custom.push.* (крон/ручной)
- */
 
 // POST /api/custom-artists/:id/match
 r.post('/:id/match', async (req, res) => {

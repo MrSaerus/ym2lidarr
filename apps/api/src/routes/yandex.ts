@@ -75,7 +75,7 @@ r.post('/match', async (req, res) => {
 
         lg.info('yandex match requested', 'yandex.match.start', { target, force });
 
-        const result: any = await runYandexMatch(target, { force });
+        const result: any = await runYandexMatch(target);
         lg.info('yandex match started', 'yandex.match.done', { runId: result?.runId ?? null });
         res.json({ ok: true, runId: result?.runId ?? null });
     } catch (e: any) {

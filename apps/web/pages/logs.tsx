@@ -112,7 +112,7 @@ export default function LogsPage() {
   const [auto, setAuto] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState<Required<Stats> | null>(null);
+  const [, setStats] = useState<Required<Stats> | null>(null);
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const tick = useRef<number | null>(null);
@@ -182,7 +182,6 @@ export default function LogsPage() {
     }
   }, [visItems, auto]);
 
-  const startLine  = useMemo(() => items.find(i => parseData(i).event === 'start'), [items]);
   const finishLine = useMemo(() => items.slice().reverse().find(i => parseData(i).event === 'finish'), [items]);
 
   // chips + уровни
@@ -196,89 +195,6 @@ export default function LogsPage() {
         error: 'bg-rose-500/15 text-rose-300 ring-1 ring-inset ring-rose-500/30',
         debug: 'bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-500/30',
       }[s] || 'bg-slate-500/15 text-slate-300 ring-1 ring-inset ring-slate-500/30');
-
-  const lineText = (l: LogItem) => {
-    const d = parseData(l);
-
-    if (l.message?.startsWith('Artist skip (cool-down)')) {
-      return <>Artist skip (cool-down) — <b>{d.name || d.artist || '—'}</b>{d.song ? <> — <i>{d.song}</i></> : null}</>;
-    }
-    if (l.message?.startsWith('Album skip (cool-down)')) {
-      return <>Album skip (cool-down) — <b>{d.artist || '—'}</b>{d.title ? <> — <i>{d.title}</i></> : null}</>;
-    }
-
-    switch (d.event) {
-      case 'artist:found':
-        return <>
-          ✓ Found artist — <b>{d.name}</b>
-          {d.mbid && <a className="text-indigo-300 underline ml-1" href={mbArtistUrl(d.mbid)} target="_blank" rel="noreferrer">MB</a>}
-          <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">YM</a>
-        </>;
-      case 'artist:not_found':
-        return <>✗ Artist not found — <b>{d.name}</b> <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(d.name)} target="_blank" rel="noreferrer">YM</a></>;
-      case 'album:found':
-        return <>
-          ✓ Found album — <b>{d.artist}</b> — <i>{d.title}</i>
-          {d.mbid && <a className="text-indigo-300 underline ml-1" href={mbRGUrl(d.mbid)} target="_blank" rel="noreferrer">MB</a>}
-          <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">YM</a>
-        </>;
-      case 'album:not_found':
-        return <>✗ Album not found — <b>{d.artist}</b> — <i>{d.title}</i> <a className="text-indigo-300 underline ml-1" href={ymSearchUrl(`${d.artist} ${d.title}`)} target="_blank" rel="noreferrer">YM</a></>;
-      case 'start': {
-        const k = d.kind || '';
-        if (k === 'yandex.pull') {
-          return <>Yandex pull started (driver: {d.driver || '—'})</>;
-        }
-        if (k === 'mb.match') {
-          return <>MB Match ({d.target || 'both'}) started{d.force ? ' — force' : ''}</>;
-        }
-        if (k.startsWith('lidarr.search')) {
-          return <>Lidarr search started</>;
-        }
-        if (k.startsWith('lidarr.push')) {
-          return <>Lidarr push started — target: {d.target || '—'}</>;
-        }
-        return <>Started — {k || l.message}</>;
-      }
-      case 'finish': {
-        const k = d.kind || '';
-
-        // MB match: нет added/failed — показываем, что реально есть
-        if (k === 'mb.match') {
-          // Можно дернуть из stats текущие счётчики, если нужно — но тут просто флаг завершения
-          return <>MB Match ({d.target || 'both'}) finished{d.force ? ' — force' : ''}</>;
-        }
-
-        // Lidarr push(+ex): totals.ok/failed/skipped
-        if (k === 'lidarr.push' || k === 'lidarr.push.ex') {
-          const tt = d.totals || {};
-          return <>Lidarr push finished — {d.target || 'items'}: ok {toNum(tt.ok)} / failed {toNum(tt.failed)} / skipped {toNum(tt.skipped)}</>;
-        }
-
-        // Lidarr pull: totalArtists/totalAlbums
-        if (k.startsWith('lidarr.pull')) {
-          if (d.totalArtists != null || d.totalAlbums != null) {
-            return <>Lidarr pull finished — artists {toNum(d.totalArtists)}; albums {toNum(d.totalAlbums)}</>;
-          }
-          return <>Lidarr pull finished</>;
-        }
-
-        // Старый кейс “matching summary” (оставляем как fallback)
-        if (!d.target) {
-          return <>Matching finished — artists {toNum(d.artists?.matched)}/{toNum(d.artists?.total)}; albums {toNum(d.albums?.matched)}/{toNum(d.albums?.total)}</>;
-        }
-
-        // На случай старых логов, где реально были added/failed
-        if (d.added != null || d.failed != null) {
-          return <>Added to Lidarr: {toNum(d.added)} new {d.target}, failed {toNum(d.failed)}</>;
-        }
-
-        return <>Finished — target: {d.target}</>;
-      }
-      default:
-        return <>{l.message}</>;
-    }
-  };
 
   return (
       <div className="min-h-screen text-slate-100">
@@ -295,7 +211,7 @@ export default function LogsPage() {
               {!runs.length && <option value="">No runs yet</option>}
               {runs.map((r) => (
                   <option key={r.id} value={r.id}>
-                    #{r.id} • {r.status} • {new Date(r.startedAt).toLocaleString()}
+                    #{r.id} • {r.kind || '—'} • {r.status} • {new Date(r.startedAt).toLocaleString()}
                   </option>
               ))}
             </select>
@@ -321,30 +237,6 @@ export default function LogsPage() {
               Clear
             </button>
           </div>
-
-          {/* summary */}
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="panel p-3">
-              <div className="text-xs text-slate-400 mb-1">Yandex likes (from log):</div>
-              {startLine ? (
-                  <div className="flex gap-2 items-center">
-                    {pill('Artists ' + (parseData(startLine).artists ?? '—'), 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30')}
-                    {pill('Albums ' + (parseData(startLine).albums ?? '—'), 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/30')}
-                    <span className="text-xs text-slate-500">driver: {parseData(startLine).driver}</span>
-                  </div>
-              ) : (
-                  <div className="text-sm text-slate-500">No start line yet.</div>
-              )}
-            </div>
-
-            <div className="panel p-3">
-              <div className="text-xs text-slate-400 mb-1">Database (current):</div>
-              <div className="flex gap-2 items-center">
-                {pill(`Matched artists ${toNum(stats?.matchedArtists ?? 0)} / ${toNum(stats?.totalArtists ?? 0)}`, 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30')}
-                {pill(`Matched albums ${toNum(stats?.matchedAlbums ?? 0)} / ${toNum(stats?.totalAlbums ?? 0)}`, 'bg-teal-500/15 text-teal-300 ring-1 ring-teal-500/30')}
-              </div>
-            </div>
-          </section>
 
           <div className="panel overflow-hidden">
             <div className="border-b border-slate-800 px-4 py-2 text-sm text-slate-300 sticky top-0 bg-slate-900/80 backdrop-blur">
@@ -386,7 +278,7 @@ export default function LogsPage() {
                         {new Date(l.ts).toLocaleString()}
                       </time>
                       {pill(l.level, lvl(l.level))}
-                      <div className="min-w-0 truncate text-sm">{lineText(l)}</div>
+                      <div className="min-w-0 truncate text-sm">{l.message}</div>
                     </li>
                 ))}
               </ul>

@@ -22,13 +22,29 @@ export async function runLidarrPush(
 
   const run = await startRun('lidarr', { phase: 'push', total: 0, done: 0, ok: 0, failed: 0, target, source: src });
   if (!run) return;
+
   const t0 = now();
   await evStart(run.id, { kind: 'lidarr.push', target, source: src, allowRepush });
 
+  // counters должны быть доступны heartbeat-таймеру
+  let done = 0, ok = 0, failed = 0;
+
+  // heartbeat: чтобы run не становился orphaned при долгих запросах/ретраях
+  const heartbeatMs = 15_000;
+  const hb = setInterval(() => {
+    // не await: heartbeat не должен блокировать воркер
+    patchRunStats(run.id, { done, ok, failed, heartbeatAt: Date.now() } as any).catch(() => {});
+  }, heartbeatMs);
+
   try {
     let items: any[] = [];
+
     if (target === 'albums') {
-      const base = await prisma.yandexAlbum.findMany({ where: { present: true, rgMbid: { not: null } }, orderBy: [{ artist: 'asc' }, { title: 'asc' }] });
+      const base = await prisma.yandexAlbum.findMany({
+        where: { present: true, rgMbid: { not: null } },
+        orderBy: [{ artist: 'asc' }, { title: 'asc' }],
+      });
+
       if (allowRepush) items = base;
       else {
         const already = await prisma.albumPush.findMany({ select: { mbid: true }, where: { mbid: { not: null } } });
@@ -39,6 +55,7 @@ export async function runLidarrPush(
       const base = src === 'custom'
         ? await prisma.customArtist.findMany({ where: { mbid: { not: null } }, orderBy: { name: 'asc' } })
         : await prisma.yandexArtist.findMany({ where: { present: true, mbid: { not: null } }, orderBy: { name: 'asc' } });
+
       if (allowRepush) items = base;
       else {
         const already = await prisma.artistPush.findMany({ select: { mbid: true }, where: { mbid: { not: null } } });
@@ -50,7 +67,6 @@ export async function runLidarrPush(
     await patchRunStats(run.id, { total: items.length });
     await dblog(run.id, 'info', `Pushing ${items.length} ${target} to Lidarr (source=${src})`);
 
-    let done = 0, ok = 0, failed = 0;
     const effSetting = { ...(setting as any) };
 
     for (const it of items as any[]) {
@@ -58,12 +74,18 @@ export async function runLidarrPush(
 
       try {
         if (target === 'albums') {
-          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) =>
+            dblog(run.id, level, msg, extra);
+
           const result = await pushAlbumWithConfirm(
             effSetting,
             { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
             log,
-            { maxAttempts: 1, initialDelayMs: 1000 }
+            {
+              maxAttempts: 5,
+              initialDelayMs: 1500,
+              shouldAbort: () => bailIfCancelled(run.id, 'lidarr-push'),
+            }
           );
 
           if (result.ok) {
@@ -78,24 +100,51 @@ export async function runLidarrPush(
               if (existing) {
                 await prisma.albumPush.update({
                   where: { id: existing.id },
-                  data: { title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+                  data: {
+                    title,
+                    path,
+                    lidarrAlbumId: lidarrId ?? null,
+                    status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                  },
                 });
               } else {
-                await prisma.albumPush.create({ data: { mbid: it.rgMbid, title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' } });
+                await prisma.albumPush.create({
+                  data: {
+                    mbid: it.rgMbid,
+                    title,
+                    path,
+                    lidarrAlbumId: lidarrId ?? null,
+                    status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                    source: 'push',
+                  },
+                });
               }
             }
             ok++;
           } else {
+            // если отменили — можно не считать как failed (на твоё усмотрение)
+            if (result.reason === 'cancelled') {
+              await dblog(run.id, 'warn', `Cancelled during album push: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid });
+              return;
+            }
             failed++;
-            await dblog(run.id, 'warn', `✖ Album push failed: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
+            await dblog(run.id, 'warn', `✖ Album push failed: ${it.artist} — ${it.title}`, {
+              target, rgMbid: it.rgMbid, reason: result.reason,
+            });
           }
         } else {
-          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) =>
+            dblog(run.id, level, msg, extra);
+
           const result = await pushArtistWithConfirm(
             effSetting,
             { name: it.name, mbid: it.mbid! },
             log,
-            { maxAttempts: 1, initialDelayMs: 1000 }
+            {
+              maxAttempts: 5,
+              initialDelayMs: 1500,
+              shouldAbort: () => bailIfCancelled(run.id, 'lidarr-push'),
+            }
           );
 
           if (result.ok) {
@@ -109,12 +158,20 @@ export async function runLidarrPush(
             if (existing) {
               await prisma.artistPush.update({
                 where: { id: existing.id },
-                data: { name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+                data: {
+                  name,
+                  path,
+                  lidarrArtistId: lidarrId ?? null,
+                  status: action === 'exists' ? 'EXISTS' : 'CREATED',
+                },
               });
             } else {
               await prisma.artistPush.create({
                 data: {
-                  mbid: it.mbid, name, path, lidarrArtistId: lidarrId ?? null,
+                  mbid: it.mbid,
+                  name,
+                  path,
+                  lidarrArtistId: lidarrId ?? null,
                   status: action === 'exists' ? 'EXISTS' : 'CREATED',
                   source: src === 'custom' ? 'custom-push' : 'push',
                 },
@@ -122,6 +179,10 @@ export async function runLidarrPush(
             }
             ok++;
           } else {
+            if (result.reason === 'cancelled') {
+              await dblog(run.id, 'warn', `Cancelled during artist push: ${it.name}`, { target, mbid: it.mbid });
+              return;
+            }
             failed++;
             await dblog(run.id, 'warn', `✖ Push failed: ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
@@ -130,7 +191,9 @@ export async function runLidarrPush(
         failed++;
         await dblog(run.id, 'warn', `Push exception: ${String(e?.message || e)}`, { target });
       }
+
       done++;
+      // прогресс можно обновлять чуть чаще, но оставляю твою логику
       if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
     }
 
@@ -138,14 +201,38 @@ export async function runLidarrPush(
     await endRun(run.id, 'ok');
 
     const finalRun = await getRunWithRetry(run.id);
-    await evFinish(run.id, { kind: 'lidarr.push', target, source: src, allowRepush, totals: { done, ok, failed }, elapsedMs: elapsedMs(t0) });
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await (await import('../notify.js')).notify('lidarr', 'ok', stats); } catch {}
+    await evFinish(run.id, {
+      kind: 'lidarr.push',
+      target,
+      source: src,
+      allowRepush,
+      totals: { done, ok, failed },
+      elapsedMs: elapsedMs(t0),
+    });
+
+    try {
+      const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+      await (await import('../notify.js')).notify('lidarr', 'ok', stats);
+    } catch {}
   } catch (e: any) {
     await dblog(run.id, 'error', 'Lidarr push failed', { error: String(e?.message || e) });
     await endRun(run.id, 'error', String(e?.message || e));
+
     const finalRun = await getRunWithRetry(run.id);
-    try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await (await import('../notify.js')).notify('lidarr', 'error', stats); } catch {}
-    await evError(run.id, { kind: 'lidarr.push', target, source: src, error: String(e?.message || e), elapsedMs: elapsedMs(t0) });
+    try {
+      const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+      await (await import('../notify.js')).notify('lidarr', 'error', stats);
+    } catch {}
+
+    await evError(run.id, {
+      kind: 'lidarr.push',
+      target,
+      source: src,
+      error: String(e?.message || e),
+      elapsedMs: elapsedMs(t0),
+    });
+  } finally {
+    clearInterval(hb);
   }
 }
 
@@ -180,11 +267,22 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
   const t0 = now();
   await evStart(run.id, { kind: 'lidarr.push.ex', target, source, allowRepush });
 
+  let done = 0, ok = 0, failed = 0;
+
+  const heartbeatMs = 15_000;
+  const hb = setInterval(() => {
+    patchRunStats(run.id, { done, ok, failed, heartbeatAt: Date.now() } as any).catch(() => {});
+  }, heartbeatMs);
+
   try {
     let items: any[] = [];
 
     if (target === 'albums') {
-      const base = await prisma.yandexAlbum.findMany({ where: { present: true, rgMbid: { not: null } }, orderBy: [{ artist: 'asc' }, { title: 'asc' }] });
+      const base = await prisma.yandexAlbum.findMany({
+        where: { present: true, rgMbid: { not: null } },
+        orderBy: [{ artist: 'asc' }, { title: 'asc' }],
+      });
+
       if (allowRepush) items = base;
       else {
         const already = await prisma.albumPush.findMany({ select: { mbid: true }, where: { mbid: { not: null } } });
@@ -195,6 +293,7 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
       const base = source === 'custom'
         ? await prisma.customArtist.findMany({ where: { mbid: { not: null } }, orderBy: { name: 'asc' } })
         : await prisma.yandexArtist.findMany({ where: { present: true, mbid: { not: null } }, orderBy: { name: 'asc' } });
+
       if (allowRepush) items = base;
       else {
         const already = await prisma.artistPush.findMany({ select: { mbid: true }, where: { mbid: { not: null } } });
@@ -206,7 +305,6 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
     const total = items.length;
     await patchRunStats(run.id, { total });
 
-    let done = 0, ok = 0, failed = 0;
     const effSetting = { ...(setting as any) };
 
     for (const it of items as any[]) {
@@ -214,8 +312,20 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
 
       try {
         if (target === 'albums') {
-          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
-          const result = await pushAlbumWithConfirm(effSetting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid! }, log, { maxAttempts: 1, initialDelayMs: 1000 });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) =>
+            dblog(run.id, level, msg, extra);
+
+          const result = await pushAlbumWithConfirm(
+            effSetting,
+            { artist: it.artist, title: it.title, rgMbid: it.rgMbid! },
+            log,
+            {
+              maxAttempts: 5,
+              initialDelayMs: 1500,
+              shouldAbort: () => bailIfCancelled(run.id, 'lidarr-push'),
+            }
+          );
+
           if (result.ok) {
             const confirmed = result.res;
             const action   = confirmed?.__action || 'created';
@@ -226,19 +336,40 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
             if (it.rgMbid) {
               const existing = await prisma.albumPush.findFirst({ where: { mbid: it.rgMbid } });
               if (existing) {
-                await prisma.albumPush.update({ where: { id: existing.id }, data: { title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' } });
+                await prisma.albumPush.update({
+                  where: { id: existing.id },
+                  data: { title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+                });
               } else {
-                await prisma.albumPush.create({ data: { mbid: it.rgMbid, title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' } });
+                await prisma.albumPush.create({
+                  data: { mbid: it.rgMbid, title, path, lidarrAlbumId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: 'push' },
+                });
               }
             }
             ok++;
           } else {
+            if (result.reason === 'cancelled') {
+              await dblog(run.id, 'warn', `Cancelled during album push: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid });
+              return;
+            }
             failed++;
             await dblog(run.id, 'warn', `✖ Album push failed: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid, reason: result.reason });
           }
         } else {
-          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) => dblog(run.id, level, msg, extra);
-          const result = await pushArtistWithConfirm(effSetting, { name: it.name, mbid: it.mbid! }, log, { maxAttempts: 1, initialDelayMs: 1000 });
+          const log = (level: 'info'|'warn'|'error', msg: string, extra?: any) =>
+            dblog(run.id, level, msg, extra);
+
+          const result = await pushArtistWithConfirm(
+            effSetting,
+            { name: it.name, mbid: it.mbid! },
+            log,
+            {
+              maxAttempts: 5,
+              initialDelayMs: 1500,
+              shouldAbort: () => bailIfCancelled(run.id, 'lidarr-push'),
+            }
+          );
+
           if (result.ok) {
             const confirmed = result.res;
             const action   = confirmed?.__action || 'created';
@@ -248,7 +379,10 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
 
             const existing = await prisma.artistPush.findFirst({ where: { mbid: it.mbid } });
             if (existing) {
-              await prisma.artistPush.update({ where: { id: existing.id }, data: { name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' } });
+              await prisma.artistPush.update({
+                where: { id: existing.id },
+                data: { name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED' },
+              });
             } else {
               await prisma.artistPush.create({
                 data: { mbid: it.mbid, name, path, lidarrArtistId: lidarrId ?? null, status: action === 'exists' ? 'EXISTS' : 'CREATED', source: source === 'custom' ? 'custom-push' : 'push' },
@@ -256,6 +390,10 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
             }
             ok++;
           } else {
+            if (result.reason === 'cancelled') {
+              await dblog(run.id, 'warn', `Cancelled during artist push: ${it.name}`, { target, mbid: it.mbid });
+              return;
+            }
             failed++;
             await dblog(run.id, 'warn', `✖ Push failed: ${it.name}`, { target, mbid: it.mbid, reason: result.reason });
           }
@@ -273,21 +411,34 @@ export async function runLidarrPushEx(opts: PushExOpts = {}) {
     await dblog(run.id, 'info', `Push finished: target ${target}, source ${source}, allowRepush ${allowRepush}, total ${total}, ok ${ok}, failed ${failed}, skipped ${skipped}`, {
       target, source, allowRepush, total, ok, failed, skipped,
     });
+
     await evFinish(run.id, { kind: 'lidarr.push.ex', target, source, allowRepush, totals: { done, ok, failed, skipped }, elapsedMs: elapsedMs(t0) });
     await patchRunStats(run.id, { done, ok, failed });
+
     if (!opts.noFinalize) {
       await patchRunStats(run.id, { phase: 'done' });
       await endRun(run.id, 'ok');
+
       const finalRun = await getRunWithRetry(run.id);
-      try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await (await import('../notify.js')).notify('lidarr', 'ok', stats); } catch {}
+      try {
+        const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+        await (await import('../notify.js')).notify('lidarr', 'ok', stats);
+      } catch {}
     }
   } catch (e: any) {
     await dblog(run.id, 'error', 'Lidarr push failed', { error: String(e?.message || e) });
+
     if (!opts.noFinalize) {
       await endRun(run.id, 'error', String(e?.message || e));
       await evError(run.id, { kind: 'lidarr.push.ex', target, source, error: String(e?.message || e), elapsedMs: elapsedMs(t0) });
+
       const finalRun = await getRunWithRetry(run.id);
-      try { const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {}; await (await import('../notify.js')).notify('lidarr', 'error', stats); } catch {}
+      try {
+        const stats = finalRun?.stats ? JSON.parse(finalRun.stats) : {};
+        await (await import('../notify.js')).notify('lidarr', 'error', stats);
+      } catch {}
     }
+  } finally {
+    clearInterval(hb);
   }
 }

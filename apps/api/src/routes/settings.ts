@@ -3,10 +3,11 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { prisma } from '../prisma';
-import { reloadJobs, getCronStatuses } from '../scheduler';
+import { reloadJobs, getCronStatuses, ensureNotBusyOrThrow } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
 import { createLogger } from '../lib/logger';
+import { runTorrentsUnmatched, runTorrentsPoll, runTorrentsCopyDownloaded } from '../workers/torrents';
 
 const r = Router();
 const log = createLogger({ scope: 'route.settings' });
@@ -120,6 +121,26 @@ const ALLOWED_FIELDS = new Set([
   'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
   'cronNavidromePush',
   'enableCronNavidromePush',
+
+  // match force flags
+  'yandexMatchForce',
+  'customMatchForce',
+  'mbMatchForce',
+
+  // Torrents puller
+  'cronTorrentRunUnmatched',
+  'cronTorrentQbtPoll',
+  'cronTorrentCopyDownloaded',
+  'enableCronTorrentRunUnmatched',
+  'enableCronTorrentQbtPoll',
+  'enableCronTorrentCopyDownloaded',
+  'torrentRunUnmatchedLimit',
+  'torrentRunUnmatchedMinSeeders',
+  'torrentRunUnmatchedLimitPerIndexer',
+  'torrentRunUnmatchedAutoStart',
+  'torrentRunUnmatchedParallelSearches',
+  'torrentQbtPollBatchSize',
+  'torrentCopyBatchSize',
 ]);
 
 function trimToNull(v: unknown): string | null {
@@ -173,6 +194,9 @@ function pickSettings(input: any) {
     'enableCronLidarrPull',
     'allowRepush',
     'qbtDeleteFiles',
+    'yandexMatchForce',
+    'customMatchForce',
+    'mbMatchForce',
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
 
   // URL/пути
@@ -344,6 +368,57 @@ r.get('/scheduler', async (req, res) => {
   } catch (e: any) {
     lg.error('get scheduler statuses failed', 'settings.scheduler.fail', { err: e?.message });
     res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// POST /api/settings/scheduler/:key/run — ручной запуск отдельных cron-джоб
+r.post('/scheduler/:key/run', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId, key: req.params?.key } });
+  const key = String(req.params?.key || '');
+
+  try {
+    if (key === 'torrentsUnmatched') {
+      // защита от параллельных запусков
+      await ensureNotBusyOrThrow(['torrents:unmatched', 'torrents:'], ['torrentsUnmatched'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsUnmatched.start');
+      await runTorrentsUnmatched();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsUnmatched.done');
+      return res.json({ ok: true });
+    }
+
+    if (key === 'torrentsPoll') {
+      await ensureNotBusyOrThrow(['torrents:poll', 'torrents:'], ['torrentsPoll'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsPoll.start');
+      await runTorrentsPoll();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsPoll.done');
+      return res.json({ ok: true });
+    }
+
+    if (key === 'torrentsCopy') {
+      await ensureNotBusyOrThrow(['torrents:copy', 'torrents:'], ['torrentsCopy'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsCopy.start');
+      await runTorrentsCopyDownloaded();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsCopy.done');
+      return res.json({ ok: true });
+    }
+
+    // если пришёл неизвестный key
+    lg.warn('unknown scheduler key for manual run', 'settings.scheduler.run.unknown', { key });
+    return res.status(404).json({ ok: false, error: 'Unknown scheduler key' });
+  } catch (e: any) {
+    const status = e?.status === 409 ? 409 : 500;
+    if (status === 409) {
+      lg.warn('manual scheduler run rejected: busy', 'settings.scheduler.run.busy', {
+        key,
+        err: e?.message || String(e),
+      });
+    } else {
+      lg.error('manual scheduler run failed', 'settings.scheduler.run.fail', {
+        key,
+        err: e?.message || String(e),
+      });
+    }
+    return res.status(status).json({ ok: false, error: e?.message || String(e) });
   }
 });
 

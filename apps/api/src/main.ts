@@ -27,8 +27,12 @@ import { instanceId } from './instance';
 import { navidromeRouter } from './routes/navidrome'
 import jackettIndexers from './routes/jackett';
 import torrents from './routes/torrents';
+import pipelineRoutes from './routes/pipeline';
 
 const app = express();
+app.set('json replacer', (_key: string, value: unknown) =>
+  typeof value === 'bigint' ? value.toString() : value
+);
 app.use(requestLogger);
 const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
 
@@ -156,8 +160,7 @@ app.use('/api/debug', qbtDebug);
 app.use('/api/navidrome', navidromeRouter);
 app.use('/api/jackett/indexers', jackettIndexers)
 app.use('/api/torrents', torrents);
-
-// Runs/logs router (supports /runs and /api/runs internally)
+app.use('/api/pipeline', pipelineRoutes);
 app.use(runsRouter);
 
 app.listen(PORT, async () => {
@@ -193,6 +196,3 @@ app.listen(PORT, async () => {
 });
 
 app.use(errorHandler);
-//
-// const port = Number(process.env.PORT || 3001);
-// app.listen(port, () => rootLog.info(`API listening on ${port}`, 'api.start'));

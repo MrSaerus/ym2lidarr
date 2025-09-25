@@ -1,5 +1,5 @@
 // apps/api/src/workers/mbMatch.ts
-import { mbFindArtist, mbFindReleaseGroup } from '../services/mb';
+import { mbFindArtist, mbFindReleaseGroup, mbGetArtistAlbumsCount } from '../services/mb';
 import {
   prisma, startRunWithKind, patchRunStats, endRun, dblog,
   evStart, evFinish, evError, now, elapsedMs, bailIfCancelled, getRunWithRetry,
@@ -62,16 +62,51 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
           });
 
           if (r.externalId) {
+            let albumsCount: number | null = null;
+            try {
+              albumsCount = await mbGetArtistAlbumsCount(r.externalId);
+            } catch (e: any) {
+              // Не считаем это фатальной ошибкой матчинга артиста:
+              // mbid сохраним, а количество альбомов останется null.
+              await dblog(
+                runId,
+                'warn',
+                'MB albums count lookup failed',
+                { yaId: y.ymId, name: y.name, mbid: r.externalId, error: String(e?.message || e) },
+              );
+            }
+
             await prisma.$transaction([
-              prisma.yandexArtist.update({ where: { id: y.id }, data: { mbid: r.externalId } }),
+              prisma.yandexArtist.update({
+                where: { id: y.id },
+                data: { mbid: r.externalId, mbAlbumsCount: albumsCount },
+              }),
               prisma.mbSyncItem.upsert({
                 where: { kind_targetId: { kind: 'yandex-artist', targetId: y.id } },
-                create: { kind: 'yandex-artist', targetId: y.id, attempts: 1, lastCheckedAt: new Date(), lastSuccessAt: new Date(), lastError: null },
-                update: { attempts: { increment: 1 }, lastCheckedAt: new Date(), lastSuccessAt: new Date(), lastError: null },
+                create: {
+                  kind: 'yandex-artist',
+                  targetId: y.id,
+                  attempts: 1,
+                  lastCheckedAt: new Date(),
+                  lastSuccessAt: new Date(),
+                  lastError: null,
+                },
+                update: {
+                  attempts:      { increment: 1 },
+                  lastCheckedAt: new Date(),
+                  lastSuccessAt: new Date(),
+                  lastError:     null,
+                },
               }),
             ]);
+
             a_matched++;
-            await dblog(runId, 'info', `✔ Artist matched: ${y.name}`, { yaId: y.ymId, name: y.name, mbid: r.externalId });
+            await dblog(runId, 'info', `✔ Artist matched: ${y.name}`, {
+              yaId: y.ymId,
+              name: y.name,
+              mbid: r.externalId,
+              mbAlbumsCount: albumsCount,
+            });
           } else {
             await prisma.mbSyncItem.upsert({
               where: { kind_targetId: { kind: 'yandex-artist', targetId: y.id } },
@@ -126,6 +161,7 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
       let al_done = 0, al_matched = 0;
       for (const rec of candidates) {
         if (await bailIfCancelled(runId, 'match-albums')) return;
+        const ts = new Date();
 
         try {
           const r = await mbFindReleaseGroup(rec.artist || '', rec.title);
@@ -137,29 +173,80 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
 
           if (r.externalId) {
             await prisma.$transaction([
-              prisma.yandexAlbum.update({ where: { id: rec.id }, data: { rgMbid: r.externalId } }),
+              prisma.yandexAlbum.update({
+                where: { id: rec.id },
+                data: {
+                  rgMbid:         r.externalId,
+                  mbLastCheckedAt: ts,
+                },
+              }),
               prisma.mbSyncItem.upsert({
                 where: { kind_targetId: { kind: 'yandex-album', targetId: rec.id } },
-                create: { kind: 'yandex-album', targetId: rec.id, attempts: 1, lastCheckedAt: new Date(), lastSuccessAt: new Date(), lastError: null },
-                update: { attempts: { increment: 1 }, lastCheckedAt: new Date(), lastSuccessAt: new Date(), lastError: null },
+                create: {
+                  kind: 'yandex-album',
+                  targetId: rec.id,
+                  attempts: 1,
+                  lastCheckedAt: ts,
+                  lastSuccessAt: ts,
+                  lastError: null,
+                },
+                update: {
+                  attempts:       { increment: 1 },
+                  lastCheckedAt:  ts,
+                  lastSuccessAt:  ts,
+                  lastError:      null,
+                },
               }),
             ]);
             al_matched++;
             await dblog(runId, 'info', `✔ Album matched: ${rec.artist} - ${rec.title}`, { yaId: rec.ymId, artist: rec.artist, title: rec.title, rgMbid: r.externalId });
           } else {
-            await prisma.mbSyncItem.upsert({
-              where: { kind_targetId: { kind: 'yandex-album', targetId: rec.id } },
-              create: { kind: 'yandex-album', targetId: rec.id, attempts: 1, lastCheckedAt: new Date(), lastError: 'not-found' },
-              update: { attempts: { increment: 1 }, lastCheckedAt: new Date(), lastError: 'not-found' },
-            });
+            await prisma.$transaction([
+              prisma.yandexAlbum.update({
+                where: { id: rec.id },
+                data: { mbLastCheckedAt: ts },
+              }),
+              prisma.mbSyncItem.upsert({
+                where: { kind_targetId: { kind: 'yandex-album', targetId: rec.id } },
+                create: {
+                  kind: 'yandex-album',
+                  targetId: rec.id,
+                  attempts: 1,
+                  lastCheckedAt: ts,
+                  lastError: 'not-found',
+                },
+                update: {
+                  attempts:      { increment: 1 },
+                  lastCheckedAt: ts,
+                  lastError:     'not-found',
+                },
+              }),
+            ]);
             await dblog(runId, 'info', `✖ Album not matched: ${rec.artist} - ${rec.title}`, { yaId: rec.ymId, artist: rec.artist, title: rec.title });
           }
         } catch (e: any) {
-          await prisma.mbSyncItem.upsert({
-            where: { kind_targetId: { kind: 'yandex-album', targetId: rec.id } },
-            create: { kind: 'yandex-album', targetId: rec.id, attempts: 1, lastCheckedAt: new Date(), lastError: String(e?.message || e) },
-            update: { attempts: { increment: 1 }, lastCheckedAt: new Date(), lastError: String(e?.message || e) },
-          });
+          const err = String(e?.message || e);
+          await prisma.$transaction([
+            prisma.yandexAlbum.update({
+              where: { id: rec.id },
+              data: { mbLastCheckedAt: ts },
+            }),
+            prisma.mbSyncItem.upsert({
+              where: { kind_targetId: { kind: 'yandex-album', targetId: rec.id } },
+              create: {
+                kind: 'yandex-album',
+                targetId: rec.id,
+                attempts: 1,
+                lastCheckedAt: ts,
+                lastError: err,
+              },
+              update: {
+                attempts:      { increment: 1 },
+                lastCheckedAt: ts,
+                lastError:     err,
+              },
+            }),
+          ]);
           await dblog(runId, 'warn', 'MB lookup failed', { id: rec.id, title: rec.title, error: String(e?.message || e) });
         }
 
@@ -228,12 +315,38 @@ export async function runCustomArtistsMatch(reuseRunId?: number, opts?: { onlyId
         });
 
         if (r.externalId) {
-          await prisma.customArtist.update({ where: { id: it.id }, data: { mbid: r.externalId, matchedAt: new Date() } });
+          let albumsCount: number | null = null;
+          try {
+            albumsCount = await mbGetArtistAlbumsCount(r.externalId);
+          } catch (e: any) {
+            await dblog(
+              runId,
+              'warn',
+              'MB albums count lookup failed (custom artist)',
+              { id: it.id, name: it.name, mbid: r.externalId, error: String(e?.message || e) },
+            );
+          }
+
+          await prisma.customArtist.update({
+            where: { id: it.id },
+            data: {
+              mbid: r.externalId,
+              matchedAt: new Date(),
+              mbAlbumsCount: albumsCount,
+            },
+          });
+
           c_matched++;
-          await dblog(runId, 'info', `✔ Custom artist matched: ${it.name}`, { id: it.id, name: it.name, mbid: r.externalId });
+          await dblog(runId, 'info', `✔ Custom artist matched: ${it.name}`, {
+            id: it.id,
+            name: it.name,
+            mbid: r.externalId,
+            mbAlbumsCount: albumsCount,
+          });
         } else {
           await dblog(runId, 'info', `✖ Custom artist not matched: ${it.name}`, { id: it.id, name: it.name });
         }
+
       } catch (e: any) {
         await dblog(runId, 'warn', 'MB lookup failed', { id: it.id, name: it.name, error: String(e?.message || e) });
       }

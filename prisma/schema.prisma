@@ -23,8 +23,9 @@ model YandexArtist {
   updatedAt  DateTime  @updatedAt
   createdAt  DateTime  @default(now())
 
-  mbid String?
-  ndId String?
+  mbid          String?
+  mbAlbumsCount Int?
+  ndId          String?
 
   albums YandexAlbum[]
 
@@ -35,25 +36,30 @@ model YandexArtist {
 }
 
 model YandexAlbum {
-  id         Int       @id @default(autoincrement())
-  ymId       String    @unique
-  title      String
-  artist     String?
-  year       Int?
-  key        String?
-  present    Boolean   @default(true)
-  lastSeenAt DateTime?
-  yGone      Boolean   @default(false)
-  yGoneAt    DateTime?
-  raw        String?
-  updatedAt  DateTime  @updatedAt
-  createdAt  DateTime  @default(now())
+  id              Int               @id @default(autoincrement())
+  ymId            String            @unique
+  title           String
+  artist          String?
+  year            Int?
+  key             String?
+  present         Boolean           @default(true)
+  lastSeenAt      DateTime?
+  yGone           Boolean           @default(false)
+  yGoneAt         DateTime?
+  raw             String?
+  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+  mbLastCheckedAt DateTime?
+  torrentState    AlbumTorrentState @default(none)
+  genresJson      String?
 
   yandexArtistId String?
   artistRef      YandexArtist? @relation(fields: [yandexArtistId], references: [ymId], onDelete: SetNull)
 
   rgMbid String?
   ndId   String?
+
+  tracks YandexTrack[]
 
   @@index([title])
   @@index([present])
@@ -73,6 +79,7 @@ model YandexTrack {
   lastSeenAt  DateTime?
   yGone       Boolean   @default(false)
   yGoneAt     DateTime?
+  genresJson  String?
 
   ymAlbumId  String?
   ymArtistId String?
@@ -82,6 +89,8 @@ model YandexTrack {
   updatedAt  DateTime @updatedAt
 
   likeSyncs YandexLikeSync[]
+
+  albumRef YandexAlbum? @relation(fields: [ymAlbumId], references: [ymId])
 }
 
 model YandexLikeSync {
@@ -167,13 +176,14 @@ model LidarrAlbum {
 // /* ===================== Ingest: Custom ===================== */
 
 model CustomArtist {
-  id        Int       @id @default(autoincrement())
-  name      String
-  nkey      String    @unique
-  mbid      String?
-  matchedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id            Int       @id @default(autoincrement())
+  name          String
+  nkey          String    @unique
+  mbid          String?
+  matchedAt     DateTime?
+  mbAlbumsCount Int?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 // /* ===================== MB Sync (трекинг) ===================== */
@@ -293,6 +303,7 @@ enum TorrentStatus {
   moved
   failed
   cancelled
+  invalid
 }
 
 enum MoveCollisionPolicy {
@@ -300,6 +311,14 @@ enum MoveCollisionPolicy {
   replace
   skip
   merge
+}
+
+enum AlbumTorrentState {
+  none // ничего не известно / не искали
+  searching // есть задача на поиск, но релиз не выбран
+  found // релиз найден/выбран, но ещё не качаем
+  downloading // добавлено в qBittorrent, идёт загрузка
+  downloaded // скачано/перемещено, готово
 }
 
 // ===================== Torrents: core models =====================
@@ -327,15 +346,26 @@ model TorrentTask {
   limitReleases Int?
   scheduledAt   DateTime?
   lastTriedAt   DateTime?
+  taskKey       String?              @unique
   releases      TorrentRelease[]
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
+  artistName    String?
+  albumTitle    String?
+  albumYear     Int?
+  ymArtistId    String?
+  ymAlbumId     String?
+  ymTrackId     String?
+  layout        String?              @default("unknown")
 
   @@index([status])
   @@index([artistId])
   @@index([albumId])
   @@index([indexerId])
   @@index([scheduledAt])
+  @@index([ymArtistId])
+  @@index([ymAlbumId])
+  @@index([ymTrackId])
 }
 
 model TorrentRelease {
@@ -355,6 +385,7 @@ model TorrentRelease {
   score      Float           @default(0)
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+  status     String          @default("new")
 
   @@index([taskId])
   @@index([indexerId])
@@ -415,6 +446,14 @@ model Setting {
   cronLidarrPull   String @default("0 3 * * *")
   lidarrPullTarget String @default("both")
 
+  cronTorrentRunUnmatched   String @default("*/15 * * * *")
+  cronTorrentQbtPoll        String @default("*/5 * * * *")
+  cronTorrentCopyDownloaded String @default("*/5 * * * *")
+
+  enableCronTorrentRunUnmatched   Boolean @default(false)
+  enableCronTorrentQbtPoll        Boolean @default(false)
+  enableCronTorrentCopyDownloaded Boolean @default(false)
+
   enableCronYandexPull    Boolean @default(false)
   enableCronYandexMatch   Boolean @default(false)
   enableCronYandexPush    Boolean @default(false)
@@ -423,17 +462,27 @@ model Setting {
   enableCronLidarrPull    Boolean @default(false)
   enableCronNavidromePush Boolean @default(false)
 
+  torrentRunUnmatchedLimit            Int? // limit
+  torrentRunUnmatchedMinSeeders       Int? // minSeeders
+  torrentRunUnmatchedLimitPerIndexer  Int? // limitPerIndexer
+  torrentRunUnmatchedAutoStart        Boolean? @default(false) // autoStart
+  torrentRunUnmatchedParallelSearches Int? // concurrency
+  torrentQbtPollBatchSize             Int?
+  torrentCopyBatchSize                Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   matchRetryDays Int     @default(3)
   allowRepush    Boolean @default(false)
 
-  qbtUrl           String?
-  qbtUser          String?
-  qbtPass          String?
-  qbtDeleteFiles   Boolean @default(true)
-  qbtWebhookSecret String?
+  torrentJackettQbtBaseUrl String?
+  torrentQbtCategory       String  @default("YM2LIDARR")
+  qbtUrl                   String?
+  qbtUser                  String?
+  qbtPass                  String?
+  qbtDeleteFiles           Boolean @default(true)
+  qbtWebhookSecret         String?
 
   navidromeUrl              String?
   navidromeUser             String?
@@ -443,27 +492,42 @@ model Setting {
   navidromeSyncTarget       String?
   likesPolicySourcePriority String?
   cronNavidromePush         String?
+
+  yandexMatchForce Boolean? @default(false)
+  customMatchForce Boolean? @default(false)
+  mbMatchForce     Boolean? @default(false)
+
+  torrentDownloadsDir String? @default("/home/Downloads")
+  musicLibraryDir     String? @default("/home/Music")
+
+  musicArtistFolderPattern String? @default("{Artist}")
+  musicAlbumFolderPattern  String? @default("{Year} - {Album}")
+  musicTrackFilePattern    String? @default("{Track:2} - {Title}")
+  musicVariousArtistsName  String? @default("Various Artists")
+  musicDiscFolderPattern   String? @default("Disc {Disc}")
+
+  fileOpMode String? @default("copy") // "copy" | "hardlink" | "move"
+
+  copyInProgress Boolean @default(false)
 }
 
 model JackettIndexer {
-  id               Int     @id @default(autoincrement())
-  name             String
-  enabled          Boolean @default(true)
-  allowRss         Boolean @default(true)
-  allowAuto        Boolean @default(true)
-  allowInteractive Boolean @default(true)
-
-  baseUrl String
-  apiKey  String
-
-  categories Json?
-
-  tags       String?
-  minSeeders Int?
-
-  order     Int      @default(100)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                Int       @id @default(autoincrement())
+  name              String
+  enabled           Boolean   @default(true)
+  allowRss          Boolean   @default(true)
+  allowAuto         Boolean   @default(true)
+  allowInteractive  Boolean   @default(true)
+  baseUrl           String
+  apiKey            String
+  categories        Json?
+  tags              String?
+  minSeeders        Int?
+  order             Int       @default(100)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  errorCount        Int       @default(0)
+  tempDisabledUntil DateTime?
 
   tasks    TorrentTask[]    @relation(name: "IndexerToTasks")
   releases TorrentRelease[] @relation(name: "IndexerToReleases")
