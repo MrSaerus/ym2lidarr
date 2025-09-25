@@ -26,6 +26,7 @@ import { prisma } from './prisma';
 import { instanceId } from './instance';
 import { navidromeRouter } from './routes/navidrome'
 import jackettIndexers from './routes/jackett';
+import torrents from './routes/torrents';
 
 const app = express();
 app.use(requestLogger);
@@ -154,6 +155,7 @@ app.use('/api/webhooks', lidarrWebhook);
 app.use('/api/debug', qbtDebug);
 app.use('/api/navidrome', navidromeRouter);
 app.use('/api/jackett/indexers', jackettIndexers)
+app.use('/api/torrents', torrents);
 
 // Runs/logs router (supports /runs and /api/runs internally)
 app.use(runsRouter);

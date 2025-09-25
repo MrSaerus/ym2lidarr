@@ -81,7 +81,6 @@ model YandexTrack {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  // обратная сторона связи для YandexLikeSync.trackRef
   likeSyncs YandexLikeSync[]
 }
 
@@ -106,7 +105,6 @@ model YandexLikeSync {
   unstarPlannedAt   DateTime?
   unstarConfirmedAt DateTime?
 
-  // связь на трек; при удалении YandexTrack мы ничего не делаем
   trackRef YandexTrack? @relation(fields: [ymId], references: [ymId])
 
   @@index([status, lastTriedAt])
@@ -156,7 +154,6 @@ model LidarrAlbum {
   updatedAt  DateTime  @updatedAt
   createdAt  DateTime  @default(now())
 
-  // связь на артиста Lidarr по его numeric id
   artistId  Int?
   artistRef LidarrArtist? @relation(fields: [artistId], references: [id], onDelete: SetNull)
 
@@ -167,7 +164,7 @@ model LidarrAlbum {
   @@index([artistId])
 }
 
-// /* ===================== Ingest: Custome ===================== */
+// /* ===================== Ingest: Custom ===================== */
 
 model CustomArtist {
   id        Int       @id @default(autoincrement())
@@ -307,49 +304,63 @@ enum MoveCollisionPolicy {
 
 // ===================== Torrents: core models =====================
 model TorrentTask {
-  id         Int                  @id @default(autoincrement())
-  scope      TorrentScope
-  artistId   Int?
-  albumId    Int?
-  query      String?
-  status     TorrentStatus
-  qbitHash   String?              @unique
-  indexer    String?
-  title      String?
-  size       BigInt?
-  seeders    Int?
-  quality    String?
-  finalPath  String?
-  movePolicy MoveCollisionPolicy?
-  startedAt  DateTime?
-  finishedAt DateTime?
-  lastError  String?
-  retries    Int                  @default(0)
-
-  releases TorrentRelease[]
+  id            Int                  @id @default(autoincrement())
+  scope         TorrentScope
+  artistId      Int?
+  albumId       Int?
+  query         String?
+  status        TorrentStatus        @default(queued)
+  qbitHash      String?              @unique
+  indexerId     Int?
+  indexerRef    JackettIndexer?      @relation(name: "IndexerToTasks", fields: [indexerId], references: [id], onDelete: SetNull)
+  title         String?
+  size          BigInt?
+  seeders       Int?
+  quality       String?
+  finalPath     String?
+  movePolicy    MoveCollisionPolicy? @default(replace)
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  lastError     String?
+  retries       Int                  @default(0)
+  minSeeders    Int?
+  limitReleases Int?
+  scheduledAt   DateTime?
+  lastTriedAt   DateTime?
+  releases      TorrentRelease[]
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   @@index([status])
   @@index([artistId])
   @@index([albumId])
+  @@index([indexerId])
+  @@index([scheduledAt])
 }
 
 model TorrentRelease {
-  id       Int       @id @default(autoincrement())
-  taskId   Int
-  indexer  String
-  title    String
-  link     String?
-  magnet   String?
-  size     BigInt?
-  seeders  Int?
-  leechers Int?
-  pubDate  DateTime?
-  quality  String?
-  score    Float
-
-  task TorrentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id         Int             @id @default(autoincrement())
+  taskId     Int
+  task       TorrentTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  indexerId  Int?
+  indexerRef JackettIndexer? @relation(name: "IndexerToReleases", fields: [indexerId], references: [id], onDelete: SetNull)
+  title      String
+  link       String?
+  magnet     String?
+  size       BigInt?
+  seeders    Int?
+  leechers   Int?
+  pubDate    DateTime?
+  quality    String?
+  score      Float           @default(0)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
   @@index([taskId])
+  @@index([indexerId])
+  @@index([seeders, score])
+  @@index([pubDate])
+  @@unique([taskId, magnet])
 }
 
 // /* ===================== Settings ===================== */
@@ -398,11 +409,11 @@ model Setting {
   cronYandexPull    String @default("0 */6 * * *")
   cronYandexMatch   String @default("10 */6 * * *")
   cronYandexPush    String @default("45 */6 * * *")
-  yandexMatchTarget String @default("both") // 'both' | 'artists' | 'albums'
-  yandexPushTarget  String @default("both") // 'both' | 'artists' | 'albums'
+  yandexMatchTarget String @default("both")
+  yandexPushTarget  String @default("both")
 
   cronLidarrPull   String @default("0 3 * * *")
-  lidarrPullTarget String @default("both") // 'both' | 'artists' | 'albums'
+  lidarrPullTarget String @default("both")
 
   enableCronYandexPull    Boolean @default(false)
   enableCronYandexMatch   Boolean @default(false)
@@ -429,8 +440,8 @@ model Setting {
   navidromePass             String?
   navidromeToken            String?
   navidromeSalt             String?
-  navidromeSyncTarget       String? // 'artists' | 'albums' | 'tracks' | 'all'
-  likesPolicySourcePriority String? // 'yandex' | 'navidrome'
+  navidromeSyncTarget       String?
+  likesPolicySourcePriority String?
   cronNavidromePush         String?
 }
 
@@ -447,12 +458,15 @@ model JackettIndexer {
 
   categories Json?
 
-  tags       String? // необязательные теги (через запятую), для будущих фильтров
-  minSeeders Int? // опциональный минимум сидов на индексер
+  tags       String?
+  minSeeders Int?
 
-  order     Int      @default(100) // порядок в списке
+  order     Int      @default(100)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  tasks    TorrentTask[]    @relation(name: "IndexerToTasks")
+  releases TorrentRelease[] @relation(name: "IndexerToReleases")
 
   @@index([enabled, order])
   @@index([name])
