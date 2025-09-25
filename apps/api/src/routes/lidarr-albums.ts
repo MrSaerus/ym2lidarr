@@ -68,8 +68,8 @@ r.get('/albums', async (req, res) => {
 
         if (q) {
             where.OR = [
-                { title: { contains: q, mode: 'insensitive' } },
-                { artistName: { contains: q, mode: 'insensitive' } },
+                { title: { contains: q } },
+                { artistName: { contains: q } },
                 { mbid: { contains: q } },
             ];
         }
