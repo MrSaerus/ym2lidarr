@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:cadbfafeb6baf87eaaffa40b3640209c4b7fd38cebde65059d15bc39cd636b85 AS builder
+FROM --platform=$BUILDPLATFORM node:25-bookworm-slim@sha256:2688bfed319481b4e9c7af4d874736777c932516b55bc1b087cc4fafcbca3e5d AS builder
 WORKDIR /app
 
 ARG VERSION=dev

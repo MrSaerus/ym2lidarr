@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM node:24-bookworm-slim@sha256:cadbfafeb6baf87eaaffa40b3640209c4b7fd38cebde65059d15bc39cd636b85 AS builder
+FROM node:25-bookworm-slim@sha256:2688bfed319481b4e9c7af4d874736777c932516b55bc1b087cc4fafcbca3e5d AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
@@ -12,7 +12,7 @@ COPY apps/api ./apps/api
 RUN npm --workspace apps/api run build
 
 # ---------- runner ----------
-FROM node:24-bookworm-slim@sha256:cadbfafeb6baf87eaaffa40b3640209c4b7fd38cebde65059d15bc39cd636b85 AS api
+FROM node:25-bookworm-slim@sha256:2688bfed319481b4e9c7af4d874736777c932516b55bc1b087cc4fafcbca3e5d AS api
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=4000 \
