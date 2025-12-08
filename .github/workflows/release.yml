@@ -29,7 +29,7 @@ jobs:
           - { name: "pyproxy", dockerfile: "./docker/pyproxy.Dockerfile", repo: "ym2lidarr-pyproxy" }
           - { name: "single",  dockerfile: "./docker/single.Dockerfile",  repo: "ym2lidarr-single" }
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with: { fetch-depth: 0 }
 
       - name: Compute build date
@@ -72,7 +72,7 @@ jobs:
           - { name: "single",  dockerfile: "./docker/single.Dockerfile",  repo: "ym2lidarr-single" }
 
     steps:
-      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
         with: { fetch-depth: 0 }
 
       - name: Compute build date
