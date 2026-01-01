@@ -1,11 +1,11 @@
 // apps/api/src/services/torrents/fs/paths.ts
 import { prisma } from '../../../prisma';
 import path from 'node:path';
-import {PathTaskInput} from '../types'
+import type { PathTaskInput } from '../types';
 
 function sanitizeName(s: string): string {
   return s
-    .replace(/[\/\\:*?"<>|]+/g, ' ')
+    .replace(/[/\\:*?"<>|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/\.+$/g, '');

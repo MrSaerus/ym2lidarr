@@ -7,6 +7,7 @@ export type TorrentLayout =
   | 'multiFileCue'
   | 'multiAlbumCue';
 
+// eslint-disable-next-line no-redeclare
 export const TorrentLayout = {
   invalid: 'invalid',
   simpleAlbum: 'simpleAlbum',

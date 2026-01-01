@@ -67,10 +67,19 @@ function isValidUtf8(buf: Buffer): boolean {
   return true;
 }
 
+function countControlChars(s: string): number {
+  let n = 0;
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        if (c <= 0x1f && c !== 0x09 && c !== 0x0a && c !== 0x0d) n++;
+    }
+  return n;
+  }
+
 function scoreDecodedText(s: string) {
   const repl = (s.match(/�/g) || []).length;
   const cyr  = (s.match(/[А-Яа-яЁё]/g) || []).length;
-  const ctrl = (s.match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+  const ctrl = countControlChars(s);
   return (cyr * 6) - (repl * 30) - (ctrl * 2);
 }
 

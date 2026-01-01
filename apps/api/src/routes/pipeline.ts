@@ -2,20 +2,10 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
-import { createTask, addTaskToQbt, pickBestRelease } from '../services/torrents';
-import { searchTaskWithJackett } from '../services/torznab';
 import { runUnmatchedInternal } from '../services/torrentsPipeline';
 
 const r = Router();
 const log = createLogger({ scope: 'route.pipeline' });
-
-function buildAlbumQuery(artistName: string | null, albumTitle: string, year: number | null): string {
-  const parts: string[] = [];
-  if (artistName) parts.push(artistName.trim());
-  parts.push(albumTitle.trim());
-  if (year && Number.isFinite(year)) parts.push(String(year));
-  return parts.join(' - ') + ' FLAC';
-}
 
 /**
  * POST /api/pipeline/plan-unmatched

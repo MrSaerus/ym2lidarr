@@ -5,8 +5,8 @@ import {
   createTask, listTasks, getTask,
   updateTaskStatus, upsertRelease, listReleases,
   pickBestRelease, addTaskToQbt, refreshTaskQbtStatus,
-  refreshActiveTasks, mapQbtToTaskStatus,
-  moveTaskToFinalPath, autoRelocateDownloaded, copyDownloadedTask, autoCopyDownloaded, autoPollQbt,
+  mapQbtToTaskStatus, moveTaskToFinalPath, autoRelocateDownloaded,
+  copyDownloadedTask, autoCopyDownloaded, autoPollQbt,
 } from '../services/torrents';
 import { isTaskKind, isCollisionPolicy } from '../types/torrents';
 import { TorrentStatus } from '@prisma/client';

@@ -352,7 +352,7 @@ function fingerprint(s?: string | null): string {
     .toLowerCase()
     .replace(/[’'`"]/g, '')
     .replace(/[‐-‒–—−]/g, '-')
-    .replace(/[\[\]().,:;!/?\\|]+/g, ' ')
+    .replace(/[[\]().,:;!/?\\|]+/g, ' ')
     .replace(/\s*&\s*/g, ' and ')
     .replace(/\s+/g, ' ')
     .trim();

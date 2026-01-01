@@ -99,10 +99,6 @@ function parseData(l: LogItem): any {
   return v;
 }
 
-function mbArtistUrl(id?: string) { return id ? `https://musicbrainz.org/artist/${id}` : undefined; }
-function mbRGUrl(id?: string)     { return id ? `https://musicbrainz.org/release-group/${id}` : undefined; }
-function ymSearchUrl(q?: string)  { return q ? `https://music.yandex.ru/search?text=${encodeURIComponent(q)}` : undefined; }
-
 export default function LogsPage() {
   const [runs, setRuns] = useState<RunShort[]>([]);
   const [sel, setSel] = useState<number | null>(null);

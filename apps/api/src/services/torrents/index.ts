@@ -1,6 +1,5 @@
 // apps/api/src/services/torrents/index.ts
 import { createLogger } from '../../lib/logger';
-import chardet from 'chardet';
 import { prisma } from '../../prisma';
 import { TorrentStatus } from '@prisma/client';
 import { QbtClient } from '../qbittorrent';

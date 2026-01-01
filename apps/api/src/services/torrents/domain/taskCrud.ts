@@ -1,7 +1,7 @@
 // apps/api/src/services/torrents/domain/taskCrud.ts
 import { isCollisionPolicy, isTaskKind } from '../../../types/torrents';
 import { prisma } from '../../../prisma';
-import { TorrentStatus } from '@prisma/client';
+import type { TorrentStatus } from '@prisma/client';
 import { log } from '../index';
 
 const ERROR_BACKOFF_BASE_MIN = 5;   // первая задержка, можно потом вынести в настройки

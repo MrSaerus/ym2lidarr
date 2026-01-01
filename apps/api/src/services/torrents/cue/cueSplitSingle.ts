@@ -83,7 +83,7 @@ export async function splitSingleFileCueAlbum(params: {
   };
 }) {
 
-  const { srcBase, files, dstAlbumDir, trackTpl, discTpl, policy, meta } = params;
+  const { srcBase, files, dstAlbumDir, trackTpl, discTpl: _discTpl, policy, meta } = params;
 
   const audioFiles = files.filter((f) => isAudioFile(f.name));
   const cueFiles = files.filter((f) => isCueFile(f.name));
@@ -112,7 +112,6 @@ export async function splitSingleFileCueAlbum(params: {
     },
     parsed,
   );
-
 
   const audioRel = audioFiles[0].name.replace(/^[/\\]+/, '');
   const audioAbs = path.join(srcBase, audioRel);
@@ -144,7 +143,7 @@ export async function splitSingleFileCueAlbum(params: {
     };
 
     const baseName =
-      applyPattern(trackTpl || '{Track:2} - {Title}', ctx) + audioExt;
+      applyPattern(trackTpl || '{Track:2} - {Title}', ctx) + outExt;
     const dstRel = baseName; // диск считаем 1, без вложенных папок
     const dstAbs = path.join(dstAlbumDir, dstRel);
 

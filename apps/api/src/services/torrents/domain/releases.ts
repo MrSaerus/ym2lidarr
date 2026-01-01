@@ -1,7 +1,7 @@
 // apps/api/src/services/torrents/domain/releases.ts
 import { prisma } from '../../../prisma';
 import type { TorrentReleaseStatus } from '../../../types/torrents';
-import { TorrentRelease } from '@prisma/client';
+import type { TorrentRelease } from '@prisma/client';
 
 function computeReleaseScore(r: { seeders: number | null; score: number | null | undefined; magnet: string | null; pubDate: Date | null }): number {
   const baseSeeders = Math.max(0, r.seeders ?? 0);

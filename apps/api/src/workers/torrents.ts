@@ -1,6 +1,5 @@
 // apps/api/src/workers/torrents.ts
 import { prisma } from '../prisma';
-import { createLogger } from '../lib/logger';
 import {
   startRunWithKind,
   evStart,
@@ -14,8 +13,6 @@ import {
 } from './_common';
 import { autoPollQbt, autoCopyDownloaded } from '../services/torrents';
 import { runUnmatchedInternal } from '../services/torrentsPipeline';
-
-const log = createLogger({ scope: 'worker.torrents' });
 
 export async function runTorrentsUnmatched(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });

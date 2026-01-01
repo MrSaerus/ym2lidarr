@@ -1,5 +1,5 @@
 // apps/api/src/services/torrents/layout/multiAlbumPick.ts
-import { PathTaskInput } from '../types';
+import type { PathTaskInput } from '../types';
 import { safe } from '../fs/paths';
 import { isAudioFile } from '../fs/copyWithRenaming';
 import { dirSeg, firstDir } from './detectLayout';

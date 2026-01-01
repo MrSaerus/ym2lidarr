@@ -1,6 +1,6 @@
 // apps/api/src/services/torrents/qbt/addTaskToQbt.ts
 import { prisma } from '../../../prisma';
-import { TorrentRelease, TorrentStatus } from '@prisma/client';
+import { TorrentStatus, type TorrentRelease } from '@prisma/client';
 import { QbtClient } from '../../qbittorrent';
 import { rewriteJackettUrlForQbt } from './jackettRewrite';
 import { precomputeReleaseHash } from './hash';

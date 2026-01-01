@@ -485,7 +485,7 @@ export default function SettingsPage() {
   }
 
   // ---- Jackett CRUD/Test ----
-  async function loadIndexers() {
+  const loadIndexers = useCallback(async () => {
     setIdxLoading(true);
     try {
       const r = await api<JackettIndexer[]>('/api/jackett/indexers');
@@ -495,11 +495,11 @@ export default function SettingsPage() {
     } finally {
       setIdxLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadIndexers();
-  }, []);
+  }, [loadIndexers]);
 
   function idxOpenNew() {
     setIdxEdit({

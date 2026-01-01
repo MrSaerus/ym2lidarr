@@ -1,8 +1,8 @@
 // apps/api/src/services/torrents/cue/cueParse.ts
 import fs from 'node:fs/promises';
-import {decodeCueSmart} from "./cueDecode"
-import {CueTrack, ParsedCue} from '../types';
-import {log} from '../index'
+import { decodeCueSmart } from './cueDecode';
+import type { CueTrack, ParsedCue } from '../types';
+import { log } from '../index';
 
 export async function parseCueFile(cuePath: string): Promise<ParsedCue> {
   const buf = await fs.readFile(cuePath);
