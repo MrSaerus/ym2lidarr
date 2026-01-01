@@ -50,12 +50,12 @@ function textBetween(s: string, open: string | RegExp, close: string | RegExp): 
 
 function decodeHtmlEntities(s: string): string {
   return s
-    .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
 
 async function applyIndexerErrorStats(
