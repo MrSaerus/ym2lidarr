@@ -26,13 +26,10 @@ export async function runLidarrPush(
   const t0 = now();
   await evStart(run.id, { kind: 'lidarr.push', target, source: src, allowRepush });
 
-  // counters должны быть доступны heartbeat-таймеру
   let done = 0, ok = 0, failed = 0;
 
-  // heartbeat: чтобы run не становился orphaned при долгих запросах/ретраях
   const heartbeatMs = 15_000;
   const hb = setInterval(() => {
-    // не await: heartbeat не должен блокировать воркер
     patchRunStats(run.id, { done, ok, failed, heartbeatAt: Date.now() } as any).catch(() => {});
   }, heartbeatMs);
 
@@ -122,7 +119,6 @@ export async function runLidarrPush(
             }
             ok++;
           } else {
-            // если отменили — можно не считать как failed (на твоё усмотрение)
             if (result.reason === 'cancelled') {
               await dblog(run.id, 'warn', `Cancelled during album push: ${it.artist} — ${it.title}`, { target, rgMbid: it.rgMbid });
               return;
@@ -193,7 +189,6 @@ export async function runLidarrPush(
       }
 
       done++;
-      // прогресс можно обновлять чуть чаще, но оставляю твою логику
       if (done % 5 === 0) await patchRunStats(run.id, { done, ok, failed });
     }
 

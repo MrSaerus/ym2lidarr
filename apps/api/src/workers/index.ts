@@ -9,11 +9,6 @@ import { runYandexPull as _runYandexPull } from './yandexPull.js';
 import { runMbMatch as _runMbMatch } from './mbMatch.js';
 import { runLidarrPush as _runLidarrPush } from './lidarrPush.js';
 
-/**
- * Custom: match all artists (через общий воркер runCustomArtistsMatch).
- * Force больше не управляется через body — здесь всегда используется
- * «обычный» режим (force=false).
- */
 export async function runCustomMatchAll(reuseRunId?: number, opts?: { force?: boolean }) {
   const { runCustomArtistsMatch } = await import('./mbMatch.js');
   const run = reuseRunId
@@ -23,12 +18,6 @@ export async function runCustomMatchAll(reuseRunId?: number, opts?: { force?: bo
   return runCustomArtistsMatch(run.id, { force: !!opts?.force });
 }
 
-/**
- * Custom: push всех custom-артистов в Lidarr.
- * Параметр force больше не поддерживается через HTTP — здесь
- * мы не переопределяем allowRepush, логика берётся из настроек
- * внутри runLidarrPushEx.
- */
 export async function runCustomPushAll(reuseRunId?: number) {
   const { runLidarrPushEx } = await import('./lidarrPush.js');
   return runLidarrPushEx({
@@ -36,7 +25,6 @@ export async function runCustomPushAll(reuseRunId?: number) {
     source: 'custom',
     reuseRunId,
     kindOverride: 'custom.push.all',
-    // allowRepushOverride убран — всё через настройки внутри воркера
   });
 }
 
@@ -53,13 +41,6 @@ export async function runYandexPullAll(reuseRunId?: number) {
   if (!run) return;
   return _runYandexPull(undefined, run.id);
 }
-
-/**
- * Yandex match: force больше не берём из body.
- * Для сохранения старого поведения здесь оставляем фиксированный force=true
- * (как раньше делали кнопки на фронте).
- * Если позже переведём на настройку — достаточно будет поменять здесь.
- */
 
 export async function runYandexMatch(
   target: 'artists'|'albums'|'both' = 'both',

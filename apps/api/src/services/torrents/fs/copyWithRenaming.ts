@@ -15,7 +15,6 @@ export function guessTrackMeta(relPath: string): { disc?: number; track?: number
   const parts = relPath.split(/[\\/]/g).filter(Boolean);
   const file = parts.pop() || '';
 
-  // Нормализация сегмента пути для более стабильного матчинга
   const norm = (s: string) =>
     (s || '')
       .toLowerCase()
@@ -23,12 +22,10 @@ export function guessTrackMeta(relPath: string): { disc?: number; track?: number
       .replace(/\s+/g, ' ')
       .trim();
 
-  // Диск берём из директорий: CD1 / CD 1 / Disc 2 / Disk 01 / Диск 1 / "Disc 2 (Bonus ...)" / "CD 1 - Extra" и т.п.
   const disc = (() => {
     for (const raw of parts) {
       const s = norm(raw);
 
-      // cd1, disc2, disk01, "disc 2 (bonus...)" и т.д.
       const m =
         s.match(/\b(cd|disc|disk|диск)\s*0*(\d{1,2})\b/) ||
         s.match(/\b(cd|disc|disk|диск)0*(\d{1,2})\b/);
@@ -41,7 +38,6 @@ export function guessTrackMeta(relPath: string): { disc?: number; track?: number
     return undefined;
   })();
 
-  // номер трека в начале имени: "01 - Title", "1. Title", "01 Title"
   const base = file.replace(extnameLower(file), '');
   const m = /^(\d{1,3})[.\-\s_]+(.+)$/.exec(base);
   const track = m ? parseInt(m[1], 10) : undefined;
@@ -78,7 +74,6 @@ export async function copyWithRenaming(fileList: { name: string }[], srcBase: st
     if (exists) {
       if (policy === 'skip') continue;
       if (policy === 'ask') throw new Error(`Destination exists: ${absDst}`);
-      // merge/replace перейдут к placeFile с нужным force
     }
 
     await placeFile(absSrc, absDst, opMode, force);

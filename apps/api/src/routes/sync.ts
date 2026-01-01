@@ -139,7 +139,6 @@ r.post('/lidarr/pull', async (req, res) => {
 
 /**
  * Общий MB-match endpoint.
- * force больше не читаем из body/query — поведение определяется самим воркером.
  */
 r.post('/match', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
@@ -147,8 +146,6 @@ r.post('/match', async (req, res) => {
   try {
     const targetRaw = (req.body?.target || req.query.target) as any; // 'artists' | 'albums' | 'both'
     const target = ['artists', 'albums', 'both'].includes(targetRaw) ? targetRaw : 'both';
-
-    // force только из БД
     const settings = await prisma.setting.findFirst();
     const force = !!(settings as any)?.mbMatchForce;
 
@@ -267,7 +264,6 @@ r.post('/runs/:id/stop', async (req, res) => {
 
 /**
  * Custom match-all: force убран из публичного API.
- * Сейчас это всегда «обычный» матч без форса.
  */
 r.post('/custom/match', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
@@ -292,8 +288,7 @@ r.post('/custom/match', async (req, res) => {
 });
 
 /**
- * Custom push-all: force убран — allowRepushOverride теперь не
- * прокидывается снаружи (будет управляться настройками внутри воркера).
+ * Custom push-all
  */
 r.post('/custom/push', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
@@ -367,7 +362,6 @@ r.post('/yandex/pull-all', async (req, res) => {
 
 /**
  * Yandex match: force больше не идёт из body/query.
- * Сейчас force зашит в воркере (см. runYandexMatch).
  */
 r.post('/yandex/match', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
@@ -376,7 +370,6 @@ r.post('/yandex/match', async (req, res) => {
     const target = (req.body?.target || req.query.target || 'both') as 'artists'|'albums'|'both';
     const kind   = target==='artists'?'yandex.match.artists':target==='albums'?'yandex.match.albums':'yandex.match.all';
 
-    // force только из БД
     const settings = await prisma.setting.findFirst();
     const force = !!(settings as any)?.yandexMatchForce;
 

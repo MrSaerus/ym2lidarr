@@ -36,21 +36,15 @@ app.set('json replacer', (_key: string, value: unknown) =>
 app.use(requestLogger);
 const PORT = process.env.PORT_API ? Number(process.env.PORT_API) : 4000;
 
-// сколько времени считаем «живым» heartbeat (мс)
-const STALE_RUN_MS = Number(process.env.STALE_RUN_MS || 5 * 60 * 1000); // 5 минут
+const STALE_RUN_MS = Number(process.env.STALE_RUN_MS || 5 * 60 * 1000);
 
-// локальный логгер со скоупом
 const log = createLogger({ scope: 'api.main', ctx: { instanceId, portApi: PORT, staleRunMs: STALE_RUN_MS } });
 
-/* -----------------------------------------------------------
- * Build / Runtime Metadata (для первого старта)
- * --------------------------------------------------------- */
 function safePkgVersion(): string | null {
   try {
-    // __dirname -> apps/api/dist/src при сборке; поднимемся к корню пакета apps/api
     const pkgPathCandidates = [
-      path.resolve(__dirname, '../../package.json'), // когда dist лежит в apps/api/dist
-      path.resolve(process.cwd(), 'package.json'),   // fallback на текущую CWD
+      path.resolve(__dirname, '../../package.json'),
+      path.resolve(process.cwd(), 'package.json'),
     ];
     for (const p of pkgPathCandidates) {
       if (fs.existsSync(p)) {
@@ -66,7 +60,6 @@ function safePkgVersion(): string | null {
 function getStartupMeta() {
   const pkgVersion = safePkgVersion();
 
-  // Передаём только «безопасные» переменные окружения (ничего чувствительного)
   const envSnapshot = {
     NODE_ENV: process.env.NODE_ENV || 'development',
     LOG_LEVEL: process.env.LOG_LEVEL || undefined,
@@ -77,7 +70,6 @@ function getStartupMeta() {
     STALE_RUN_MS: process.env.STALE_RUN_MS || undefined,
   };
 
-  // Возможные CI-переменные, если заданы при сборке/запуске
   const build = {
     version: pkgVersion || process.env.BUILD_VERSION || null,
     commit: process.env.GIT_COMMIT || process.env.COMMIT_SHA || null,
@@ -85,7 +77,6 @@ function getStartupMeta() {
     image: process.env.IMAGE_TAG || null,
   };
 
-  // Платформа и рантайм
   const runtime = {
     node: process.version,
     pid: process.pid,

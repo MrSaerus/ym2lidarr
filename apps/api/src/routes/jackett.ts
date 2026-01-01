@@ -30,7 +30,6 @@ function parseCats(v: any): string[] | null {
 // GET /api/jackett/indexers
 r.get('/', async (_req, res) => {
   const list = await prisma.jackettIndexer.findMany({ orderBy: [{ order: 'asc' }, { id: 'asc' }] });
-  // Маскируем ключи
   res.json(list.map(({ apiKey, ...rest }) => ({ ...rest, apiKey: '' })));
 });
 
@@ -90,7 +89,6 @@ r.delete('/:id', async (req, res) => {
 /* --------- Test --------- */
 
 // POST /api/jackett/indexers/:id/test
-// (или body: { baseUrl, apiKey } — для разового теста без сохранения)
 r.post('/:id/test', async (req, res) => {
   const id = parseInt(String(req.params.id), 10);
   if (!Number.isFinite(id)) return res.status(400).json({ ok: false, error: 'bad id' });
@@ -106,7 +104,6 @@ r.post('/:id/test', async (req, res) => {
   if (!base) return res.status(400).json({ ok: false, error: 'baseUrl missing' });
   if (!key) return res.status(400).json({ ok: false, error: 'apiKey missing' });
 
-  // Torznab caps
   const url = new URL('/api/v2.0/indexers/all/results/torznab/api', base);
   url.searchParams.set('t', 'caps');
   url.searchParams.set('apikey', key);

@@ -66,8 +66,6 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
             try {
               albumsCount = await mbGetArtistAlbumsCount(r.externalId);
             } catch (e: any) {
-              // Не считаем это фатальной ошибкой матчинга артиста:
-              // mbid сохраним, а количество альбомов останется null.
               await dblog(
                 runId,
                 'warn',

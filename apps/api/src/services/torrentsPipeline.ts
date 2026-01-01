@@ -62,9 +62,9 @@ class JackettFatalError extends Error {
 }
 
 type JackettAvailabilitySnapshot = {
-  available: number; // enabled && not in cooldown
+  available: number;
   enabled: number;
-  cooldown: number; // enabled but tempDisabledUntil > now
+  cooldown: number;
   disabled: number;
   nextAvailableAt: string | null;
   cooldownIndexers: Array<{ id: number; name: string; until: string }>;
@@ -138,11 +138,6 @@ async function ensureJackettAvailable(runId?: number, phase?: string) {
   throw new JackettUnavailableError(msg);
 }
 
-/**
- * Основной пайплайн «run-unmatched» для cron-задач и ручного запуска.
- *
- * runId — это опциональный SyncRun.id для Live Logs (как в Yandex/Lidarr Match/Push).
- */
 export async function runUnmatchedInternal(
   opts: RunUnmatchedOptions,
   runId?: number,
@@ -166,9 +161,6 @@ export async function runUnmatchedInternal(
     );
   }
 
-  // === 1) Забираем кандидатов без MBID ===
-  // NOTE: у тебя переменная названа oneDayAgo, но сейчас это 60 секунд.
-  // Если тебе реально нужен 1 день — замени на 24 * 60 * 60 * 1000.
   const oneDayAgo = new Date(Date.now() - 60 * 1000);
 
   const yAlbums = await prisma.yandexAlbum.findMany({
@@ -236,7 +228,6 @@ export async function runUnmatchedInternal(
     return parts.join(' - ') + ' FLAC';
   };
 
-  // === dryRun: только план, без похода в Jackett/qBittorrent ===
   if (dryRun) {
     const plan = {
       albums: yAlbums.map((a) => ({
@@ -264,10 +255,8 @@ export async function runUnmatchedInternal(
     return { ok: true as const, dryRun: true as const, stats, plan };
   }
 
-  // Перед стартом: если нет ни одного доступного индексатора — падаем.
   await ensureJackettAvailable(runId, 'torrents:unmatched.start');
 
-  // === 2) Обрабатываем альбомы пачками по parallelSearches ===
   const batches: typeof yAlbums[] = [];
   for (let i = 0; i < yAlbums.length; i += parallelSearches) {
     batches.push(yAlbums.slice(i, i + parallelSearches));
@@ -275,7 +264,6 @@ export async function runUnmatchedInternal(
 
   for (const batch of batches) {
     await ensureNotCancelled(runId, 'torrents:unmatched.batch');
-    // Во время работы: если индексаторы ушли в таймаут/выключились — прерываем задачу.
     await ensureJackettAvailable(runId, 'torrents:unmatched.batch');
 
     const promises = batch.map((a) =>
@@ -283,7 +271,6 @@ export async function runUnmatchedInternal(
         try {
           const query = buildAlbumQuery(a.artist ?? null, a.title, a.year ?? null);
 
-          // 2.1) Создаем или переиспользуем torrentTask
           const task = await createTask({
             kind: 'album',
             artistName: a.artist ?? null,
@@ -310,7 +297,6 @@ export async function runUnmatchedInternal(
             stats.tasksCreated += 1;
           }
 
-          // первичное выставление torrentState по статусу задачи
           try {
             await prisma.yandexAlbum.update({
               where: { id: a.id },
@@ -374,7 +360,6 @@ export async function runUnmatchedInternal(
             query,
           });
 
-          // 3) Поиск релизов через Jackett
           const searchRes = await searchTaskWithJackett(task.id, { limitPerIndexer });
 
           if (!searchRes) {
@@ -382,7 +367,6 @@ export async function runUnmatchedInternal(
             const msg = `Jackett search returned no result object for task ${task.id} (album ${a.ymId})`;
             if (runId) await dblog(runId, 'error', msg);
 
-            // поиска по факту нет — считаем, что активного торрента нет
             try {
               await prisma.yandexAlbum.update({
                 where: { id: a.id },
@@ -409,9 +393,6 @@ export async function runUnmatchedInternal(
             return;
           }
 
-          // IMPORTANT: СНАЧАЛА обрабатываем !ok, потом count.
-          // Иначе no-indexers/indexer-error с count=0 будет ошибочно трактоваться как "пустой поиск",
-          // и задача НЕ прервётся.
           if (!searchRes.ok) {
             stats.errors += 1;
 
@@ -431,7 +412,6 @@ export async function runUnmatchedInternal(
               msg = `Search error for task ${task.id} (album ${a.ymId}), reason=${reason}`;
             }
 
-            // ошибка поиска — считаем, что активного торрента нет
             try {
               await prisma.yandexAlbum.update({
                 where: { id: a.id },
@@ -463,7 +443,6 @@ export async function runUnmatchedInternal(
 
             tasks.push(task);
 
-            // Фатальные причины: индексаторов больше нет / все упали => прерываем ВСЮ задачу.
             if (reason === 'no-indexers' || reason === 'indexer-error') {
               throw new JackettFatalError(msg);
             }
@@ -474,7 +453,6 @@ export async function runUnmatchedInternal(
           if (searchRes.count <= 0) {
             stats.searchesEmpty += 1;
 
-            // релизов нет — помечаем, что активного торрента нет
             try {
               await prisma.yandexAlbum.update({
                 where: { id: a.id },
@@ -512,7 +490,6 @@ export async function runUnmatchedInternal(
 
           stats.searchesOk += 1;
 
-          // 4) Выбор лучшего релиза
           const { chosen, reason } = await pickBestRelease(task.id, {
             commit: true,
           } as any);
@@ -548,7 +525,6 @@ export async function runUnmatchedInternal(
             title: chosen.title,
           });
 
-          // 5) Добавление в qBittorrent
           const addRes = await addTaskToQbt(task.id, {
             releaseId: chosen.id,
             autoStart,
@@ -556,7 +532,6 @@ export async function runUnmatchedInternal(
 
           const updatedTask = addRes.task ?? task;
 
-          // после addToQbt у нас уже есть новый статус задачи — синхронизируем в альбом
           try {
             await prisma.yandexAlbum.update({
               where: { id: a.id },
@@ -596,7 +571,6 @@ export async function runUnmatchedInternal(
               qbitHash: addRes.qbitHash ?? null,
             });
           } else {
-            // ключевое изменение: берём реальную причину из lastError
             const reasonMsg =
               (updatedTask as any).lastError ||
               'qBittorrent: add returned not ok (no hash / duplicate?)';
@@ -618,7 +592,6 @@ export async function runUnmatchedInternal(
 
           tasks.push(updatedTask);
         } catch (err: any) {
-          // Не проглатываем фатальные ошибки Jackett — они должны оборвать run.
           if (err instanceof JackettUnavailableError || err instanceof JackettFatalError) {
             throw err;
           }

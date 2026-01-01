@@ -115,7 +115,6 @@ r.patch('/tasks/:id/status', async (req, res) => {
       lastTriedAt: new Date(),
     };
 
-    // позволяем вручную задать/исправить хеш
     if (typeof req.body?.qbitHash === 'string' && req.body.qbitHash.trim()) {
       patch.qbitHash = req.body.qbitHash.trim().toUpperCase();
     }
@@ -276,10 +275,7 @@ r.post('/qbt/webhook', async (req, res) => {
       await prisma.torrentTask.update({ where: { id: task.id }, data: { updatedAt: new Date() } });
     }
     if (next === TorrentStatus.downloaded && task.status !== TorrentStatus.moved) {
-      // асинхронно, но можно и await — решай: если webhook должен отвечать быстро, не блокируем
-      // здесь лучше "fire-and-forget" без падений ответа
       copyDownloadedTask(task.id).catch(err => {
-        // просто записываем ошибку, ответ вебхуку — ok
         console.warn('copyDownloadedTask failed', err?.message);
       });
     }

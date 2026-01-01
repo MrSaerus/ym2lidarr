@@ -5,8 +5,6 @@ import { createLogger } from '../lib/logger';
 
 const router = Router();
 const log = createLogger({ scope: 'route.runs' });
-
-// Поддержим и с префиксом, и без него — на случай app.use('/api', router) ИЛИ app.use(router)
 const PREFIXES = ['', '/api'];
 
 function toInt(x: any, def: number): number {
@@ -34,11 +32,6 @@ function toNum(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Универсально собираем прогресс из stats:
- * - предпочитаем total/done
- * - иначе агрегируем все пары *_total / *_done (например a_total/a_done, al_total/al_done, c_total/c_done и т.д.)
- */
 function deriveProgress(stats: Record<string, any>): { total: number; done: number; pct: number } | null {
   let total = 0;
   let done = 0;
@@ -51,15 +44,12 @@ function deriveProgress(stats: Record<string, any>): { total: number; done: numb
     if (t <= 0) return;
 
     total += t;
-    // done может быть больше total по конкретной паре — ограничим
     done += Math.min(d, t);
     found = true;
   };
 
-  // 1) total/done — если есть
   if (stats.total != null || stats.done != null) addPair(stats.total, stats.done);
 
-  // 2) все *_total / *_done
   for (const k of Object.keys(stats)) {
     if (!k.endsWith('_total')) continue;
     const dKey = k.replace(/_total$/, '_done');
@@ -69,7 +59,6 @@ function deriveProgress(stats: Record<string, any>): { total: number; done: numb
 
   if (!found || total <= 0) return null;
 
-  // Финальная страховка
   if (done < 0) done = 0;
   if (done > total) done = total;
 
@@ -88,7 +77,7 @@ function mapRun(run: any) {
     finishedAt: run.finishedAt,
     message: run.message ?? null,
     kind: (run as any).kind ?? null,
-    progress, // <-- ВАЖНО
+    progress,
   };
 }
 
@@ -185,7 +174,7 @@ for (const p of PREFIXES) {
         ts: l.ts,
         level: l.level,
         message: l.message,
-        data: safeParseJson(l.data), // отдаём уже распарсенным объектом
+        data: safeParseJson(l.data),
         runId: l.runId,
       }));
       const nextAfter = mapped.length ? mapped[mapped.length - 1].id : after;

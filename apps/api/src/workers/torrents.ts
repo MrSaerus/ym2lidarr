@@ -17,9 +17,6 @@ import { runUnmatchedInternal } from '../services/torrentsPipeline';
 
 const log = createLogger({ scope: 'worker.torrents' });
 
-/**
- * torrents:unmatched — автоматическое создание задач по лайкам (run-unmatched)
- */
 export async function runTorrentsUnmatched(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });
   const limit = settings?.torrentRunUnmatchedLimit ?? 10;
@@ -92,9 +89,6 @@ export async function runTorrentsUnmatched(reuseRunId?: number) {
   }
 }
 
-/**
- * torrents:poll — опрос qBittorrent и обновление статусов задач
- */
 export async function runTorrentsPoll(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });
   const batchSize = settings?.torrentQbtPollBatchSize ?? 50;
@@ -118,7 +112,6 @@ export async function runTorrentsPoll(reuseRunId?: number) {
   });
 
   try {
-    // ВАЖНО: runId больше не передаём, только batchSize/staleSec
     const res = await autoPollQbt({ batchSize });
 
     await patchRunStats(runId, {
@@ -149,16 +142,12 @@ export async function runTorrentsPoll(reuseRunId?: number) {
   }
 }
 
-
-/**
- * torrents:copy — копирование/перемещение скачанных альбомов в библиотеку
- */
 export async function runTorrentsCopyDownloaded(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });
   const batchSize = settings?.torrentCopyBatchSize ?? 20;
 
   const run = await startRunWithKind(
-    'torrents.copy', // у вас уже точечный kind, оставляем как есть
+    'torrents.copy',
     {
       phase: 'start',
       batchSize,
@@ -188,10 +177,7 @@ export async function runTorrentsCopyDownloaded(reuseRunId?: number) {
     if (res.errors && res.errors > 0) {
       const msg = `Torrent copy finished with ${res.errors} error(s) (copied=${res.copied}, skipped=${res.skipped})`;
 
-      // пишем в Live Logs
       await dblog(runId, 'error', msg, { ...res });
-
-      // event для live-лент
       await evError(runId, {
         kind: 'torrents.copy',
         error: msg,

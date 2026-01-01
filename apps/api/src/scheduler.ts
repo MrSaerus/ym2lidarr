@@ -22,12 +22,9 @@ import { createLogger } from './lib/logger';
 const log = createLogger({ scope: 'scheduler' });
 
 /* ====================== CRON-PARSER SAFE NEXT ====================== */
-/** Универсальный вызов cron-parser для v2…v5 */
 function nextFromCron(expr: string, opts?: any): Date | null {
   try {
     const m: any = cronParser;
-
-    // Подбираем доступную функцию парсинга в порядке приоритета
     const parseFn =
       (typeof m?.parseExpression === 'function' && m.parseExpression) ||
       (typeof m?.default?.parseExpression === 'function' && m.default.parseExpression) ||
@@ -48,14 +45,12 @@ function nextFromCron(expr: string, opts?: any): Date | null {
     const n = it.next();
     if (!n) return null;
 
-    // v2/v3/v5: next() -> CronDate { toDate() }, иногда возвращают сам Date
     if (typeof n.toDate === 'function') return n.toDate();
     if (n instanceof Date) return n;
     if (typeof n.valueOf === 'function') return new Date(n.valueOf());
 
     return null;
   } catch {
-    // тихо возвращаем null (UI сам покажет "—")
     return null;
   }
 }
@@ -75,13 +70,11 @@ let jobs: {
   backup?: cron.ScheduledTask;
   navidromePush?: cron.ScheduledTask;
 
-  // Новые задачи по торрентам
   torrentsUnmatched?: cron.ScheduledTask;
   torrentsPoll?: cron.ScheduledTask;
   torrentsCopy?: cron.ScheduledTask;
 } = {};
 
-// Памятка: какие jobKeys сейчас запущены ИМЕННО кроном (для UI "State")
 type JobKey =
   | 'yandexPull'
   | 'yandexMatch'
@@ -91,7 +84,6 @@ type JobKey =
   | 'customPush'
   | 'backup'
   | 'navidromePush'
-  // новые ключи
   | 'torrentsUnmatched'
   | 'torrentsPoll'
   | 'torrentsCopy';
@@ -213,7 +205,6 @@ export async function initScheduler() {
   await reloadJobs();
 }
 
-/** true, если есть активный ран, kind начинается с любого из префиксов */
 async function hasActiveRunWithPrefixes(prefixes: string[]): Promise<boolean> {
   if (!prefixes.length) return false;
   const or = prefixes.map((p) => ({ kind: { startsWith: p } as any }));
@@ -224,7 +215,6 @@ async function hasActiveRunWithPrefixes(prefixes: string[]): Promise<boolean> {
   return !!r;
 }
 
-/** Проверка «занятости» с учётом памяти (крон уже стартанул, но ран ещё не создался) */
 async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<boolean> {
   const dbBusy = await hasActiveRunWithPrefixes(prefixes);
   const cronBusy = relatedJobKeys.some((k) => !!cronActivity[k]);
@@ -236,7 +226,6 @@ async function isBusyNow(prefixes: string[], relatedJobKeys: JobKey[]): Promise<
 export async function reloadJobs() {
   log.info('reload scheduler jobs start', 'cron.reload.start');
 
-  // стоп старые
   for (const k of Object.keys(jobs) as (keyof typeof jobs)[]) {
     try {
       jobs[k]?.stop();
@@ -250,7 +239,6 @@ export async function reloadJobs() {
     return;
   }
 
-  /* helper: обёртки запуска для единообразного логирования */
   const wrap =
     <T extends JobKey>(
       key: T,
@@ -330,7 +318,6 @@ export async function reloadJobs() {
   }
 
   // ========== NAVIDROME PUSH ==========
-  // управляется полями: enableCronNavidromePush + cronNavidromePush
   if (s?.enableCronNavidromePush && s?.cronNavidromePush) {
     const expr = String(s.cronNavidromePush);
     if (cron.validate(expr)) {
@@ -338,7 +325,6 @@ export async function reloadJobs() {
         cronActivity.navidromePush = true;
         const lg = log.child({ scope: 'scheduler.navidromePush' });
         try {
-          // читаем текущие настройки для аутентификации и таргета/политики
           const st = await prisma.setting.findFirst();
           const navUrl = (st?.navidromeUrl || '').replace(/\/+$/, '');
           const user = st?.navidromeUser || '';
@@ -350,8 +336,6 @@ export async function reloadJobs() {
           if (!navUrl || !user || (!pass && !(token && salt))) {
             lg.warn('navidrome not configured, skip', 'cron.nav.push.skip.misconfig');
           } else {
-            // сам воркер стартует run и ведёт логи (reuseRunId не нужен)
-            // dryRun=false — реальный пуш лайков
             const auth = pass ? { user, pass } : { user, token, salt };
             await runNavidromeApply({
               navUrl,
@@ -473,8 +457,6 @@ const JOB_META: Record<
     enabledFlag: 'enableCronNavidromePush',
     prefixes: ['nav.apply.', 'navidrome.'],
   },
-
-  // Новые задачи по торрентам
   torrentsUnmatched: {
     title: 'Torrents: Run unmatched',
     settingCron: 'cronTorrentRunUnmatched',
@@ -503,7 +485,6 @@ function safeParseStats(stats?: string | null): any | null {
 export async function getCronStatuses() {
   const s = await prisma.setting.findFirst();
   const now = new Date();
-  // 1) одним запросом забираем все активные ранны (для быстрого матчинга по prefixes)
   const activeRuns = await prisma.syncRun.findMany({
     where: { status: 'running' },
     orderBy: { startedAt: 'desc' },
@@ -557,8 +538,6 @@ export async function getCronStatuses() {
   return out;
 }
 
-/* ====================== ХЕЛПЕР для ручных эндпоинтов ====================== */
-/** Зови это из ручных роутов, чтобы отдавать 409, если занято */
 export async function ensureNotBusyOrThrow(prefixes: string[], relatedJobKeys: JobKey[]) {
   const busy = await isBusyNow(prefixes, relatedJobKeys);
   if (busy) {

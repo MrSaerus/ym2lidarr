@@ -43,7 +43,6 @@ export type ReleaseGroupCandidateMB = {
 
 type MbOpts = { signal?: AbortSignal };
 
-// TLS/circuit state (process-wide)
 let tlsFailStreak = 0;
 let circuitUntilTs = 0;
 
@@ -55,7 +54,6 @@ function jitter(minMs: number, maxMs: number) {
 
 function isTlsDrop(err: any) {
   const msg = String(err?.message || err);
-  // симптом “дропа/блокировки до TLS”
   return msg.includes('before secure TLS connection was established');
 }
 
@@ -130,29 +128,16 @@ async function maybeWaitCircuit(url: string, signal?: AbortSignal) {
   }
 }
 
-/**
- * JSON fetch with:
- * - per-request timeout
- * - retries for HTTP transient and network/timeout
- * - separate TLS-drop branch with long backoff + circuit breaker
- * - respects Retry-After for 429/503
- * - optional AbortSignal to allow cancellation from worker
- */
+
 async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
   const startedAt = Date.now();
 
   const timeoutMs = 12_000;
   const maxAttempts = 4;
-
-  // net/backoff (non-TLS)
   const baseBackoffMs = 1200;
   const maxNetBackoffMs = 12_000;
-
-  // TLS-drop backoff
   const tlsBackoffMinMs = 15_000;
   const tlsBackoffMaxMs = 60_000;
-
-  // circuit breaker
   const tlsStreakToOpenCircuit = 3;
   const circuitMinMs = 60_000;
   const circuitMaxMs = 180_000;
@@ -165,9 +150,7 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
     const attemptStarted = Date.now();
     log.debug('MB request', 'mb.http.req', { url, attempt, timeoutMs });
 
-    // combine outer signal + local timeout into a single signal for request/sleep
     const ac = new AbortController();
-
     const onOuterAbort = () => ac.abort();
     if (opts?.signal) {
       if (opts.signal.aborted) ac.abort();
@@ -219,7 +202,6 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
 
       const data = (await res.body.json()) as unknown as T;
 
-      // success => reset TLS streak
       tlsFailStreak = 0;
 
       log.debug('MB response ok', 'mb.http.ok', {
@@ -247,7 +229,6 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
             pauseMs,
           });
 
-          // reset streak after opening circuit
           tlsFailStreak = 0;
 
           await sleep(pauseMs, ac.signal);
@@ -280,7 +261,6 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
         throw e;
       }
 
-      // --- normal transient network/timeout/abort ---
       if (attempt < maxAttempts && isAbortLike(e)) {
         const exp = Math.round(baseBackoffMs * Math.pow(2, attempt - 1) * (0.85 + Math.random() * 0.3));
         const backoff = Math.min(maxNetBackoffMs, exp);
@@ -319,10 +299,6 @@ async function mbJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
   return limiter.schedule(() => getJSON<T>(url, opts));
 }
 
-/**
- * Количество release-group'ов (альбомов) по артисту в MusicBrainz.
- * Берём поле `release-group-count` из browse-запроса.
- */
 export async function mbGetArtistAlbumsCount(mbid: string, opts?: MbOpts): Promise<number> {
   const url = `${BASE}/release-group?fmt=json&artist=${encodeURIComponent(mbid)}&type=album&limit=1`;
   log.info('MB artist albums count', 'mb.artist.albums.start', { mbid });
@@ -429,10 +405,6 @@ function uniq(arr: string[]): string[] {
   return out;
 }
 
-/**
- * Поиск артиста в MusicBrainz.
- * Возвращает { externalId, candidates, raw }.
- */
 export async function mbFindArtist(name: string, opts?: MbOpts) {
   const variants = uniq([name, hasCyrillic(name) ? translitRuToLat(name) : '']);
 
@@ -523,10 +495,6 @@ export async function mbFindArtist(name: string, opts?: MbOpts) {
   return { externalId: hit?.id ?? null, candidates, raw };
 }
 
-/**
- * Поиск release-group (альбома) по артисту и названию.
- * Возвращает { externalId, candidates, raw }.
- */
 export async function mbFindReleaseGroup(artist: string, title: string, opts?: MbOpts) {
   const artistVariants = uniq([artist, hasCyrillic(artist) ? translitRuToLat(artist) : '']);
   const titleVariants = uniq([title, hasCyrillic(title) ? translitRuToLat(title) : '']);
@@ -656,9 +624,6 @@ export async function mbFindReleaseGroup(artist: string, title: string, opts?: M
   return { externalId: hit?.id ?? null, candidates, raw };
 }
 
-/**
- * Для маршрутов Custom Artists
- */
 export async function searchArtistMB(name: string): Promise<{ id: string; name: string } | null> {
   try {
     const res = await mbFindArtist(name);

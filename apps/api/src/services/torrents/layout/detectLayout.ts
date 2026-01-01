@@ -15,7 +15,7 @@ function isDiscRootName(root: string): boolean {
     /^cd\s*\d{1,2}$/.test(r) ||
     /^disc\s*\d{1,2}$/.test(r) ||
     /^disk\s*\d{1,2}$/.test(r) ||
-    /^disс\s*\d{1,2}$/.test(r) || // кириллическая "с"
+    /^disс\s*\d{1,2}$/.test(r) ||
     /^диск\s*\d{1,2}$/.test(r) ||
     /^cd\s*\d{1,2}\s*-\s*.*$/.test(r) ||
     /^disc\s*\d{1,2}\s*-\s*.*$/.test(r)
@@ -32,8 +32,8 @@ export function pathParts(p: string): string[] {
 }
 export function dirSeg(p: string, idx: number): string | null {
   const parts = pathParts(p);
-  if (parts.length <= 1) return null;        // нет директорий, только имя файла
-  const dirs = parts.slice(0, -1);           // все директории, без имени файла
+  if (parts.length <= 1) return null;
+  const dirs = parts.slice(0, -1);
   return dirs[idx] ?? null;
 }
 export function firstDir(p: string): string | null {
@@ -51,21 +51,13 @@ export function detectTorrentLayout(files: { name: string; size: number }[]): To
 
   const hasCue = cues.length > 0;
 
-  // корни — только директории верхнего уровня
   const rootDirs = Array.from(new Set(
     files.map(f => firstDir(f.name)).filter((x): x is string => !!x),
   ));
   const rootCount = rootDirs.length;
 
-  // multi-disc в корне (CD1/CD2) — это НЕ multiAlbum
   const rootsAreDiscs = allDiscRoots(rootDirs);
 
-  // nested структура: 1 rootDir (папка альбома), внутри могут быть:
-  // - Disc 1 / Disc 2 (multi-disc одного альбома)
-  // - AlbumA / AlbumB (multi-album)
-  //
-  // Поэтому "несколько second-level" считаем multi-album ТОЛЬКО если среди них есть
-  // хотя бы 2 НЕ-дисковых имени.
   const audioSecondDirsAll = Array.from(new Set(
     audio.map(f => dirSeg(f.name, 1)).filter((x): x is string => !!x),
   ));
@@ -76,11 +68,10 @@ export function detectTorrentLayout(files: { name: string; size: number }[]): To
   if (!hasCue) {
     if (hasNestedMultiAlbum) return TorrentLayout.multiAlbum;
     if (rootCount <= 1) return TorrentLayout.simpleAlbum;
-    if (rootsAreDiscs) return TorrentLayout.simpleAlbum; // CD1/CD2 без cue
+    if (rootsAreDiscs) return TorrentLayout.simpleAlbum;
     return TorrentLayout.multiAlbum;
   }
 
-  // Есть CUE
   if (hasNestedMultiAlbum) return TorrentLayout.multiAlbumCue;
 
   if (rootCount <= 1) {
@@ -88,7 +79,6 @@ export function detectTorrentLayout(files: { name: string; size: number }[]): To
     return TorrentLayout.multiFileCue;
   }
 
-  // несколько корней, но это диски => multiFileCue (один альбом, multi-disc)
   if (rootsAreDiscs) return TorrentLayout.multiFileCue;
 
   return TorrentLayout.multiAlbumCue;

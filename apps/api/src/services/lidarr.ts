@@ -8,8 +8,6 @@ const DEFAULT_BODY_TIMEOUT = 30_000;    // 30s
 
 const log = createLogger({ scope: 'service.lidarr' });
 
-// Лимитер только для SkyHook lookup (artist/lookup, album/lookup),
-// чтобы не ловить 503 при серии запросов.
 const skyhookLimiter = new Bottleneck({
   maxConcurrent: 1,
   minTime: 1200,
@@ -23,7 +21,7 @@ export type Setting = {
   metadataProfileId?: number | null;
   monitor?: string | null;
 
-  lidarrAllowNoMetadata?: boolean | null; // для артистов
+  lidarrAllowNoMetadata?: boolean | null;
 };
 
 type EnsureResult = any & {
@@ -41,7 +39,6 @@ function normalizeRoot(p?: string | null) {
   return String(p || '').replace(/\/+$/, '');
 }
 
-/** Только БД + мягкие дефолты (на случай пустой БД) */
 function withDefaults(s: Setting): Setting {
   return {
     ...s,
@@ -354,7 +351,6 @@ export async function ensureAlbumInLidarr(s0: Setting, al: { artist: string; tit
 
 // ==================== confirm & retry helpers (artists + albums) ====================
 
-// Локальный helper HTTP для этого модуля (использует query apikey как основной api()).
 async function __lidarrApi<T = any>(base: string, key: string, path: string): Promise<T> {
   const b = base.replace(/\/+$/, '');
   const url = `${b}${path}${path.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(key)}`;
@@ -404,24 +400,18 @@ async function __sleepAbortable(ms: number, shouldAbort?: ShouldAbortFn, stepMs 
 
 // ===================================
 
-/** Локальная проверка присутствия артиста по MBID: НЕ бьёт SkyHook */
 export async function findArtistLocalByMBID(base: string, apiKey: string, mbid: string): Promise<any | null> {
   const artists: any[] = await __lidarrApi(base, apiKey, '/api/v1/artist');
   const needle = String(mbid).toLowerCase();
   return artists.find(a => String(a?.foreignArtistId || a?.mbid || '').toLowerCase().includes(needle)) || null;
 }
 
-/** Локальная проверка присутствия альбома по MBID: НЕ бьёт SkyHook */
 export async function findAlbumLocalByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
   const albums: any[] = await __lidarrApi(base, apiKey, '/api/v1/album');
   const needle = String(rgMbid).toLowerCase();
   return albums.find(a => String(a?.foreignAlbumId || a?.mbid || '').toLowerCase().includes(needle)) || null;
 }
 
-/**
- * Fallback проверка альбома через SkyHook lookup (бьёт SkyHook).
- * Важно: оборачиваем лимитером, чтобы не ловить 503 на серии запросов.
- */
 export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
   const path = `/api/v1/album/lookup?term=mbid:${encodeURIComponent(rgMbid)}`;
 
@@ -442,15 +432,9 @@ type LogFn = (level: 'info' | 'warn' | 'error', msg: string, extra?: any) => Pro
 type PushConfirmOpts = {
   maxAttempts?: number;
   initialDelayMs?: number;
-  shouldAbort?: ShouldAbortFn; // <-- ADD
+  shouldAbort?: ShouldAbortFn;
 };
 
-/**
- * Добавление артиста с подтверждением.
- * - pre-check (local /artist)
- * - ensureArtistInLidarr
- * - post-check (local /artist)
- */
 export async function pushArtistWithConfirm(
   setting: any,
   it: { name: string; mbid: string },
@@ -491,7 +475,6 @@ export async function pushArtistWithConfirm(
     try {
       const res = await ensureArtistInLidarr(setting, { name: it.name, mbid: it.mbid });
 
-      // post-check: ждём появления локально
       const confirmAttempts = 3;
       let confirmed: any | null = null;
 
@@ -563,12 +546,6 @@ export async function pushArtistWithConfirm(
   return { ok: false, reason: String(lastErr?.message || lastErr || 'unknown error') };
 }
 
-/**
- * Добавление альбома с подтверждением.
- * - pre-check: сначала local /album (НЕ SkyHook), затем fallback lookup при необходимости
- * - ensureAlbumInLidarr
- * - post-check: local /album (и при желании — fallback lookup)
- */
 export async function pushAlbumWithConfirm(
   setting: any,
   it: { artist: string; title: string; rgMbid: string },
@@ -585,7 +562,6 @@ export async function pushAlbumWithConfirm(
     return { ok: false, reason: 'cancelled' };
   }
 
-  // pre-check: сначала локально (не SkyHook), затем fallback на lookup
   try {
     const local = await findAlbumLocalByMBID(base, apiKey, it.rgMbid);
     if (local) {
@@ -607,7 +583,6 @@ export async function pushAlbumWithConfirm(
     return { ok: false, reason: 'cancelled' };
   }
 
-  // fallback lookup (SkyHook) — если нужно
   try {
     const hit = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
     if (hit) {
@@ -642,7 +617,6 @@ export async function pushAlbumWithConfirm(
     try {
       const res = await ensureAlbumInLidarr(setting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid });
 
-      // post-check: локально (НЕ SkyHook)
       const confirmAttempts = 3;
       let confirmed: any | null = null;
 
@@ -658,7 +632,6 @@ export async function pushAlbumWithConfirm(
           confirmed = await findAlbumLocalByMBID(base, apiKey, it.rgMbid);
 
           if (!confirmed) {
-            // optional fallback (можно убрать, если хочешь максимально исключить SkyHook)
             confirmed = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
           }
 

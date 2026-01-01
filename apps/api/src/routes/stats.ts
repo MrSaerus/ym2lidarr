@@ -77,7 +77,6 @@ r.get('/', async (req, res) => {
             yArtistsTotal, yArtistsMatched, yAlbumsTotal, yAlbumsMatched
         });
 
-        // Топ-5 «последних» альбомов из Yandex (по ymId убыв.)
         const latestYandexRaw = await prisma.yandexAlbum.findMany({
             where: { present: true },
             orderBy: [{ id: 'desc' }],
@@ -94,7 +93,6 @@ r.get('/', async (req, res) => {
             mbUrl: x.rgMbid ? `https://musicbrainz.org/release-group/${x.rgMbid}` : undefined,
         }));
 
-        // Топ-5 «последних» артистов из Yandex (по ymId убыв.)
         const latestYandexArtistsRaw = await prisma.yandexArtist.findMany({
             where: { present: true },
             orderBy: [{ id: 'desc' }],
@@ -122,7 +120,6 @@ r.get('/', async (req, res) => {
             prisma.lidarrAlbum.count({ where: { removed: false, mbid: { not: null } } }),
         ]);
 
-        // Топ-5 последних альбомов и артистов из Lidarr
         const [latestLidarrRaw, latestLidarrArtistsRaw] = await Promise.all([
             prisma.lidarrAlbum.findMany({
                 where: { removed: false },
@@ -193,7 +190,6 @@ r.get('/', async (req, res) => {
         const lArtistsDownloadedPct = lArtistsTotal ? lArtistsDownloaded / lArtistsTotal : 0;
         const lAlbumsWithoutDownloads = Math.max(0, lAlbumsTotal - lAlbumsDownloaded);
         const lAlbumsDownloadedPct = lAlbumsTotal ? lAlbumsDownloaded / lAlbumsTotal : 0;
-        // учитываем оба вида kind для совместимости
         const [yandex, lidarr, match] = await Promise.all([
             getRuns(['yandex', 'yandex-pull']),
             getRuns(['lidarr', 'lidarr-pull']),
@@ -202,7 +198,6 @@ r.get('/', async (req, res) => {
         const [ymLikedWithRgMbids, lidarrDownloadedMbids] = await Promise.all([
             prisma.yandexAlbum.findMany({
                 where: { present: true, rgMbid: { not: null } },
-                // берем только RG MBID
                 select: { rgMbid: true },
             }),
             prisma.lidarrAlbum.findMany({
@@ -211,7 +206,6 @@ r.get('/', async (req, res) => {
                     mbid: { not: null },
                     OR: [{ sizeOnDisk: { gt: 0 } }, { tracks: { gt: 0 } }],
                 },
-                // distinct по mbid, чтобы не считать дубликаты релизов в Lidarr
                 select: { mbid: true },
                 distinct: ['mbid'],
             }),
@@ -234,7 +228,6 @@ r.get('/', async (req, res) => {
         });
 
         res.json({
-            // (legacy) суммарные блоки как "yandex"
             artists: {
                 total: yArtistsTotal,
                 found: yArtistsMatched,
@@ -246,7 +239,6 @@ r.get('/', async (req, res) => {
                 unmatched: Math.max(0, yAlbumsTotal - yAlbumsMatched),
             },
 
-            // новая структурированная модель
             yandex: {
                 artists: {
                     total: yArtistsTotal,
@@ -284,7 +276,6 @@ r.get('/', async (req, res) => {
                 latestArtists: latestLidarrArtists,
             },
 
-            // ⬇️ кастом
             custom: {
                 artists: {
                     total: cArtistsTotal,

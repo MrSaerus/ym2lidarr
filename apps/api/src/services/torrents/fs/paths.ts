@@ -5,10 +5,10 @@ import {PathTaskInput} from '../types'
 
 function sanitizeName(s: string): string {
   return s
-    .replace(/[\/\\:*?"<>|]+/g, ' ') // запрещённые/проблемные
+    .replace(/[\/\\:*?"<>|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/\.+$/g, ''); // убираем хвостовые точки/пробелы
+    .replace(/\.+$/g, '');
 }
 function tidy(p: string) {
   return p.replace(/\s{2,}/g,' ').replace(/\s*-\s*/g, ' - ').replace(/^-\s+|\s+-$/g,'').trim();

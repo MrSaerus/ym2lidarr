@@ -12,24 +12,20 @@ function bdecodeValueEndOffset(buf: Buffer, offset: number): number {
 
   const ch = buf[offset];
 
-  // integer: i123e
   if (ch === 0x69 /* 'i' */) {
     const end = buf.indexOf(0x65 /* 'e' */, offset + 1);
     if (end === -1) throw new Error('Invalid bencode integer: no terminator');
     return end + 1;
   }
 
-  // list: l...e  / dict: d...e
   if (ch === 0x6c /* 'l' */ || ch === 0x64 /* 'd' */) {
     const isDict = ch === 0x64;
     let pos = offset + 1;
 
     while (pos < buf.length && buf[pos] !== 0x65 /* 'e' */) {
       if (isDict) {
-        // key (строка)
         pos = bdecodeValueEndOffset(buf, pos);
       }
-      // value
       pos = bdecodeValueEndOffset(buf, pos);
     }
 
@@ -40,7 +36,6 @@ function bdecodeValueEndOffset(buf: Buffer, offset: number): number {
     return pos + 1;
   }
 
-  // string: <len>:<data>
   if (ch >= 0x30 /* '0' */ && ch <= 0x39 /* '9' */) {
     let colon = buf.indexOf(0x3a /* ':' */, offset); // позиция ':'
     if (colon === -1) throw new Error('Invalid bencode string: no colon');
@@ -99,13 +94,11 @@ async function computeTorrentInfoHashFromUrl(urlStr: string): Promise<string | n
   return hashHex;
 }
 export async function precomputeReleaseHash(release: TorrentRelease): Promise<string | null> {
-  // 1) Magnet → BTIH (уже есть готовый helper)
   if (release.magnet) {
     const h = parseMagnetHash(release.magnet);
     if (h) return h;
   }
 
-  // 2) HTTP(S) ссылка → .torrent → info-hash
   if (release.link && /^https?:\/\//i.test(release.link)) {
     try {
       const h = await computeTorrentInfoHashFromUrl(release.link);

@@ -25,8 +25,8 @@ async function getQbtConfig() {
 export type QbtTorrentInfo = {
   hash: string;
   name: string;
-  progress: number; // 0..1
-  state: string;    // downloading, stalledDL, pausedDL, metaDL, error, uploading, ...
+  progress: number;
+  state: string;
   dlspeed: number;
   upspeed: number;
   downloaded: number;
@@ -38,7 +38,7 @@ export type QbtTorrentInfo = {
 };
 
 export type QbtTorrentFile = {
-  name: string;             // относительный путь внутри торрента
+  name: string;
   size: number;
   progress: number;
   priority: number;
@@ -97,7 +97,6 @@ export class QbtClient {
     });
   }
 
-  // `any` вместо Blob/File, чтобы не упираться в типы среды
   private async postMultipart(path: string, fields: Record<string, string | any | undefined | null>): Promise<Response> {
     await this.ensureAuth();
     const url = `${this.base}${path}`;
@@ -117,16 +116,13 @@ export class QbtClient {
     if (!r.ok) throw new Error(`qBittorrent delete failed: ${r.status} ${r.statusText}`);
   }
 
-  /** Добавление по magnet или прямой ссылке (torrent-файл url) */
   async addByMagnetOrUrl(args: { magnetOrUrl: string; savePath?: string | null; paused?: boolean; tags?: string | null; category?: string | null }) {
     const fields: Record<string, string> = { urls: args.magnetOrUrl };
     if (args.savePath) fields['savepath'] = args.savePath;
     if (typeof args.paused === 'boolean') {
-      // qBittorrent v5: поле `stopped`.
-      // Для совместимости можно отправлять и paused, и stopped.
       const v = args.paused ? 'true' : 'false';
       fields['stopped'] = v;
-      fields['paused'] = v; // на случай, если придётся говорить с более старым qBittorrent
+      fields['paused'] = v;
     }
     if (args.tags) fields['tags'] = args.tags;
     if (args.category) fields['category'] = args.category;
@@ -144,7 +140,6 @@ export class QbtClient {
     return true;
   }
 
-  /** Информация по одному торренту */
   async infoByHash(hash: string): Promise<QbtTorrentInfo | null> {
     const r = await this.get(`/api/v2/torrents/info?hashes=${encodeURIComponent(hash)}`);
     if (!r.ok) throw new Error(`qBittorrent info failed: ${r.status} ${r.statusText}`);
@@ -204,7 +199,7 @@ export class QbtClient {
       size: it.size,
       category: it.category,
       save_path: it.save_path,
-      tags: it.tags, // строка вида "tag1,tag2"
+      tags: it.tags,
     }));
   }
 

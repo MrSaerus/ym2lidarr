@@ -14,25 +14,17 @@ function buildAlbumQuery(artistName: string | null, albumTitle: string, year: nu
   if (artistName) parts.push(artistName.trim());
   parts.push(albumTitle.trim());
   if (year && Number.isFinite(year)) parts.push(String(year));
-  // Немного сузим поиск до lossless, как ты делал руками
   return parts.join(' - ') + ' FLAC';
 }
 
 /**
  * POST /api/pipeline/plan-unmatched
- * { limit?: number }
- *
- * Собираем кандидатов из лайков Яндекса без MBID,
- * группируем по artist/album и возвращаем «план».
- *
- * НИКАКИХ обращений к внутренним полям Prisma (dmmf/datamodel) — только обычные findMany.
  */
 r.post('/plan-unmatched', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
   try {
     const limit = Number.isFinite(+req.body?.limit) ? Math.max(1, Math.min(500, +req.body.limit)) : 100;
 
-    // 1) Альбомы: лайкнутые и присутствующие, но без rgMbid
     const yAlbums = await prisma.yandexAlbum.findMany({
       where: { present: true, rgMbid: null },
       select: { ymId: true, title: true, artist: true, year: true },
@@ -40,7 +32,6 @@ r.post('/plan-unmatched', async (req, res) => {
       orderBy: { updatedAt: 'desc' },
     });
 
-    // 2) Артисты: лайкнутые и присутствующие, но без mbid
     const yArtists = await prisma.yandexArtist.findMany({
       where: {
         present: true,
@@ -89,11 +80,6 @@ r.post('/plan-unmatched', async (req, res) => {
  *   dryRun?: boolean,         // если true — только план, без создания задач и поиска
  *   autoStart?: boolean       // автозапуск в qBittorrent (по умолчанию true)
  * }
- *
- * Делает то, что ты сейчас делал руками:
- * - берёт альбомы/артисты без MBID
- * - для альбомов создаёт TorrentTask (source=yandex)
- * - через Jackett ищет релизы, выбирает лучший и добавляет в qBittorrent
  */
 r.post('/run-unmatched', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
@@ -138,7 +124,7 @@ r.post('/run-unmatched', async (req, res) => {
         autoStart,
         parallelSearches,
       },
-      undefined, // runId тут не нужен, этот route не привязан к SyncRun
+      undefined,
     );
 
     lg.info('run-unmatched finished', 'pipeline.run-unmatched.done', {

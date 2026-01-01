@@ -9,11 +9,7 @@ import { log, refreshActiveTasks, setReleaseStatus } from '../index';
 export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number }) {
   const batchSize = opts?.batchSize ?? 20;
   const staleSec = opts?.staleSec ?? 60;
-
-  // 1) Обычное обновление "живых" задач (downloading/queued/...)
   const { total, changed } = await refreshActiveTasks({ batchSize, staleSec });
-
-  // 2) Классификация задач в статусе added
   const addedTasks = await prisma.torrentTask.findMany({
     where: {
       status: TorrentStatus.added,
@@ -52,7 +48,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
 
       const info = await client.infoByHash(t.qbitHash);
       if (!info) {
-        // qBittorrent уже не знает про этот торрент — считаем ошибкой
         await prisma.torrentTask.update({
           where: { id: t.id },
           data: {
@@ -68,7 +63,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
       const layout = detectTorrentLayout(files);
 
       if (layout === TorrentLayout.invalid) {
-        // 2.1. Раздача нам не подходит — удаляем торрент + файлы, помечаем задачу invalid и релиз rejected
         await client.deleteTorrents(t.qbitHash, deleteFiles);
 
         await prisma.torrentTask.update({
@@ -81,7 +75,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
           },
         });
 
-        // Сбросим torrentState у альбома, если есть привязка к Yandex
         if ((t as any).ymAlbumId) {
           await prisma.yandexAlbum.updateMany({
             where: { ymId: (t as any).ymAlbumId },
@@ -89,7 +82,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
           });
         }
 
-        // Помечаем активный релиз как rejected
         const rel = await prisma.torrentRelease.findFirst({
           where: {
             taskId: t.id,
@@ -106,7 +98,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
         continue;
       }
 
-      // 2.2. Раздача валидна — сохраняем layout, переводим задачу в downloading и снимаем паузу в qBittorrent
       await prisma.torrentTask.update({
         where: { id: t.id },
         data: {
@@ -132,7 +123,6 @@ export async function autoPollQbt(opts?: { batchSize?: number; staleSec?: number
       started++;
       classified++;
     } catch (e: any) {
-      // Логируем, но не падаем целиком
       log.warn('autoPollQbt classification error', 'torrents.qbt.autopoll.classify.error', {
         taskId: t.id,
         error: e?.message || String(e),

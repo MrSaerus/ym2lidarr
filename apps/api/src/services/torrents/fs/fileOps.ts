@@ -13,14 +13,11 @@ export async function placeFile(src: string, dst: string, mode: 'copy'|'hardlink
 
   if (mode === 'hardlink') {
     try {
-      // если файл уже есть и force=false — просто выходим
       if (!force && await pathExists(dst)) return;
-      // если force=true и существует — удалим
       if (force && await pathExists(dst)) await fs.rm(dst, { force: true });
       await fs.link(src, dst);
       return;
     } catch {
-      // если линк не удаётся (другой файловый том и т.п.) — fallback на копию
       await fs.cp(src, dst, { force });
       return;
     }
@@ -33,13 +30,11 @@ export async function placeFile(src: string, dst: string, mode: 'copy'|'hardlink
       await fs.rename(src, dst);
       return;
     } catch {
-      // если move между разными томами — fallback на копирование + удаление
       await fs.cp(src, dst, { force });
       try { await fs.rm(src, { force: true }); } catch {}
       return;
     }
   }
 
-  // copy (по умолчанию)
   await fs.cp(src, dst, { force });
 }

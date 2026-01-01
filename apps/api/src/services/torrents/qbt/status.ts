@@ -11,7 +11,6 @@ export function mapQbtToTaskStatus(info: { state?: string; progress?: number }):
   if (st.includes('error') || st.includes('missing')) return TorrentStatus.failed;
 
   if (st.includes('paused')) {
-    // 0% и paused — это наш "added" (ещё не стартовали)
     return prog > 0 ? TorrentStatus.downloading : TorrentStatus.added;
   }
 
@@ -21,7 +20,6 @@ export function mapQbtToTaskStatus(info: { state?: string; progress?: number }):
   if (st.includes('queued')) return TorrentStatus.queued;
   if (st.includes('upload') || st.includes('seed')) return TorrentStatus.downloaded;
 
-  // по умолчанию считаем незавершённой загрузкой
   return TorrentStatus.downloading;
 }
 export async function refreshTaskQbtStatus(taskId: number) {
@@ -54,7 +52,7 @@ export async function refreshTaskQbtStatus(taskId: number) {
 }
 export async function refreshActiveTasks(opts?: { batchSize?: number; staleSec?: number }) {
   const batchSize = opts?.batchSize ?? 20;
-  const staleSec = opts?.staleSec ?? 60; // не дёргать слишком часто
+  const staleSec = opts?.staleSec ?? 60;
 
   const activeStatuses: TorrentStatus[] = [
     TorrentStatus.downloading,
@@ -98,7 +96,6 @@ export async function refreshActiveTasks(opts?: { batchSize?: number; staleSec?:
         });
         changed++;
       } else {
-        // просто тронем updatedAt, чтобы не попадал в выборку каждую секунду
         await prisma.torrentTask.update({ where: { id: t.id }, data: { updatedAt: new Date() } });
       }
     } catch (e: any) {

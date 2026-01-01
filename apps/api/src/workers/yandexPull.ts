@@ -110,8 +110,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
       const ymAlbumIdStr = String(alb?.id ?? '').trim();
       const ymArtistIdStr = String(alb?.artistId ?? '').trim();
       const year = Number.isFinite(Number(alb?.year)) ? Number(alb!.year) : null;
-
-      // жанры для альбома -> genresJson: JSON-массив строк
       const rawAlbumGenre = (alb as any).genre as string | null | undefined;
       const albumGenres = rawAlbumGenre && rawAlbumGenre.trim()
         ? [rawAlbumGenre.trim()]
@@ -144,7 +142,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
             yGone: false,
             yGoneAt: null,
             yandexArtistId: /^\d+$/.test(ymArtistIdStr) ? ymArtistIdStr : null,
-            // не перезатираем существующий genresJson пустым
             ...(albumGenresJson ? { genresJson: albumGenresJson } : {}),
           },
         });
@@ -207,7 +204,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
       const dur = Number.isFinite(durationSec as any) ? (durationSec as number) : 0;
       const key = nkey(`${artistName}|||${title}|||${dur}`);
 
-      // жанры для трека: сначала трековые, затем fallback на жанр альбома
       const rawTrackGenre = (tr as any).genre as string | null | undefined;
       const rawAlbumGenre = (tr as any).albumGenre as string | null | undefined;
       const trackGenres = rawTrackGenre && rawTrackGenre.trim()
@@ -217,7 +213,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
           : null;
       const trackGenresJson = trackGenres ? JSON.stringify(trackGenres) : null;
 
-      // 1) пробуем обычный upsert по ymId
       try {
         const res = await prisma.yandexTrack.upsert({
           where: { ymId: ymTrackIdStr },
@@ -252,7 +247,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
           },
         });
 
-        // LikeSync создаём/обновляем только для реально лайкнутых треков
         if (liked) {
           const ls = await prisma.yandexLikeSync.upsert({
             where: { kind_ymId: { kind: 'track', ymId: ymTrackIdStr } },
@@ -275,21 +269,18 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
         tr_created += res.createdAt.getTime() === res.updatedAt.getTime() ? 1 : 0;
         tr_updated += res.createdAt.getTime() !== res.updatedAt.getTime() ? 1 : 0;
       } catch (e: any) {
-        // 2) Обработка коллизии по уникальному key (P2002 на поле key)
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
           const existing = await prisma.yandexTrack.findFirst({ where: { key } });
           if (existing) {
             tr_collisions++;
 
             const updateData: any = {
-              // не затираем ymId — используем существующий
               title: existing.title ?? title,
               artist: existing.artist ?? artistName,
               album: existing.album ?? albumTitle,
               durationSec: existing.durationSec ?? (durationSec ?? null),
               lastSeenAt: watermark,
               present: true,
-              // подтягиваем связи и жанры, если у нас есть новая инфа
               ...( /^\d+$/.test(ymAlbumIdStr) ? { ymAlbumId: ymAlbumIdStr } : {} ),
               ...( /^\d+$/.test(ymArtistIdStr) ? { ymArtistId: ymArtistIdStr } : {} ),
               ...(trackGenresJson ? { genresJson: trackGenresJson } : {}),
@@ -300,7 +291,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
               data: updateData,
             });
 
-            // LikeSync тоже только для лайкнутых
             if (liked) {
               const ls = await prisma.yandexLikeSync.upsert({
                 where: { kind_ymId: { kind: 'track', ymId: existing.ymId } },
@@ -342,7 +332,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
 
     await patchRunStats(runId, { t_done });
 
-    // ---------- Помечаем ушедшие ----------
     await prisma.$transaction([
       prisma.yandexArtist.updateMany({
         where: { OR: [{ lastSeenAt: { lt: watermark } }, { lastSeenAt: null }] },
@@ -358,7 +347,6 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
       }),
     ]);
 
-    // ---------- Финальная статистика ----------
     const tracks_present = await prisma.yandexTrack.count({
       where: { present: true, yGone: false },
     });

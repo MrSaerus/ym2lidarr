@@ -21,7 +21,7 @@ type ParsedItem = {
   pubDate?: Date | null;
   quality?: string | null;
   category?: string | null;
-  infoHash?: string | null; // редко встречается в фидах; запас
+  infoHash?: string | null;
 };
 
 function textBetween(s: string, open: string | RegExp, close: string | RegExp): string | null {
@@ -65,7 +65,6 @@ async function applyIndexerErrorStats(
 
   for (const pi of perIndexer) {
     if (pi.ok) {
-      // успешный ответ: сбрасываем счётчик и снимаем временное отключение
       await prisma.jackettIndexer.update({
         where: { id: pi.id },
         data: {
@@ -76,7 +75,6 @@ async function applyIndexerErrorStats(
       continue;
     }
 
-    // ошибка индексера
     const updated = await prisma.jackettIndexer.update({
       where: { id: pi.id },
       data: {
@@ -84,7 +82,6 @@ async function applyIndexerErrorStats(
       },
     });
 
-    // 1) Достигнут порог для временного таймаута
     if (updated.errorCount === INDEXER_ERROR_THRESHOLD_COOLDOWN) {
       const until = new Date(now.getTime() + INDEXER_COOLDOWN_MINUTES * 60_000);
 
@@ -104,7 +101,6 @@ async function applyIndexerErrorStats(
       continue;
     }
 
-    // 2) Повторный набор ошибок после таймаута — выключаем индексер
     if (updated.errorCount >= INDEXER_ERROR_THRESHOLD_DISABLE && updated.enabled) {
       await prisma.jackettIndexer.update({
         where: { id: pi.id },
@@ -121,10 +117,8 @@ async function applyIndexerErrorStats(
   }
 }
 
-/** Очень простой XML-парсер под Torznab, без внешних зависимостей. */
 function parseTorznabXml(xml: string): ParsedItem[] {
   const items: ParsedItem[] = [];
-  // находим <item>...</item>
   const reItem = /<item\b[\s\S]*?<\/item>/gi;
   const itms = xml.match(reItem) || [];
   for (const raw of itms) {
@@ -133,13 +127,11 @@ function parseTorznabXml(xml: string): ParsedItem[] {
     const title = safe(textBetween(raw, /<title>/i, /<\/title>/i)) || '(no title)';
     const guid = safe(textBetween(raw, /<guid[^>]*>/i, /<\/guid>/i));
 
-// link: иногда ссылка на .torrent, иногда на страницу релиза
     const rawLink =
       safe(textBetween(raw, /<link>/i, /<\/link>/i)) ||
       safe(textBetween(raw, /<enclosure\b[^>]*url="/i, /"/i));
     const link = rawLink ? decodeHtmlEntities(rawLink) : undefined;
 
-// magnet может быть в <link>, <guid>, <torrent:magneturi> или enclosure url
     let magnet = undefined as string | undefined;
     const lowerRaw = raw.toLowerCase();
     if (lowerRaw.includes('magnet:?')) {
@@ -151,7 +143,6 @@ function parseTorznabXml(xml: string): ParsedItem[] {
     const pubDateStr = safe(textBetween(raw, /<pubDate>/i, /<\/pubDate>/i));
     const pubDate = pubDateStr ? new Date(pubDateStr) : undefined;
 
-    // torznab:attr
     const attrs = Array.from(raw.matchAll(/<torznab:attr[^>]*name="([^"]+)"[^>]*value="([^"]*)"/gi));
     const attrMap = new Map<string, string>();
     for (const m of attrs) {
@@ -198,12 +189,10 @@ export async function searchTaskWithJackett(
   const query = (task.query || '').trim();
   if (!query) throw new Error('Task has no query');
 
-  // запоминаем старые значения для расчёта бэкоффа
   const prevScheduledAt = task.scheduledAt ?? null;
   const prevLastTriedAt = task.lastTriedAt ?? null;
   const now = new Date();
 
-  // ставим searching
   await updateTaskStatus(taskId, TorrentStatus.searching, { lastTriedAt: now });
 
   const indexers = await prisma.jackettIndexer.findMany({
@@ -352,7 +341,6 @@ export async function searchTaskWithJackett(
   const allFailed =
     perIndexer.length > 0 && perIndexer.every((x) => !x.ok);
 
-  // 1) Что-то нашли — success
   if (totalSaved > 0) {
     await updateTaskStatus(taskId, TorrentStatus.found, {
       lastError: null,
@@ -367,7 +355,6 @@ export async function searchTaskWithJackett(
     };
   }
 
-  // 2) Все индексеры упали — ошибка Jackett с бэкоффом
   if (allFailed) {
     const msg = perIndexer[0]?.error || 'Jackett error';
     const nextAt = calcNextErrorScheduledAt(
@@ -388,7 +375,6 @@ export async function searchTaskWithJackett(
     };
   }
 
-  // 3) Индексеры отработали, но ничего не нашли — не ошибка, а "пусто"
   const NOT_FOUND_RETRY_MINUTES = 30;
   const nextAt = new Date(now.getTime() + NOT_FOUND_RETRY_MINUTES * 60_000);
 

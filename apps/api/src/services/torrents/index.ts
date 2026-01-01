@@ -26,15 +26,12 @@ export async function moveTaskToFinalPath(taskId: number) {
 
   const { client } = await QbtClient.fromDb();
 
-  // проставим moving (идемпотентно)
   if (task.status !== TorrentStatus.moving) {
     await prisma.torrentTask.update({ where: { id: taskId }, data: { status: TorrentStatus.moving, updatedAt: new Date() } });
   }
 
-  // инициируем перенос
   await client.setLocation({ hashes: task.qbitHash, location: task.finalPath });
 
-  // сразу проверим где сейчас лежит
   try {
     const info = await client.infoByHash(task.qbitHash);
     if (info && info.save_path) {
@@ -44,9 +41,8 @@ export async function moveTaskToFinalPath(taskId: number) {
         return { ok: true as const, status: 'moved' as const };
       }
     }
-  } catch { /* ignore */ }
+  } catch {}
 
-  // перемещение асинхронное — зафиксируем moving, завершит авто-пуллер
   return { ok: true as const, status: 'moving' as const };
 }
 export async function autoRelocateDownloaded(opts?: { batchSize?: number; onlyWithFinal?: boolean }) {
@@ -82,12 +78,11 @@ export async function autoRelocateDownloaded(opts?: { batchSize?: number; onlyWi
       const cur = String(info.save_path || '').replace(/\/+$/,'');
 
       if (t.status === TorrentStatus.downloaded) {
-        if (!t.finalPath) continue; // нечего делать
+        if (!t.finalPath) continue;
         if (cur === want) {
           await prisma.torrentTask.update({ where: { id: t.id }, data: { status: TorrentStatus.moved, updatedAt: new Date() } });
           moved++;
         } else {
-          // инициируем перенос
           await prisma.torrentTask.update({ where: { id: t.id }, data: { status: TorrentStatus.moving, updatedAt: new Date() } });
           await client.setLocation({ hashes: t.qbitHash!, location: t.finalPath! });
           moving++;

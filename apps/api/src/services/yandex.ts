@@ -2,16 +2,10 @@
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
 
-/**
- * Yandex Music service: pyproxy-only интерфейс + верификация токена.
- * ВАЖНО: yandexPullLikes требует PY (pyproxy URL). Без него — ошибка.
- */
-
 const log = createLogger({ scope: 'service.yandex' });
 
 const BASE = 'https://api.music.yandex.net';
 
-// pyproxy URL может прийти из env, но его можно переопределить настройками:
 let PY = (process.env.YA_PYPROXY_URL || '').replace(/\/+$/, '');
 export function setPyproxyUrl(url?: string | null) {
   const before = PY;
@@ -28,7 +22,6 @@ export function getDriver(settingValue?: string | null): 'pyproxy' | 'native' {
   return driver;
 }
 
-// "правдоподобные" заголовки для нативных вызовов (нужны только для fallback-проверки токена)
 const DEFAULT_UA =
   process.env.YA_UA ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -107,14 +100,6 @@ export async function yandexGetAccount(token: string): Promise<YAccount> {
   }
 }
 
-/**
- * Лайки через PYPROXY.
- * Возвращает нормализованные массивы: артисты / альбомы / треки.
- *
- * ВАЖНО:
- *  - genres от pyproxy (album.genre, track.genre, track.albumGenre) прокидываем наверх;
- *  - liked от pyproxy прокидываем наверх (ТОЛЬКО он означает реальный лайк).
- */
 export async function yandexPullLikes(
   token: string,
 ): Promise<{
@@ -186,7 +171,6 @@ export async function yandexPullLikes(
             ? raw.likedTracks
             : [];
 
-    // ---------- Artists ----------
     const artists = artistsRaw
       .map((x) => {
         if (typeof x === 'string') {
@@ -204,7 +188,6 @@ export async function yandexPullLikes(
       })
       .filter((a) => a.name);
 
-    // ---------- Albums (c жанром) ----------
     const albums = albumsRaw
       .map((x) => {
         const id =
@@ -229,7 +212,6 @@ export async function yandexPullLikes(
               : undefined;
         const rgMbid = typeof x?.rgMbid === 'string' ? x.rgMbid : null;
 
-        // жанр альбома: pyproxy сейчас отдаёт строку (одна, уже нормализованная)
         const genre =
           typeof x?.genre === 'string'
             ? x.genre
@@ -239,7 +221,6 @@ export async function yandexPullLikes(
       })
       .filter((a) => a.title || a.artistName);
 
-    // ---------- Tracks (жанры + liked) ----------
     const tracks = tracksRaw
       .map((x) => {
         const id =
@@ -293,7 +274,6 @@ export async function yandexPullLikes(
         const recMbid = typeof x?.recMbid === 'string' ? x.recMbid : null;
         const rgMbid  = typeof x?.rgMbid  === 'string' ? x.rgMbid  : null;
 
-        // Жанр трека и жанр альбома, как их вернул pyproxy
         const genre =
           typeof x?.genre === 'string'
             ? x.genre
@@ -351,7 +331,7 @@ export async function yandexVerifyToken(token: string) {
       const data: any = await resp.body.json();
       const ok = !!data?.ok;
       log.info('verify via pyproxy done', 'ya.py.verify.done', { ok, status: resp.statusCode });
-      return data; // { ok, uid, login, ... } или { ok:false, error }
+      return data;
     } catch (e: any) {
       log.error('verify via pyproxy failed', 'ya.py.verify.fail', { err: e?.message || String(e) });
       return { ok: false, error: String(e?.message || e) };

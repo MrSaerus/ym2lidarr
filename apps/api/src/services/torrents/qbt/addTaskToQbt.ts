@@ -46,7 +46,6 @@ function scoreTorrentCandidate(
     if (params.task?.artistName) {
       best = Math.max(best, tokensSimilarity(params.task.artistName, candidate));
     }
-    // year можно тоже подмешать, но обычно токенов и так хватает
   }
 
   return best;
@@ -61,7 +60,6 @@ function tokensSimilarity(a: string, b: string): number {
   for (const t of ta) {
     if (tb.has(t)) common += 1;
   }
-  // доля пересечения по меньшему множесту
   return common / Math.min(ta.size, tb.size);
 }
 export async function addTaskToQbt(
@@ -74,7 +72,6 @@ export async function addTaskToQbt(
   });
   if (!task) throw new Error('Task not found');
 
-  // выбрать релиз
   let release: TorrentRelease | null = null;
   if (opts?.releaseId) {
     release = task.releases.find((r) => r.id === opts.releaseId) || null;
@@ -90,16 +87,14 @@ export async function addTaskToQbt(
     throw new Error('Release has neither magnet nor link');
   }
 
-  // либо магнет как есть, либо переписанный HTTP-URL Jackett
   const magnetOrUrl = release.magnet
     ? release.magnet
     : await rewriteJackettUrlForQbt(rawUrl);
 
   const precomputedHash = await precomputeReleaseHash(release);
   const { client } = await QbtClient.fromDb();
-  const { downloadsDir } = await getPathConfig(); // наш downloadsDir из настроек
+  const { downloadsDir } = await getPathConfig();
 
-  // категория для qBittorrent (может быть null)
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
   const category = setting?.torrentQbtCategory?.trim() || null;
 
@@ -107,15 +102,11 @@ export async function addTaskToQbt(
   const prevLastTriedAt = task.lastTriedAt ?? null;
   const now = new Date();
 
-  // отметим момент до добавления — пригодится для фильтрации по added_on
   const startedAtMs = Date.now();
   const startedAtSec = Math.floor(startedAtMs / 1000);
 
-  // ВАЖНО: если autoStart === true, то НЕ стопаем.
-  // Во всех остальных случаях добавляем в остановленном состоянии.
   const paused = opts?.autoStart === true ? false : true;
 
-  // === Добавление в qBittorrent с бэкоффом по ошибке ===
   try {
     await client.addByMagnetOrUrl({
       magnetOrUrl,
@@ -125,7 +116,6 @@ export async function addTaskToQbt(
       ...(opts?.tags ? { tags: opts.tags } : {}),
     });
   } catch (e: any) {
-    // пытаемся вытащить максимум информации из ошибки HTTP-клиента
     const rawError =
       (e && (e.response?.data || e.response?.statusText)) ||
       e?.message ||
@@ -137,7 +127,6 @@ export async function addTaskToQbt(
       now,
     );
 
-    // логируем в сервисный лог
     log.error('qbt addByMagnetOrUrl failed', 'torrents.qbt.add.error', {
       taskId,
       releaseId: release.id,
@@ -158,18 +147,11 @@ export async function addTaskToQbt(
       },
     });
 
-    // пробрасываем, чтобы пайплайн тоже знал, что всё плохо
     throw e;
   }
 
-  // 1) пробуем вытащить хеш из магнита, если он есть
   let qbitHash = precomputedHash;
 
-  // 2) если добавляли по .torrent (magnet нет) — пытаемся найти торрент в qBittorrent,
-  //    используя:
-  //    - окно по времени added_on
-  //    - fuzzy по имени торрента / content_path
-  //    - artist/album из задачи
   if (!qbitHash) {
     const maxAttempts = 15;
     const delayMs = 1000;
@@ -196,7 +178,6 @@ export async function addTaskToQbt(
 
       const torrents = Array.isArray(list) ? list : [];
 
-      // ограничиваемся по времени (2 минуты до момента добавления)
       const minAdded = startedAtSec - 120;
 
       const candidates = torrents.filter((t: any) => {
@@ -223,7 +204,6 @@ export async function addTaskToQbt(
         }
       }
 
-      // порог уверенности — чуть ниже, чем было, т.к. матчинг богаче
       const SIM_THRESHOLD = 0.45;
 
       if (best && best.hash && bestScore >= SIM_THRESHOLD) {
@@ -252,7 +232,6 @@ export async function addTaskToQbt(
       }
     }
 
-    // если после всех попыток хеш не найден, считаем это фейлом
     if (!qbitHash) {
       const failNow = new Date();
       const nextAt = calcNextErrorScheduledAt(
@@ -289,7 +268,6 @@ export async function addTaskToQbt(
     }
   }
 
-  // сюда попадаем либо с хешем из магнита, либо с найденным по уверенной схожести
   const patch: any = {
     status: TorrentStatus.added,
     lastTriedAt: new Date(),
@@ -322,7 +300,6 @@ export async function addTaskToQbt(
     const code = String(e?.code || e?.meta?.code || '').toUpperCase();
 
     if (code === 'P2002' && qbitHash) {
-      // нашли задачу, которая уже владеет этим qbitHash
       const existing = await prisma.torrentTask.findFirst({
         where: { qbitHash },
       });
@@ -337,7 +314,6 @@ export async function addTaskToQbt(
           status: TorrentStatus.failed,
           lastError: msg,
           lastTriedAt: new Date(),
-          // бэкофф здесь, скорее всего, не нужен — это логическая коллизия
           scheduledAt: null,
         },
       });
@@ -360,7 +336,6 @@ export async function addTaskToQbt(
       };
     }
 
-    // если ошибка не про дубль hash — пробрасываем дальше
     throw e;
   }
 }

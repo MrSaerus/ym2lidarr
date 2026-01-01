@@ -146,7 +146,7 @@ type UAlbumRow = {
     artistName: string;
 
     rgUrl?: string | null;        // MB release-group (если есть)
-    releaseUrl?: string | null;   // резерв: MB release
+    releaseUrl?: string | null;
 
     yandexAlbumId?: string | null;
     yandexUrl?: string | null;
@@ -203,7 +203,6 @@ r.get('/albums', async (req, res) => {
             return row;
         };
 
-        // Yandex: основа
         for (const y of ya) {
             const row = ensure(y.artist || '', y.title);
             row.yandexAlbumId = String(y.ymId);
@@ -212,7 +211,6 @@ r.get('/albums', async (req, res) => {
             if (y.rgMbid) row.rgUrl = `https://musicbrainz.org/release-group/${y.rgMbid}`;
         }
 
-        // Lidarr: факт наличия + возможный release MBID
         for (const l of la) {
             const row = ensure(l.artistName || '', l.title);
             row.lidarrAlbumId = l.id;
