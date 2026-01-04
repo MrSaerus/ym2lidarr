@@ -7,24 +7,16 @@ import { createLogger } from '../lib/logger';
 const r = Router();
 const log = createLogger({ scope: 'route.webhooks.lidarr' });
 
-/**
- * Минимальные типы под Lidarr webhook.
- * Lidarr шлёт разные eventType, нас интересуют успешные импорты.
- * В payload обычно есть downloadId — это ID задачи у клиента (для qBittorrent это infohash).
- */
 type LidarrEventCommon = {
   eventType: string;
   instanceName?: string;
 };
 type LidarrDownloadEvent = LidarrEventCommon & {
-  // Для успешного импорта:
-  // eventType может быть "DownloadFolderImported" (или "AlbumImported" в новых сборках),
-  // downloadId?: string;
+
   downloadId?: string | null;
   isUpgrade?: boolean;
   artist?: { id?: number; name?: string };
   album?: { id?: number; title?: string; releaseDate?: string | null };
-  // Иногда встречается: 'torrentInfoHash' или 'downloadClient' — оставим про запас
   torrentInfoHash?: string | null;
 };
 
@@ -42,7 +34,6 @@ function isSuccessImport(ev: LidarrEventCommon) {
 function normalizeHash(s?: string | null): string | null {
   if (!s) return null;
   const hex = s.trim().toLowerCase();
-  // ожидаем 40 hex-символов; иногда lidarr передаёт "BT_" префиксы — уберём всё лишнее
   const m = /([0-9a-f]{40})/.exec(hex);
   return m ? m[1] : null;
 }
@@ -80,7 +71,6 @@ r.post('/lidarr', async (req, res) => {
       return res.json({ ok: true, skipped: true, reason: 'not a success-import event' });
     }
 
-    // Пытаемся вытащить hash
     let hash =
       normalizeHash(payload.downloadId || null) ||
       normalizeHash(payload.torrentInfoHash || null);

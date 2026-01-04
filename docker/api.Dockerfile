@@ -18,7 +18,7 @@ ENV NODE_ENV=production \
     PORT=4000 \
     DATABASE_URL="file:/app/data/app.db"
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates openssl tini ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 COPY apps/api/package.json ./apps/api/package.json

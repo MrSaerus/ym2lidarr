@@ -1,5 +1,5 @@
 // apps/api/src/services/qbittorrent.ts
-import { fetch, type Response } from 'undici';
+import { fetch, type Response, FormData } from 'undici';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 
@@ -16,11 +16,34 @@ async function getQbtConfig() {
   log.debug('loaded qbt config', 'qbt.config.loaded', {
     base: cfg.base,
     hasUser: !!cfg.user,
-    hasPass: cfg.pass ? true : false, // только флаг
+    hasPass: !!cfg.pass,
     deleteFiles: cfg.deleteFiles,
   });
   return cfg;
 }
+
+export type QbtTorrentInfo = {
+  hash: string;
+  name: string;
+  progress: number;
+  state: string;
+  dlspeed: number;
+  upspeed: number;
+  downloaded: number;
+  uploaded: number;
+  size: number;
+  category?: string;
+  save_path?: string;
+  tags?: string;
+};
+
+export type QbtTorrentFile = {
+  name: string;
+  size: number;
+  progress: number;
+  priority: number;
+  is_seed: boolean;
+};
 
 export class QbtClient {
   private cookie: string | null = null;
@@ -34,7 +57,6 @@ export class QbtClient {
 
   private async ensureAuth() {
     if (this.cookie) return;
-    log.info('auth start', 'qbt.auth.start', { base: this.base });
 
     const r = await fetch(`${this.base}/api/v2/auth/login`, {
       method: 'POST',
@@ -48,70 +70,163 @@ export class QbtClient {
       throw new Error(msg);
     }
 
-    // извлекаем cookie, не логируя её содержимое
     const getSetCookie = (r.headers as any).getSetCookie?.bind(r.headers) as (() => string[]) | undefined;
     const cookies: string[] = getSetCookie?.() ?? ((r.headers as any).raw?.()['set-cookie'] ?? []);
     const sidLine = cookies.find((c: string) => /SID=/.test(c));
-    if (!sidLine) {
-      log.error('no set-cookie with SID', 'qbt.auth.nosid');
-      throw new Error('qBittorrent auth: no cookie');
-    }
-    const m = /SID=([^;]+)/i.exec(sidLine);
+    const m = sidLine ? /SID=([^;]+)/i.exec(sidLine) : null;
     if (!m) {
       log.error('SID not found in cookie', 'qbt.auth.sid.missing');
       throw new Error('qBittorrent auth: SID not found');
     }
     this.cookie = `SID=${m[1]}`;
-    log.info('auth ok', 'qbt.auth.ok', { base: this.base });
   }
 
-  private async postForm(path: string, form: Record<string, string>): Promise<Response> {
+  private async get(path: string): Promise<Response> {
     await this.ensureAuth();
     const url = `${this.base}${path}`;
-    log.debug('POST form', 'qbt.http.post', { path, url });
+    return fetch(url, { headers: { cookie: this.cookie! } });
+  }
 
-    const r = await fetch(url, {
+  private async postFormUrlencoded(path: string, form: Record<string, string>): Promise<Response> {
+    await this.ensureAuth();
+    const url = `${this.base}${path}`;
+    return fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: this.cookie! },
       body: new URLSearchParams(form),
     });
+  }
 
-    if (!r.ok) {
-      log.warn('POST failed', 'qbt.http.post.fail', { path, status: r.status, statusText: r.statusText });
-    } else {
-      log.debug('POST ok', 'qbt.http.post.ok', { path, status: r.status });
+  private async postMultipart(path: string, fields: Record<string, string | any | undefined | null>): Promise<Response> {
+    await this.ensureAuth();
+    const url = `${this.base}${path}`;
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined || v === null) continue;
+      fd.append(k, v as any);
     }
-    return r;
+    return fetch(url, { method: 'POST', headers: { cookie: this.cookie! }, body: fd });
   }
 
   async deleteTorrents(hashes: string, deleteFiles = false) {
-    log.info('delete torrents request', 'qbt.delete.start', {
-      hashesPreview: hashes.slice(0, 12), // не спамим полный список
-      count: hashes.split('|').length,
-      deleteFiles,
-    });
-
-    const r = await this.postForm('/api/v2/torrents/delete', {
+    const r = await this.postFormUrlencoded('/api/v2/torrents/delete', {
       hashes,
       deleteFiles: deleteFiles ? 'true' : 'false',
     });
+    if (!r.ok) throw new Error(`qBittorrent delete failed: ${r.status} ${r.statusText}`);
+  }
 
-    if (!r.ok) {
-      const msg = `qBittorrent delete failed: ${r.status} ${r.statusText}`;
-      log.error('delete failed', 'qbt.delete.fail', { status: r.status, statusText: r.statusText });
-      throw new Error(msg);
+  async addByMagnetOrUrl(args: { magnetOrUrl: string; savePath?: string | null; paused?: boolean; tags?: string | null; category?: string | null }) {
+    const fields: Record<string, string> = { urls: args.magnetOrUrl };
+    if (args.savePath) fields['savepath'] = args.savePath;
+    if (typeof args.paused === 'boolean') {
+      const v = args.paused ? 'true' : 'false';
+      fields['stopped'] = v;
+      fields['paused'] = v;
     }
+    if (args.tags) fields['tags'] = args.tags;
+    if (args.category) fields['category'] = args.category;
 
-    log.info('delete torrents ok', 'qbt.delete.ok', {
-      count: hashes.split('|').length,
-      deleteFiles,
+    const r = await this.postMultipart('/api/v2/torrents/add', fields);
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      log.error('add torrent failed', 'qbt.add.fail', {
+        status: r.status,
+        statusText: r.statusText,
+        body: text
+      });
+      throw new Error(`qBittorrent add failed: ${r.status} ${r.statusText}`);
+    }
+    return true;
+  }
+
+  async infoByHash(hash: string): Promise<QbtTorrentInfo | null> {
+    const r = await this.get(`/api/v2/torrents/info?hashes=${encodeURIComponent(hash)}`);
+    if (!r.ok) throw new Error(`qBittorrent info failed: ${r.status} ${r.statusText}`);
+    const rows = (await r.json()) as any[];
+    const it = Array.isArray(rows) ? rows[0] : null;
+    if (!it) return null;
+    return {
+      hash: it.hash,
+      name: it.name,
+      progress: it.progress,
+      state: it.state,
+      dlspeed: it.dlspeed,
+      upspeed: it.upspeed,
+      downloaded: it.downloaded,
+      uploaded: it.uploaded,
+      size: it.size,
+      category: it.category,
+      save_path: it.save_path,
+    };
+  }
+
+  async setLocation(args: { hashes: string; location: string }) {
+    const r = await this.postFormUrlencoded('/api/v2/torrents/setLocation', {
+      hashes: args.hashes,
+      location: args.location,
     });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(`qBittorrent setLocation failed: ${r.status} ${text}`);
+    }
+    return true;
   }
 
   static async fromDb(): Promise<{ client: QbtClient; deleteFiles: boolean }> {
     const cfg = await getQbtConfig();
     const client = new QbtClient(cfg.base, cfg.user, cfg.pass);
-    log.debug('QbtClient.fromDb ready', 'qbt.fromDb', { base: cfg.base, deleteFiles: cfg.deleteFiles });
     return { client, deleteFiles: cfg.deleteFiles };
+  }
+  async infoList(params?: { tag?: string; category?: string; filter?: string }): Promise<QbtTorrentInfo[]> {
+    const usp = new URLSearchParams();
+    if (params?.filter) usp.set('filter', params.filter);
+    if (params?.category) usp.set('category', params.category);
+    if (params?.tag) usp.set('tag', params.tag);
+    const suffix = usp.toString() ? `?${usp.toString()}` : '';
+    const r = await this.get(`/api/v2/torrents/info${suffix}`);
+    if (!r.ok) throw new Error(`qBittorrent info list failed: ${r.status} ${r.statusText}`);
+    const rows = (await r.json()) as any[];
+    return (rows || []).map((it) => ({
+      hash: it.hash,
+      name: it.name,
+      progress: it.progress,
+      state: it.state,
+      dlspeed: it.dlspeed,
+      upspeed: it.upspeed,
+      downloaded: it.downloaded,
+      uploaded: it.uploaded,
+      size: it.size,
+      category: it.category,
+      save_path: it.save_path,
+      tags: it.tags,
+    }));
+  }
+
+  async filesByHash(hash: string): Promise<QbtTorrentFile[]> {
+    const r = await this.get(`/api/v2/torrents/files?hash=${encodeURIComponent(hash)}`);
+    if (!r.ok) throw new Error(`qBittorrent files failed: ${r.status} ${r.statusText}`);
+    return (await r.json()) as QbtTorrentFile[];
+  }
+  async pauseTorrents(hashes: string) {
+    const r = await this.postFormUrlencoded('/api/v2/torrents/stop', {
+      hashes,
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(`qBittorrent pause failed: ${r.status} ${text}`);
+    }
+    return true;
+  }
+
+  async resumeTorrents(hashes: string) {
+    const r = await this.postFormUrlencoded('/api/v2/torrents/start', {
+      hashes,
+    });
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      throw new Error(`qBittorrent resume failed: ${r.status} ${text}`);
+    }
+    return true;
   }
 }

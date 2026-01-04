@@ -3,8 +3,6 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import { request } from 'undici';
 import { getLidarrCreds } from '../utils/lidarr-creds';
-
-// NEW: взаимная блокировка с кроном/другими ручными раннами
 import { ensureNotBusyOrThrow } from '../scheduler';
 import { createLogger } from '../lib/logger';
 
@@ -48,12 +46,9 @@ r.get('/albums', async (req, res) => {
         const page = Math.max(1, i(req.query.page, 1));
         const pageSize = Math.max(1, i(req.query.pageSize, 50));
         const q = String(req.query.q ?? '').trim();
-
         const monitored = String(req.query.monitored ?? 'all'); // 'all'|'true'|'false'
         const sortBy = (String(req.query.sortBy ?? 'title') as SortField);
         const sortDir = String(req.query.sortDir ?? 'asc') === 'desc' ? 'desc' : 'asc';
-
-        // доп. фильтры
         const minTracks = iU(req.query.minTracks);
         const maxTracks = iU(req.query.maxTracks);
         const minSize = parseBytes(req.query.minSize);

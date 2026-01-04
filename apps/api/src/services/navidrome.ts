@@ -30,7 +30,6 @@ function collapseWhitespace(src: string): string {
   return out.trim();
 }
 
-// Нормализуем ключ для "мягких" сравнений: lowerCase + схлопывание пробелов
 function nkey(s: string) {
   return collapseWhitespace((s || '').toLowerCase());
 }
@@ -50,7 +49,6 @@ export class NavidromeClient {
     this.authPass = authPass;
   }
 
-  /** Базовые auth-параметры, чтобы можно было APPEND тех же ключей много раз */
   private authParams(): URLSearchParams {
     const u = new URLSearchParams();
     u.set('u', this.auth.user);
@@ -71,7 +69,6 @@ export class NavidromeClient {
     return `${this.base}/rest/${path}.view?${params.toString()}`;
   }
 
-  /** Универсальный GET: принимает либо Record, либо уже собранный URLSearchParams */
   private async get(path: string, params?: Record<string, any> | URLSearchParams) {
     let q: URLSearchParams;
     if (params instanceof URLSearchParams) {
@@ -143,7 +140,6 @@ export class NavidromeClient {
     return { artists, albums, songs };
   }
 
-  // --- Метаданные по ID (для красивых логов) ---
   async getSong(id: string) {
     const r = await this.get('getSong', { id });
     return r?.['subsonic-response']?.song;
@@ -157,7 +153,6 @@ export class NavidromeClient {
     return r?.['subsonic-response']?.artist;
   }
 
-  // Чуть увеличим выборку — резолв будет устойчивее
   async search2(query: string, count = 100) {
     const r = await this.get('search2', { query, songCount: count, albumCount: count, artistCount: count });
     const root = r?.['subsonic-response']?.searchResult2 || {};
@@ -168,10 +163,6 @@ export class NavidromeClient {
     };
   }
 
-  /**
-   * ВАЖНО: несколько ID должны передаваться повторяющимися параметрами,
-   * а НЕ строкой через запятую (`id=a&id=b`, а не `id=a,b`).
-   */
   async star(opts: { artistIds?: string[]; albumIds?: string[]; songIds?: string[] }) {
     const p = this.authParams();
     for (const id of opts.songIds || [])   p.append('id', id);
@@ -206,7 +197,6 @@ export class NavidromeClient {
     return this.get('unstar', p);
   }
 
-  // ===== Улучшенный резолв с «мягкими» правилами совпадения =====
   private eq(a: string, b: string) { return nkey(a) === nkey(b); }
   private incl(needle: string, hay: string) { const n = nkey(needle); const h = nkey(hay); return !!n && h.includes(n); }
   private matchish(a: string, b: string) {
@@ -301,14 +291,13 @@ export class NavidromeClient {
         .map(s => ({ s, diff: Math.abs((s.duration || 0) - wantDur) }))
         .sort((a, b) => a.diff - b.diff)[0];
 
-      const tol = Math.max(10, Math.round(wantDur * 0.1)); // 10 сек или 10%
+      const tol = Math.max(10, Math.round(wantDur * 0.1));
       if (best && best.diff <= tol) {
         out.set(k, best.s.id);
         log.info('Song resolved (duration match)', 'nd.resolve.song.ok', {
           want: { artist, title, wantDur }, chosen: { id: best.s.id, duration: best.s.duration, diff: best.diff, tol }
         });
       } else {
-        // фолбэк: берём текстово-подходящий вариант
         out.set(k, cand[0].id);
         log.info('Song resolved (fallback first)', 'nd.resolve.song.ok.fallback', {
           want: { artist, title, wantDur }, chosen: { id: cand[0].id, duration: cand[0].duration }

@@ -33,3 +33,9 @@ prisma/data/
 *.db-shm
 *.db-wal
 backups/
+todo.md
+audit.json
+full_code.txt
+undici
+song_list.txt
+data-media
