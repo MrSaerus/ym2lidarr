@@ -244,7 +244,6 @@ r.post('/search-artists', async (req, res) => {
             phase: 'search', total: 0, done: 0, ok: 0, failed: 0,
         });
 
-        // пожаробезопасный запуск воркера
         runLidarrSearchArtists(run.id, { delayMs }).catch((e) => {
             lg.error('worker crash (search artists)', 'lidarr.search.artists.worker.fail', { runId: run.id, err: e?.message });
         });

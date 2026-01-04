@@ -15,7 +15,6 @@ r.get('/list', async (req, res) => {
   lg.info('list backups requested', 'backup.list.start');
 
   try {
-    // используем id=1 для единообразия со всем кодом
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
     const dir = s?.backupDir || '/app/data/backups';
     lg.debug('resolved backup directory', 'backup.list.dir', { dir });
@@ -39,7 +38,6 @@ r.post('/run', async (req, res) => {
     const result = await runBackupNow();
 
     if (!result.ok) {
-      // disabled → 400; остальное → 500
       const status = result.error && /disabled/i.test(result.error) ? 400 : 500;
 
       if (status === 400) {

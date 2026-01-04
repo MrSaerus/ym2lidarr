@@ -5,9 +5,9 @@ import { startRun } from '../log';
 import { runCustomArtistsMatch } from '../workers';
 import type { Prisma } from '@prisma/client';
 
-// НОВОЕ: взаимная блокировка с кроном custom.*
 import { ensureNotBusyOrThrow } from '../scheduler';
 import { createLogger } from '../lib/logger';
+import { mbGetArtistAlbumsCount } from '../services/mb';
 
 const r = Router();
 const log = createLogger({ scope: 'route.custom-artists' });
@@ -52,7 +52,6 @@ r.get('/', async (req, res) => {
 
         lg.debug('fetched custom artists from DB', 'custom.artists.list.db', { total, itemsCount: items.length });
 
-        // --- NEW: наличие в Lidarr по MBID + опциональный прямой URL
         const mbids = items.map(a => a.mbid).filter((x): x is string => !!x);
         let lidarrSet = new Set<string>();
         const lidarrIdByMbid = new Map<string, number>();
@@ -71,9 +70,8 @@ r.get('/', async (req, res) => {
             lg.debug('resolved lidarr presence by mbid', 'custom.artists.list.lidarr', { checked: mbids.length, found: lidarrSet.size });
         }
 
-        // Если задан base URL Лидара в настройках — сформируем прямую ссылку
         const setting = await prisma.setting.findUnique({ where: { id: 1 } });
-        const lidarrBase = (setting?.lidarrUrl || '').replace(/\/+$/, ''); // обрежем хвостовые /
+        const lidarrBase = (setting?.lidarrUrl || '').replace(/\/+$/, '');
         lg.debug('resolved lidarr base url', 'custom.artists.list.lidarr.base', { lidarrBase });
 
         res.json({
@@ -122,7 +120,6 @@ r.post('/', async (req, res) => {
             return res.status(400).json({ ok: false, error: 'No names provided', added: 0, exists: 0, failed: 0, created: 0 });
         }
 
-        // легкая валидация и сбор ошибок, не ломаем весь батч
         type ErrRec = { name: string; message: string };
         const errors: ErrRec[] = [];
         const validNames: string[] = [];
@@ -146,7 +143,6 @@ r.post('/', async (req, res) => {
         const payload = validNames.map((name) => ({ name, nkey: nkey(name) }));
         const keys = [...new Set(payload.map((p) => p.nkey))];
 
-        // узнаём заранее, что уже есть (одним запросом)
         const existing = await prisma.customArtist.findMany({
             where: { nkey: { in: keys } },
             select: { id: true, nkey: true, name: true },
@@ -158,7 +154,6 @@ r.post('/', async (req, res) => {
             requested: names.length, valid: validNames.length, alreadyExists: existingSet.size, toInsert: toInsert.length
         });
 
-        // если все уже были
         if (toInsert.length === 0) {
             lg.info('no new artists to insert', 'custom.artists.create.nothing');
             return res.json({
@@ -173,12 +168,10 @@ r.post('/', async (req, res) => {
             });
         }
 
-        // Вставляем поштучно, ловим P2002 как "exists" (гонка)
         let added = 0;
         let raceExists = 0;
         const createdIds: number[] = [];
 
-        // Можно батчить по 100 для снижения нагрузки
         const chunkSize = 100;
         for (let i = 0; i < toInsert.length; i += chunkSize) {
             const chunk = toInsert.slice(i, i + chunkSize);
@@ -199,7 +192,6 @@ r.post('/', async (req, res) => {
                     const ex: any = resu.reason;
                     const code = ex?.code || ex?.meta?.code || '';
                     if (String(code).toUpperCase() === 'P2002') {
-                        // уникальный конфликт — считаем как "exists" (гонка)
                         raceExists += 1;
                     } else {
                         errors.push({ name: rec.name, message: ex?.message || 'Insert error' });
@@ -209,7 +201,6 @@ r.post('/', async (req, res) => {
             lg.debug('insert chunk processed', 'custom.artists.create.chunk', { chunkSize: chunk.length, addedSoFar: added, raceExistsSoFar: raceExists });
         }
 
-        // Итоговое exists = что было до + что поймали на гонке
         const exists = existingSet.size + raceExists;
         const failed = errors.length;
 
@@ -252,13 +243,44 @@ r.patch('/:id', async (req, res) => {
             data.nkey = nkey(name);
         }
         if ('mbid' in req.body) {
-            const mbid = req.body.mbid ? String(req.body.mbid) : null;
-            data.mbid = mbid;
-            data.matchedAt = mbid ? new Date() : null;
+            const raw = req.body.mbid;
+            const mbid =
+              raw === null || raw === undefined
+                ? null
+                : String(raw).trim() || null;
+
+            if (!mbid) {
+                data.mbid = null;
+                data.matchedAt = null;
+                (data as any).mbAlbumsCount = 0;
+            } else {
+                data.mbid = mbid;
+                data.matchedAt = new Date();
+
+                try {
+                    const albumsCount = await mbGetArtistAlbumsCount(mbid);
+                    (data as any).mbAlbumsCount = albumsCount;
+                    lg.info('mbAlbumsCount resolved for custom artist', 'custom.artists.patch.mbalbums.ok', {
+                        id,
+                        mbid,
+                        albumsCount,
+                    });
+                } catch (e: any) {
+                    lg.warn('mbAlbumsCount resolve failed, keeping previous value', 'custom.artists.patch.mbalbums.fail', {
+                        id,
+                        mbid,
+                        err: e?.message || String(e),
+                    });
+                }
+            }
         }
 
         const updated = await prisma.customArtist.update({ where: { id }, data });
-        lg.info('custom artist updated', 'custom.artists.patch.done', { id, changedName: !!data.name, changedMbid: 'mbid' in data });
+        lg.info('custom artist updated', 'custom.artists.patch.done', {
+            id,
+            changedName: !!data.name,
+            changedMbid: 'mbid' in data,
+        });
         res.json(updated);
     } catch (e: any) {
         lg.error('custom artist patch failed', 'custom.artists.patch.fail', { id, err: e?.message });
@@ -283,10 +305,6 @@ r.delete('/:id', async (req, res) => {
         res.status(500).json({ ok: false, error: 'Failed to delete custom artist' });
     }
 });
-
-/** ---------- МАТЧИНГ: запускаем воркер, возвращаем runId ----------
- *  БЛОКИРУЕМ, если идёт любой custom.match.* / custom.push.* (крон/ручной)
- */
 
 // POST /api/custom-artists/:id/match
 r.post('/:id/match', async (req, res) => {

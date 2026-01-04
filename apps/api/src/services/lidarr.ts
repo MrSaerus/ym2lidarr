@@ -1,4 +1,5 @@
 // apps/api/src/services/lidarr.ts
+import Bottleneck from 'bottleneck';
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
 
@@ -6,6 +7,11 @@ const DEFAULT_HEADERS_TIMEOUT = 10_000; // 10s
 const DEFAULT_BODY_TIMEOUT = 30_000;    // 30s
 
 const log = createLogger({ scope: 'service.lidarr' });
+
+const skyhookLimiter = new Bottleneck({
+  maxConcurrent: 1,
+  minTime: 1200,
+});
 
 export type Setting = {
   lidarrUrl: string;
@@ -15,7 +21,7 @@ export type Setting = {
   metadataProfileId?: number | null;
   monitor?: string | null;
 
-  lidarrAllowNoMetadata?: boolean | null; // для артистов
+  lidarrAllowNoMetadata?: boolean | null;
 };
 
 type EnsureResult = any & {
@@ -33,7 +39,6 @@ function normalizeRoot(p?: string | null) {
   return String(p || '').replace(/\/+$/, '');
 }
 
-/** Только БД + мягкие дефолты (на случай пустой БД) */
 function withDefaults(s: Setting): Setting {
   return {
     ...s,
@@ -131,12 +136,17 @@ async function findExistingArtistByMBID(s: Setting, mbid: string) {
   }
   return null;
 }
+
 async function lookupWithRetry(s: Setting, path: string, attempts = 2, delayMs = 800) {
   let lastErr: any;
   for (let i = 0; i < attempts; i++) {
     try {
       log.debug('lookup attempt', 'lidarr.lookup.try', { path, attempt: i + 1, attempts });
-      const r = await api<any[]>(s, path);
+
+      const r = path.includes('/lookup')
+        ? await skyhookLimiter.schedule(() => api<any[]>(s, path))
+        : await api<any[]>(s, path);
+
       if (Array.isArray(r.data) && r.data.length) return r;
       lastErr = new Error('Lookup returned empty array');
       log.warn('lookup empty', 'lidarr.lookup.empty', { path, attempt: i + 1 });
@@ -148,23 +158,43 @@ async function lookupWithRetry(s: Setting, path: string, attempts = 2, delayMs =
   }
   throw new Error(`Lookup failed for ${path} (${attempts} attempts): ${String(lastErr?.message || lastErr)}`);
 }
+
 async function postWithRetry(s: Setting, path: string, body: any, attempts = 3, delayMs = 1000) {
   let last: { status: number; data: any } | null = null;
+
+  const isRetryableStatus = (st: number) =>
+    st === 429 || st === 500 || st === 502 || st === 503 || st === 504;
+
   for (let i = 0; i < attempts; i++) {
-    log.debug('post attempt', 'lidarr.post.try', { path, attempt: i + 1, attempts });
-    const r = await api(s, path, {
-      method: 'POST',
-      body: JSON.stringify(body),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    last = r;
-    if (r.status < 500 || (r.status !== 500 && r.status !== 503)) {
-      log.debug('post attempt done', 'lidarr.post.done', { path, status: r.status });
-      return r;
+    try {
+      log.debug('post attempt', 'lidarr.post.try', { path, attempt: i + 1, attempts });
+
+      const r = await api(s, path, {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      last = r;
+
+      if (!isRetryableStatus(r.status)) {
+        log.debug('post attempt done', 'lidarr.post.done', { path, status: r.status });
+        return r;
+      }
+
+      log.warn('post transient error (retry)', 'lidarr.post.retry', { path, status: r.status, attempt: i + 1 });
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      last = { status: 599, data: { error: msg } };
+
+      log.warn('post network error (retry)', 'lidarr.post.retry.net', {
+        path, attempt: i + 1, err: msg,
+      });
     }
-    log.warn('post transient error (retry)', 'lidarr.post.retry', { path, status: r.status, attempt: i + 1 });
+
     if (i < attempts - 1) await new Promise(res => setTimeout(res, delayMs));
   }
+
   log.error('post failed after retries', 'lidarr.post.fail', { path, status: last?.status });
   return last!;
 }
@@ -319,65 +349,107 @@ export async function ensureAlbumInLidarr(s0: Setting, al: { artist: string; tit
   return { ...(r.data as any), __action: 'created', __from: 'lookup', __request: body, __response: r.data };
 }
 
-// ==================== ADD: confirm & retry helpers (artists + albums) ====================
-import { request as __undiciRequest } from 'undici';
+// ==================== confirm & retry helpers (artists + albums) ====================
 
-// Локальный helper HTTP для этого модуля (не конфликтует с workers.ts)
 async function __lidarrApi<T = any>(base: string, key: string, path: string): Promise<T> {
-  const url = `${base.replace(/\/+$/, '')}${path}`;
+  const b = base.replace(/\/+$/, '');
+  const url = `${b}${path}${path.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(key)}`;
+
   log.debug('confirm api call', 'lidarr.confirm.http.req', { path });
-  const res = await __undiciRequest(url, { headers: { 'X-Api-Key': key } });
+
+  const res = await request(url, {
+    headersTimeout: DEFAULT_HEADERS_TIMEOUT,
+    bodyTimeout: DEFAULT_BODY_TIMEOUT,
+  });
+
   const text = await res.body.text();
+
   if (res.statusCode >= 400) {
     log.warn('confirm api error', 'lidarr.confirm.http.fail', { path, status: res.statusCode });
     throw new Error(`Lidarr ${path} ${res.statusCode}: ${text?.slice(0, 180)}`);
   }
+
   try { return JSON.parse(text) as T; } catch { return text as any; }
 }
 
-function __sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 function __jitter(extra = 250) { return Math.floor(Math.random() * extra); }
 function __isTransientLidarrError(err: any): boolean {
   const msg = String(err?.message || err || '').toLowerCase();
   return /\b(5\d\d|serviceunavailable|temporarily unavailable|timeout|timed out|etimedout|econn|refused|fetch failed|503)\b/.test(msg);
 }
 
-/** Локальная проверка присутствия артиста по MBID: НЕ бьёт SkyHook */
-export async function findArtistLocalByMBID(base: string, apiKey: string, mbid: string): Promise<any | null> {
-  const artists: any[] = await __lidarrApi(base, apiKey, '/api/v1/artist');
-  return artists.find(a => (a?.foreignArtistId || a?.mbid) === mbid) || null;
+// ======== ADD: abort helpers ========
+type ShouldAbortFn = () => boolean | Promise<boolean>;
+
+async function __shouldAbort(fn?: ShouldAbortFn): Promise<boolean> {
+  if (!fn) return false;
+  try { return !!(await fn()); } catch { return false; }
 }
 
-/**
- * Проверка альбома по MBID.
- * В Лидарре нет стабильного фильтра «по MBID» в локальном списке альбомов,
- * поэтому используем album lookup (это бьёт SkyHook). Это ОК, т.к. главный кейс
- * — обработка транзиентных 503 с ретраями.
- */
+async function __sleepAbortable(ms: number, shouldAbort?: ShouldAbortFn, stepMs = 250) {
+  const step = Math.max(50, stepMs);
+  let left = Math.max(0, ms);
+
+  while (left > 0) {
+    if (await __shouldAbort(shouldAbort)) return;
+    const chunk = Math.min(step, left);
+    await new Promise(r => setTimeout(r, chunk));
+    left -= chunk;
+  }
+}
+
+// ===================================
+
+export async function findArtistLocalByMBID(base: string, apiKey: string, mbid: string): Promise<any | null> {
+  const artists: any[] = await __lidarrApi(base, apiKey, '/api/v1/artist');
+  const needle = String(mbid).toLowerCase();
+  return artists.find(a => String(a?.foreignArtistId || a?.mbid || '').toLowerCase().includes(needle)) || null;
+}
+
+export async function findAlbumLocalByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
+  const albums: any[] = await __lidarrApi(base, apiKey, '/api/v1/album');
+  const needle = String(rgMbid).toLowerCase();
+  return albums.find(a => String(a?.foreignAlbumId || a?.mbid || '').toLowerCase().includes(needle)) || null;
+}
+
 export async function lookupAlbumByMBID(base: string, apiKey: string, rgMbid: string): Promise<any | null> {
-  const items: any[] = await __lidarrApi(base, apiKey, `/api/v1/album/lookup?term=mbid:${encodeURIComponent(rgMbid)}`);
-  const hit = items?.find?.((x: any) => (x?.foreignAlbumId || x?.mbid) === rgMbid) || null;
+  const path = `/api/v1/album/lookup?term=mbid:${encodeURIComponent(rgMbid)}`;
+
+  const items: any[] = await skyhookLimiter.schedule(() =>
+    __lidarrApi(base, apiKey, path)
+  );
+
+  const needle = String(rgMbid).toLowerCase();
+  const hit = items?.find?.((x: any) =>
+    String(x?.foreignAlbumId || x?.mbid || '').toLowerCase().includes(needle)
+  ) || null;
+
   return hit || (Array.isArray(items) && items.length ? items[0] : null);
 }
 
-/**
- * Добавление артиста с подтверждением.
- * - Идемпотентный pre-check (local /artist)
- * - ensureArtistInLidarr
- * - post-check (local /artist), ретраи на 5xx/503
- */
-
 type LogFn = (level: 'info' | 'warn' | 'error', msg: string, extra?: any) => Promise<void>;
+
+type PushConfirmOpts = {
+  maxAttempts?: number;
+  initialDelayMs?: number;
+  shouldAbort?: ShouldAbortFn;
+};
+
 export async function pushArtistWithConfirm(
   setting: any,
   it: { name: string; mbid: string },
   extLog: LogFn,
-  opts: { maxAttempts?: number; initialDelayMs?: number } = {},
+  opts: PushConfirmOpts = {},
 ): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
   const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
   const apiKey = String(setting?.lidarrApiKey || '');
   const maxAttempts = Math.max(1, opts.maxAttempts ?? 5);
   let delay = Math.max(500, opts.initialDelayMs ?? 1000);
+
+  if (await __shouldAbort(opts.shouldAbort)) {
+    await extLog('warn', `Cancelled before artist push: ${it.name}`, { mbid: it.mbid });
+    return { ok: false, reason: 'cancelled' };
+  }
 
   // pre-check
   try {
@@ -395,19 +467,32 @@ export async function pushArtistWithConfirm(
   let lastErr: any;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (await __shouldAbort(opts.shouldAbort)) {
+      await extLog('warn', `Cancelled during artist push: ${it.name}`, { mbid: it.mbid, attempt, maxAttempts });
+      return { ok: false, reason: 'cancelled' };
+    }
+
     try {
       const res = await ensureArtistInLidarr(setting, { name: it.name, mbid: it.mbid });
 
-      // post-check: ждём появления локально
       const confirmAttempts = 3;
       let confirmed: any | null = null;
+
       for (let c = 0; c < confirmAttempts; c++) {
-        await __sleep(500 + __jitter(200));
+        if (await __shouldAbort(opts.shouldAbort)) {
+          await extLog('warn', `Cancelled during artist confirm: ${it.name}`, { mbid: it.mbid, confirmAttempt: c + 1 });
+          return { ok: false, reason: 'cancelled' };
+        }
+
+        await __sleepAbortable(500 + __jitter(200), opts.shouldAbort);
+
         try {
           confirmed = await findArtistLocalByMBID(base, apiKey, it.mbid);
           if (confirmed) break;
         } catch (e: any) {
-          await extLog('warn', 'Post-check read failed (will retry confirm)', { attempt: c + 1, name: it.name, mbid: it.mbid, error: String(e?.message || e) });
+          await extLog('warn', 'Post-check read failed (will retry confirm)', {
+            attempt: c + 1, name: it.name, mbid: it.mbid, error: String(e?.message || e),
+          });
           log.warn('artist post-check read failed', 'lidarr.push.artist.post.read.fail', { attempt: c + 1, mbid: it.mbid, err: e?.message });
         }
       }
@@ -415,23 +500,31 @@ export async function pushArtistWithConfirm(
       if (confirmed) {
         await extLog('info', `✔ Pushed artist (confirmed): ${confirmed.artistName || it.name}`, {
           action: res?.__action || 'created',
-          lidarrId: confirmed.id, path: confirmed.path,
-          name: confirmed.artistName || it.name, mbid: it.mbid, from: res?.__from,
-          payload: res?.__request, response: res?.__response,
+          lidarrId: confirmed.id,
+          path: confirmed.path,
+          name: confirmed.artistName || it.name,
+          mbid: it.mbid,
+          from: res?.__from,
+          payload: res?.__request,
+          response: res?.__response,
         });
         log.info('artist push confirmed', 'lidarr.push.artist.confirmed', { mbid: it.mbid, id: confirmed.id });
         return { ok: true, res: { ...res, id: confirmed.id, path: confirmed.path, artistName: confirmed.artistName || it.name } };
       }
 
       lastErr = new Error('timeout waiting artist to appear (post-check)');
-      await extLog('warn', `~ Retrying (artist not confirmed yet): ${it.name}`, { attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message) });
+      await extLog('warn', `~ Retrying (artist not confirmed yet): ${it.name}`, {
+        attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message),
+      });
       log.warn('artist not confirmed yet', 'lidarr.push.artist.confirm.wait', { attempt, mbid: it.mbid, delayMs: delay });
     } catch (e: any) {
       lastErr = e;
       const transient = __isTransientLidarrError(e);
-      await extLog(transient ? 'warn' : 'error', transient ? `~ Retrying push (transient): ${it.name}` : `✖ Push failed (fatal): ${it.name}`, {
-        attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e),
-      });
+      await extLog(transient ? 'warn' : 'error',
+        transient ? `~ Retrying push (transient): ${it.name}` : `✖ Push failed (fatal): ${it.name}`,
+        { attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e) }
+      );
+
       if (transient) {
         log.warn('transient artist push error (retry)', 'lidarr.push.artist.retry', { attempt, mbid: it.mbid, err: e?.message, delayMs: delay });
       } else {
@@ -440,7 +533,12 @@ export async function pushArtistWithConfirm(
       }
     }
 
-    await __sleep(delay + __jitter(300));
+    if (await __shouldAbort(opts.shouldAbort)) {
+      await extLog('warn', `Cancelled before retry sleep (artist): ${it.name}`, { mbid: it.mbid, attempt, maxAttempts });
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    await __sleepAbortable(delay + __jitter(300), opts.shouldAbort);
     delay = Math.min(delay * 3, 90_000);
   }
 
@@ -448,24 +546,43 @@ export async function pushArtistWithConfirm(
   return { ok: false, reason: String(lastErr?.message || lastErr || 'unknown error') };
 }
 
-/**
- * Добавление альбома с подтверждением.
- * - Pre-check: /api/v1/album/lookup?term=mbid:<rgMbid> (да, это SkyHook; решает наш кейс с 503 через ретраи)
- * - ensureAlbumInLidarr
- * - Post-check: тот же lookup с ретраями (на 503/5xx)
- */
 export async function pushAlbumWithConfirm(
   setting: any,
   it: { artist: string; title: string; rgMbid: string },
   extLog: LogFn,
-  opts: { maxAttempts?: number; initialDelayMs?: number } = {},
+  opts: PushConfirmOpts = {},
 ): Promise<{ ok: true; res: any } | { ok: false; reason: string }> {
   const base = String(setting?.lidarrUrl || '').replace(/\/+$/, '');
   const apiKey = String(setting?.lidarrApiKey || '');
   const maxAttempts = Math.max(1, opts.maxAttempts ?? 5);
   let delay = Math.max(500, opts.initialDelayMs ?? 1000);
 
-  // pre-check (если что-то вернулось — считаем, что в каталоге уже есть релиз по этому MBID)
+  if (await __shouldAbort(opts.shouldAbort)) {
+    await extLog('warn', `Cancelled before album push: ${it.artist} — ${it.title}`, { rgMbid: it.rgMbid });
+    return { ok: false, reason: 'cancelled' };
+  }
+
+  try {
+    const local = await findAlbumLocalByMBID(base, apiKey, it.rgMbid);
+    if (local) {
+      await extLog('info', `Album already present (pre-check local): ${it.artist} — ${it.title}`, {
+        rgMbid: it.rgMbid, action: 'exists-pre', lidarrId: local?.id, hitTitle: local?.title,
+      });
+      log.info('album present pre-check local', 'lidarr.push.album.pre.exists.local', { rgMbid: it.rgMbid, id: local?.id });
+      return { ok: true, res: { __action: 'exists', id: local?.id, title: local?.title, path: local?.path } };
+    }
+  } catch (e: any) {
+    await extLog('warn', 'Album pre-check local failed (will continue)', {
+      artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e),
+    });
+    log.warn('album pre-check local failed', 'lidarr.push.album.pre.local.fail', { rgMbid: it.rgMbid, err: e?.message });
+  }
+
+  if (await __shouldAbort(opts.shouldAbort)) {
+    await extLog('warn', `Cancelled after album pre-check local: ${it.artist} — ${it.title}`, { rgMbid: it.rgMbid });
+    return { ok: false, reason: 'cancelled' };
+  }
+
   try {
     const hit = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
     if (hit) {
@@ -476,12 +593,15 @@ export async function pushAlbumWithConfirm(
       return { ok: true, res: { __action: 'exists', id: hit?.id, title: hit?.title, path: hit?.path } };
     }
   } catch (e: any) {
-    // Если тут 503 — продолжим, логнём и пойдём в ensure + ретраи
     if (__isTransientLidarrError(e)) {
-      await extLog('warn', 'Album pre-check transient failure (will continue)', { artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e) });
+      await extLog('warn', 'Album pre-check transient failure (will continue)', {
+        artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e),
+      });
       log.warn('album pre-check transient', 'lidarr.push.album.pre.transient', { rgMbid: it.rgMbid, err: e?.message });
     } else {
-      await extLog('warn', 'Album pre-check failed (non-transient, will continue anyway)', { artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e) });
+      await extLog('warn', 'Album pre-check failed (non-transient, will continue anyway)', {
+        artist: it.artist, title: it.title, rgMbid: it.rgMbid, error: String(e?.message || e),
+      });
       log.warn('album pre-check failed', 'lidarr.push.album.pre.fail', { rgMbid: it.rgMbid, err: e?.message });
     }
   }
@@ -489,16 +609,32 @@ export async function pushAlbumWithConfirm(
   let lastErr: any;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (await __shouldAbort(opts.shouldAbort)) {
+      await extLog('warn', `Cancelled during album push: ${it.artist} — ${it.title}`, { rgMbid: it.rgMbid, attempt, maxAttempts });
+      return { ok: false, reason: 'cancelled' };
+    }
+
     try {
       const res = await ensureAlbumInLidarr(setting, { artist: it.artist, title: it.title, rgMbid: it.rgMbid });
 
-      // post-check через lookup с несколькими быстрыми попытками
       const confirmAttempts = 3;
       let confirmed: any | null = null;
+
       for (let c = 0; c < confirmAttempts; c++) {
-        await __sleep(500 + __jitter(200));
+        if (await __shouldAbort(opts.shouldAbort)) {
+          await extLog('warn', `Cancelled during album confirm: ${it.artist} — ${it.title}`, { rgMbid: it.rgMbid, confirmAttempt: c + 1 });
+          return { ok: false, reason: 'cancelled' };
+        }
+
+        await __sleepAbortable(500 + __jitter(200), opts.shouldAbort);
+
         try {
-          confirmed = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
+          confirmed = await findAlbumLocalByMBID(base, apiKey, it.rgMbid);
+
+          if (!confirmed) {
+            confirmed = await lookupAlbumByMBID(base, apiKey, it.rgMbid);
+          }
+
           if (confirmed) break;
         } catch (e: any) {
           await extLog('warn', 'Album post-check lookup failed (will retry confirm)', {
@@ -511,23 +647,31 @@ export async function pushAlbumWithConfirm(
       if (confirmed) {
         await extLog('info', `✔ Pushed album (confirmed): ${confirmed.title || it.title}`, {
           action: res?.__action || 'created',
-          lidarrId: confirmed.id, path: confirmed.path,
-          title: confirmed.title || it.title, rgMbid: it.rgMbid, from: res?.__from,
-          payload: res?.__request, response: res?.__response,
+          lidarrId: confirmed.id,
+          path: confirmed.path,
+          title: confirmed.title || it.title,
+          rgMbid: it.rgMbid,
+          from: res?.__from,
+          payload: res?.__request,
+          response: res?.__response,
         });
         log.info('album push confirmed', 'lidarr.push.album.confirmed', { rgMbid: it.rgMbid, id: confirmed.id });
         return { ok: true, res: { ...res, id: confirmed.id, path: confirmed.path, title: confirmed.title || it.title } };
       }
 
       lastErr = new Error('timeout waiting album to appear (post-check)');
-      await extLog('warn', `~ Retrying (album not confirmed yet): ${it.artist} — ${it.title}`, { attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message) });
+      await extLog('warn', `~ Retrying (album not confirmed yet): ${it.artist} — ${it.title}`, {
+        attempt, maxAttempts, delayMs: delay, reason: String(lastErr.message),
+      });
       log.warn('album not confirmed yet', 'lidarr.push.album.confirm.wait', { attempt, rgMbid: it.rgMbid, delayMs: delay });
     } catch (e: any) {
       lastErr = e;
       const transient = __isTransientLidarrError(e);
-      await extLog(transient ? 'warn' : 'error', transient ? `~ Retrying album push (transient): ${it.artist} — ${it.title}` : `✖ Album push failed (fatal): ${it.artist} — ${it.title}`, {
-        attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e),
-      });
+      await extLog(transient ? 'warn' : 'error',
+        transient ? `~ Retrying album push (transient): ${it.artist} — ${it.title}` : `✖ Album push failed (fatal): ${it.artist} — ${it.title}`,
+        { attempt, maxAttempts, delayMs: transient ? delay : 0, error: String(e?.message || e) }
+      );
+
       if (transient) {
         log.warn('transient album push error (retry)', 'lidarr.push.album.retry', { attempt, rgMbid: it.rgMbid, err: e?.message, delayMs: delay });
       } else {
@@ -536,7 +680,12 @@ export async function pushAlbumWithConfirm(
       }
     }
 
-    await __sleep(delay + __jitter(300));
+    if (await __shouldAbort(opts.shouldAbort)) {
+      await extLog('warn', `Cancelled before retry sleep (album): ${it.artist} — ${it.title}`, { rgMbid: it.rgMbid, attempt, maxAttempts });
+      return { ok: false, reason: 'cancelled' };
+    }
+
+    await __sleepAbortable(delay + __jitter(300), opts.shouldAbort);
     delay = Math.min(delay * 3, 90_000);
   }
 

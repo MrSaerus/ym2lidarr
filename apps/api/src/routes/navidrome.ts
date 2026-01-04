@@ -14,7 +14,6 @@ export const navidromeRouter = Router();
 /* utils                                                         */
 /* ------------------------------------------------------------- */
 
-// Безопасно убираем хвостовые слэши без регекспов (O(n))
 function stripTrailingSlashes(s: string): string {
   let i = s.length;
   while (i > 0 && s.charCodeAt(i - 1) === 47 /* '/' */) i--;
@@ -32,11 +31,9 @@ function normalizeTarget(t?: string | null): 'artists'|'albums'|'tracks'|'all' {
 }
 
 function chooseAuth(user: string, pass: string, token: string, salt: string) {
-  // Приоритет — пароль, если он задан (надёжнее и подтверждён curl-тестом)
   if (pass) return { user, pass } as const;
   if (token && salt) return { user, token, salt } as const;
-  // fallback: если только token без salt — это заведомо плохо, не возвращаем
-  return { user, pass } as const; // пустой pass пусть отловится проверками выше
+  return { user, pass } as const;
 }
 
 /* ------------------------------------------------------------- */
@@ -157,7 +154,6 @@ const navTestLimiter = rateLimit({
 });
 navidromeRouter.post('/test', navTestLimiter, async (req, res, next) => {
   try {
-    // Берём из БД дефолты, а body позволяет переопределить (как на фронте)
     const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
     const rawUrl = str(req.body?.navidromeUrl ?? setting?.navidromeUrl);
@@ -180,7 +176,6 @@ navidromeRouter.post('/test', navTestLimiter, async (req, res, next) => {
 
     log.info('navidrome test requested', 'route.nav.test.start', { via: pass ? 'pass' : 'token' });
 
-    // Проверяем и отдаём подробности
     const info = await nd.pingInfo();
     if (!info.ok) {
       const { ok: _ignored, ...rest } = info;
