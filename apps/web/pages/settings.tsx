@@ -74,6 +74,7 @@ type Settings = {
 
   // qBittorrent
   torrentQbtCategory?: string | null;
+  torrentJackettQbtBaseUrl?: string | null;
   qbtUrl?: string | null;
   qbtUser?: string | null;
   qbtPass?: string | null;
@@ -174,6 +175,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
 
     // qBittorrent
     torrentQbtCategory: s.torrentQbtCategory ?? 'YM2LIDARR',
+    torrentJackettQbtBaseUrl: s.torrentJackettQbtBaseUrl ?? 'http://qbittorrent:8080',
     qbtUrl: s.qbtUrl ?? 'http://qbittorrent:8080',
     qbtUser: s.qbtUser ?? 'admin',
     qbtPass: s.qbtPass ?? '',
@@ -1566,7 +1568,22 @@ export default function SettingsPage() {
             {activeTab === 'qbt' && (
               <section className="panel p-4 space-y-3">
                 <div className="section-title">qBittorrent</div>
-
+                <FormRow
+                  label="URL"
+                  help="Внутренний адрес qBittorrent"
+                >
+                  <input
+                    className="input"
+                    value={settings.torrentJackettQbtBaseUrl || ''}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        torrentJackettQbtBaseUrl: e.target.value,
+                      })
+                    }
+                    placeholder="http://qbittorrent:8080"
+                  />
+                </FormRow>
                 <FormRow
                   label="URL"
                   help="Базовый URL qBittorrent WebUI (без хвостового /)."
@@ -1584,8 +1601,8 @@ export default function SettingsPage() {
                   />
                 </FormRow>
                 <FormRow
-                  label="URL"
-                  help="torrentDownloadsDir"
+                  label="Downloaded dir"
+                  help="Папка со скаченными файлами"
                 >
                   <input
                     className="input"
@@ -1600,8 +1617,8 @@ export default function SettingsPage() {
                   />
                 </FormRow>
                 <FormRow
-                  label="URL"
-                  help="musicLibraryDir"
+                  label="Music dir"
+                  help="Папка с музыкой"
                 >
                   <input
                     className="input"

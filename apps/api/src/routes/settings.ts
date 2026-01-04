@@ -102,6 +102,7 @@ const ALLOWED_FIELDS = new Set([
   'matchRetryDays',
 
   // qBittorrent
+  'torrentJackettQbtBaseUrl',
   'qbtUrl',
   'qbtUser',
   'qbtPass',
@@ -194,7 +195,9 @@ function pickSettings(input: any) {
     'customMatchForce',
     'mbMatchForce',
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
-
+  if ('torrentJackettQbtBaseUrl' in out && typeof out.torrentJackettQbtBaseUrl === 'string') {
+    out.torrentJackettQbtBaseUrl = stripTrailingSlashes(out.torrentJackettQbtBaseUrl);
+  }
   if ('qbtUrl' in out && typeof out.qbtUrl === 'string') {
     out.qbtUrl = stripTrailingSlashes(out.qbtUrl);
   }
