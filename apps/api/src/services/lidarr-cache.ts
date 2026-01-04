@@ -11,12 +11,6 @@ function sanitizeBase(url?: string | null) {
     return String(url || '').replace(/\/+$/, '');
 }
 
-/** ===== ARTISTS SYNC (Lidarr → DB) =====
- * Полный ресинк артистов:
- *  - читаем /api/v1/artist
- *  - upsert по id
- *  - отсутствующих помечаем removed=true
- */
 export async function syncLidarrArtists(): Promise<{ upserted: number; removed: number; total: number }> {
     const startedAt = Date.now();
     try {
@@ -69,7 +63,7 @@ export async function syncLidarrArtists(): Promise<{ upserted: number; removed: 
                     added: a.added ? new Date(a.added) : null,
                     albums: a.statistics?.albumCount ?? null,
                     tracks: a.statistics?.trackCount ?? null,
-                    sizeOnDisk: a.statistics?.sizeOnDisk ?? null, // Float? в схеме — норм
+                    sizeOnDisk: a.statistics?.sizeOnDisk ?? null,
                     removed: false,
                     lastSyncAt: now,
                 },
@@ -112,13 +106,6 @@ export async function syncLidarrArtists(): Promise<{ upserted: number; removed: 
     }
 }
 
-/** ===== ALBUMS SYNC (Lidarr → DB) =====
- * Полный ресинк альбомов:
- *  - читаем /api/v1/album
- *  - upsert по id
- *  - отсутствующих помечаем removed=true
- *  Схема: LidarrAlbum (см. prisma/schema.prisma)
- */
 export async function syncLidarrAlbums(): Promise<{ upserted: number; removed: number; total: number }> {
     const startedAt = Date.now();
     try {
@@ -138,7 +125,7 @@ export async function syncLidarrAlbums(): Promise<{ upserted: number; removed: n
         type LAlbum = {
             id: number;
             title: string;
-            foreignAlbumId?: string; // RG mbid
+            foreignAlbumId?: string;
             monitored?: boolean;
             added?: string;
             path?: string;
@@ -171,7 +158,7 @@ export async function syncLidarrAlbums(): Promise<{ upserted: number; removed: n
                     path: a.path || null,
                     monitored: !!a.monitored,
                     added: a.added ? new Date(a.added) : null,
-                    sizeOnDisk: a.statistics?.sizeOnDisk ?? null, // Float?
+                    sizeOnDisk: a.statistics?.sizeOnDisk ?? null,
                     // tracks: a.statistics?.trackCount ?? null,
                     removed: false,
                     lastSyncAt: now,

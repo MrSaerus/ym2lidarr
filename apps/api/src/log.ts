@@ -79,11 +79,10 @@ export async function log(
       data: data != null ? JSON.stringify(data) : null,
     };
     if (typeof runId === 'number') {
-      payload.runId = runId; // только если есть валидный runId
+      payload.runId = runId;
     }
     await prisma.syncLog.create({ data: payload });
   } catch (e: any) {
-    // чтобы сам логгер не падал маршруты: просто выведем в консоль
     console.error(JSON.stringify({
       ts: new Date().toISOString(),
       level: 'info',

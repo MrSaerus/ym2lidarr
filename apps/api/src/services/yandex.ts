@@ -2,16 +2,10 @@
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
 
-/**
- * Yandex Music service: pyproxy-only интерфейс + верификация токена.
- * ВАЖНО: yandexPullLikes требует PY (pyproxy URL). Без него — ошибка.
- */
-
 const log = createLogger({ scope: 'service.yandex' });
 
 const BASE = 'https://api.music.yandex.net';
 
-// pyproxy URL может прийти из env, но его можно переопределить настройками:
 let PY = (process.env.YA_PYPROXY_URL || '').replace(/\/+$/, '');
 export function setPyproxyUrl(url?: string | null) {
   const before = PY;
@@ -28,7 +22,6 @@ export function getDriver(settingValue?: string | null): 'pyproxy' | 'native' {
   return driver;
 }
 
-// "правдоподобные" заголовки для нативных вызовов (нужны только для fallback-проверки токена)
 const DEFAULT_UA =
   process.env.YA_UA ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
@@ -70,7 +63,10 @@ async function getJSON(path: string, token: string, searchParams?: Record<string
   }
   if (res.statusCode >= 400) {
     log.warn('native GET http error', 'ya.native.req.http', {
-      path: url.pathname, status: res.statusCode, durMs, preview: text?.slice(0, 180)
+      path: url.pathname,
+      status: res.statusCode,
+      durMs,
+      preview: text?.slice(0, 180),
     });
     throw new Error(`YA ${url.pathname} ${res.statusCode}: ${text?.slice(0, 200)}`);
   }
@@ -80,7 +76,11 @@ async function getJSON(path: string, token: string, searchParams?: Record<string
     log.debug('native GET ok', 'ya.native.req.ok', { path: url.pathname, durMs });
     return json;
   } catch {
-    log.warn('native GET non-json', 'ya.native.req.nonjson', { path: url.pathname, durMs, size: text?.length || 0 });
+    log.warn('native GET non-json', 'ya.native.req.nonjson', {
+      path: url.pathname,
+      durMs,
+      size: text?.length || 0,
+    });
     return text ? { result: text } : {};
   }
 }
@@ -100,17 +100,19 @@ export async function yandexGetAccount(token: string): Promise<YAccount> {
   }
 }
 
-/**
- * Лайки через PYPROXY.
- * Возвращает нормализованные массивы: артисты и альбомы.
- * Если pyproxy не отдаёт id, оставляем их пустыми — воркер сам поставит плейсхолдер key.
- */
 export async function yandexPullLikes(
   token: string,
 ): Promise<{
   artists: Array<{ id?: number; name: string; mbid?: string | null }>;
-  albums: Array<{ id?: number; title: string; artistName: string; year?: number; artistId?: number; rgMbid?: string | null }>;
-  // NEW: треки
+  albums: Array<{
+    id?: number;
+    title: string;
+    artistName: string;
+    year?: number;
+    artistId?: number;
+    rgMbid?: string | null;
+    genre?: string | null;
+  }>;
   tracks: Array<{
     id?: number;
     title: string;
@@ -119,9 +121,11 @@ export async function yandexPullLikes(
     durationSec?: number;
     albumId?: number;
     artistId?: number;
-    // опциональные поля на будущее для точного матчинга
     recMbid?: string | null;
     rgMbid?: string | null;
+    genre?: string | null;
+    albumGenre?: string | null;
+    liked?: boolean;
   }>;
 }> {
   if (!PY) {
@@ -141,26 +145,37 @@ export async function yandexPullLikes(
 
     const status = resp.statusCode || 0;
     let raw: any = null;
-    try { raw = await resp.body.json(); }
-    catch { raw = null; }
+    try {
+      raw = await resp.body.json();
+    } catch {
+      raw = null;
+    }
 
     if (!status || status >= 400) {
-      log.warn('pyproxy /likes http error', 'ya.py.likes.http', { status });
-      throw new Error(`pyproxy /likes ${status}`);
+      const detail = raw?.detail || raw?.error;
+      log.warn('pyproxy /likes http error', 'ya.py.likes.http', {
+        status,
+        detail,
+      });
+      throw new Error(`pyproxy /likes ${status}${detail ? `: ${detail}` : ''}`);
     }
 
     const artistsRaw: any[] = Array.isArray(raw?.artists) ? raw.artists : [];
     const albumsRaw: any[] = Array.isArray(raw?.albums) ? raw.albums : [];
-    // NEW: разные возможные поля от pyproxy
     const tracksRaw: any[] =
-      Array.isArray(raw?.tracks) ? raw.tracks
-        : Array.isArray(raw?.songs) ? raw.songs
-          : Array.isArray(raw?.likedTracks) ? raw.likedTracks
+      Array.isArray(raw?.tracks)
+        ? raw.tracks
+        : Array.isArray(raw?.songs)
+          ? raw.songs
+          : Array.isArray(raw?.likedTracks)
+            ? raw.likedTracks
             : [];
 
     const artists = artistsRaw
       .map((x) => {
-        if (typeof x === 'string') return { name: x } as { id?: number; name: string; mbid?: string | null };
+        if (typeof x === 'string') {
+          return { name: x } as { id?: number; name: string; mbid?: string | null };
+        }
         const id =
           typeof x?.id === 'number'
             ? x.id
@@ -196,11 +211,16 @@ export async function yandexPullLikes(
               ? Number(x.yandexArtistId)
               : undefined;
         const rgMbid = typeof x?.rgMbid === 'string' ? x.rgMbid : null;
-        return { id, title, artistName, year, artistId, rgMbid };
+
+        const genre =
+          typeof x?.genre === 'string'
+            ? x.genre
+            : undefined;
+
+        return { id, title, artistName, year, artistId, rgMbid, genre };
       })
       .filter((a) => a.title || a.artistName);
 
-    // нормализация треков
     const tracks = tracksRaw
       .map((x) => {
         const id =
@@ -213,8 +233,18 @@ export async function yandexPullLikes(
                 : undefined;
 
         const title = String(x?.title || x?.name || '').trim();
-        const artistName = String(x?.artistName || x?.artist || x?.artists?.[0]?.name || '').trim();
-        const albumTitle = String(x?.albumTitle || x?.album || x?.release?.title || '').trim();
+        const artistName = String(
+          x?.artistName ||
+          x?.artist ||
+          x?.artists?.[0]?.name ||
+          '',
+        ).trim();
+        const albumTitle = String(
+          x?.albumTitle ||
+          x?.album ||
+          x?.release?.title ||
+          '',
+        ).trim();
 
         const durationSec =
           typeof x?.durationSec === 'number'
@@ -244,13 +274,41 @@ export async function yandexPullLikes(
         const recMbid = typeof x?.recMbid === 'string' ? x.recMbid : null;
         const rgMbid  = typeof x?.rgMbid  === 'string' ? x.rgMbid  : null;
 
-        return { id, title, artistName, albumTitle, durationSec, albumId, artistId, recMbid, rgMbid };
+        const genre =
+          typeof x?.genre === 'string'
+            ? x.genre
+            : undefined;
+
+        const albumGenre =
+          typeof x?.albumGenre === 'string'
+            ? x.albumGenre
+            : undefined;
+
+        const liked = !!x?.liked;
+
+        return {
+          id,
+          title,
+          artistName,
+          albumTitle,
+          durationSec,
+          albumId,
+          artistId,
+          recMbid,
+          rgMbid,
+          genre,
+          albumGenre,
+          liked,
+        };
       })
       .filter((t) => t.title && t.artistName);
 
     const durMs = Date.now() - startedAt;
     log.info('pyproxy /likes done', 'ya.py.likes.done', {
-      artists: artists.length, albums: albums.length, tracks: tracks.length, durMs
+      artists: artists.length,
+      albums: albums.length,
+      tracks: tracks.length,
+      durMs,
     });
 
     return { artists, albums, tracks };
@@ -273,7 +331,7 @@ export async function yandexVerifyToken(token: string) {
       const data: any = await resp.body.json();
       const ok = !!data?.ok;
       log.info('verify via pyproxy done', 'ya.py.verify.done', { ok, status: resp.statusCode });
-      return data; // { ok, uid, login, ... } или { ok:false, error }
+      return data;
     } catch (e: any) {
       log.error('verify via pyproxy failed', 'ya.py.verify.fail', { err: e?.message || String(e) });
       return { ok: false, error: String(e?.message || e) };
