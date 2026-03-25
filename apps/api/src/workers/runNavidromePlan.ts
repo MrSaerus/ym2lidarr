@@ -9,13 +9,10 @@ const log = createLogger({ scope: 'worker.nav.plan' });
 function nkey(s: string) { return (s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
 export type PlanTarget = 'artists' | 'albums' | 'tracks' | 'all';
-// Policy оставлен для совместимости типов, на дифф не влияет
 export type Policy = 'yandex' | 'navidrome';
-
 export type ComputedPlan = {
   toStar:   { artistIds: string[]; albumIds: string[]; songIds: string[] };
 
-  // YM→ND карта только для треков, чтобы красиво логировать и потом подтвердить
   starSongMap: Array<{
     ymId: string;
     key: string;
@@ -25,7 +22,6 @@ export type ComputedPlan = {
     durationSec: number;
   }>;
 
-  // Что было найдено в этом планировании (при resolveIds=true)
   resolved: {
     artists: Array<{ key: string; ndId: string }>;
     albums:  Array<{ key: string; ndId: string }>;
@@ -33,22 +29,11 @@ export type ComputedPlan = {
   };
 
   counts: {
-    // всего из YM (present && !yGone)
     wantArtists: number; wantAlbums: number; wantTracks: number;
-
-    // у скольких уже есть ndId локально
     haveNdArtists: number; haveNdAlbums: number; haveNdSongs: number;
-
-    // скольким ещё нужно искать ndId в ND
     needSearchArtists: number; needSearchAlbums: number; needSearchSongs: number;
-
-    // к скольким реально можем применить STAR (haveNd + resolved)
     toStarArtists: number; toStarAlbums: number; toStarSongs: number;
-
-    // сколько не удалось зарезолвить (если resolveIds=true)
     unresolved: number;
-
-    // прогресс по трекам (добавочные поля)
     alreadyStarredSongs?: number;
     needToStarSongs?: number;
   };
@@ -58,9 +43,9 @@ type ComputeOpts = {
   navUrl: string;
   auth: NdAuth;
   target: PlanTarget;
-  policy?: any;          // игнорируется
-  withNdState?: boolean; // игнорируется
-  resolveIds?: boolean;  // ищем ndId в ND только тем, у кого его нет
+  policy?: any;
+  withNdState?: boolean;
+  resolveIds?: boolean;
   authPass?: string;
 };
 
@@ -75,7 +60,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const a_rows = needArtists
     ? await prisma.yandexArtist.findMany({
       where: { present: true, yGone: false },
-      // ndId предполагается в схеме; если его нет — убери из select
       select: { key: true, name: true, ndId: true } as any,
     })
     : [];
@@ -100,7 +84,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   const al_rows = needAlbums
     ? await prisma.yandexAlbum.findMany({
       where: { present: true, yGone: false },
-      // ndId предполагается в схеме; если его нет — убери из select
       select: { key: true, title: true, artist: true, ndId: true } as any,
     })
     : [];
@@ -138,7 +121,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   type LsInfo = { ndId?: string; key?: string; status?: string | null; starConfirmedAt?: Date | null };
   const lsByYm = new Map<string, LsInfo>();
 
-  // ymId может быть null — фильтруем и нормализуем
   for (const r of likeRows) {
     const ym = r.ymId ?? undefined;
     if (!ym) continue;
@@ -168,14 +150,11 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
     }
   }
 
-  // what we can star right now (имеем ndId; часть из них может быть уже synced)
   const t_toStar_allIds: string[] = t_have.map(x => x.ndId);
   const t_alreadySyncedCount = t_have.filter(x => x.alreadySynced).length;
-
   const starSongMap: ComputedPlan['starSongMap'] = [];
   const t_resolved: Array<{ ymId: string; key: string; ndId: string }> = [];
 
-  // Для логов включаем уже известные
   for (const x of t_have) {
     starSongMap.push({
       ymId: x.ymId,
@@ -216,7 +195,6 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
     }
   }
 
-  // Дедуп по наборам для STAR
   const toStar = {
     artistIds: [...new Set(a_toStar)],
     albumIds:  [...new Set(al_toStar)],
@@ -257,13 +235,12 @@ export async function computeNavidromePlan(opts: ComputeOpts): Promise<ComputedP
   };
 }
 
-/** План (счётчики). Ничего не резолвит, только считает «есть ndId» / «нужно искать» и логирует прогресс. */
 export async function runNavidromePlan(params: {
   navUrl: string;
   auth: NdAuth;
   target: PlanTarget;
-  policy?: any;          // игнорируется
-  withNdState?: boolean; // игнорируется
+  policy?: any;
+  withNdState?: boolean;
 }) {
   const run = await startRun('navidrome.plan', {
     phase: 'plan',
@@ -286,7 +263,6 @@ export async function runNavidromePlan(params: {
       resolveIds: false,
     });
 
-    // Сохраним расширенные статистики — могут понадобиться фронту
     await patchRunStats(runId, {
       a_total: plan.counts.wantArtists,
       al_total: plan.counts.wantAlbums,
@@ -312,7 +288,6 @@ export async function runNavidromePlan(params: {
       unresolved: plan.counts.unresolved,
     });
 
-    // Старый краткий формат одной строкой — фронт это точно видит
     const S = plan.counts;
     const already = S.alreadyStarredSongs ?? 0;
     const need = S.needToStarSongs ?? Math.max(S.toStarSongs - already, 0);
@@ -321,9 +296,6 @@ export async function runNavidromePlan(params: {
     await dblog(runId, 'info', `needSearch A:${S.needSearchArtists} Al:${S.needSearchAlbums} T:${S.needSearchSongs}`);
     await dblog(runId, 'info', `toStar A:${S.toStarArtists} Al:${S.toStarAlbums} T:${S.toStarSongs}`);
     await dblog(runId, 'info', `tracks alreadyStarred:${already} needToStar:${need} unresolved:${S.unresolved}`);
-
-
-    // И оставим детальный снапшот чисел в data — если фронт научится их показывать
     await dblog(runId, 'info', 'Plan: progress snapshot', {
       tracks: {
         totalWant: S.wantTracks,

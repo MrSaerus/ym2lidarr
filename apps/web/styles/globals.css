@@ -143,16 +143,26 @@
     }
 
     /* Поля ввода */
-    .input, .select, .textarea {
+    .input, .textarea {
         @apply w-full rounded-md px-2 py-1.5 text-sm bg-transparent;
         border: 1px solid var(--panel-border);
         color: var(--fg);
     }
-    .input:focus, .select:focus, .textarea:focus {
+    .input:focus, .textarea:focus {
         outline: none;
         box-shadow: 0 0 0 2px rgba(139,92,246,.35);
     }
-
+    .select {
+        @apply w-full rounded-md px-2 py-1.5 text-sm bg-transparent;
+        border: 1px solid var(--panel-border);
+        color: var(--fg);
+        background: var(--panel);
+    }
+    .select:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(139,92,246,.35);
+        border: 1px solid var(--panel-border);
+    }
     /* Таблицы — общий базовый стиль */
     .table { @apply w-full border-collapse text-sm; }
     .table thead th {

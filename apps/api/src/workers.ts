@@ -14,3 +14,9 @@ export {
   runYandexMatch,
   runYandexPush,
 } from './workers/index.js';
+
+export {
+  runTorrentsUnmatched,
+  runTorrentsPoll,
+  runTorrentsCopyDownloaded,
+} from './workers/torrents';

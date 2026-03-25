@@ -14,7 +14,6 @@
     "build:web": "npm --workspace apps/web run build",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
-    "prisma:seed": "prisma db seed",
     "lint": "eslint . --max-warnings 5",
     "lint:fix": "eslint . --fix",
     "format": "prettier -c \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\"",
@@ -35,8 +34,5 @@
     "prettier": "^3.6.2",
     "ts-jest": "^29.4.1",
     "typescript-eslint": "^8.39.1"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   }
 }

@@ -20,6 +20,8 @@ services:
     #      - LOG_DATE_PATTERN=yyyy-MM-dd — суффикс дневных файлов
     volumes:
       - ./data:/app/data
+      - ./data-media/Downloads:/home/Downloads
+      - ./data-media/Music:/home/Music
     ports:
       - '4000:4000'
     depends_on:
