@@ -20,11 +20,9 @@
     "format:fix": "prettier -w \"**/*.{ts,tsx,js,jsx,json,md,yml,yaml}\""
   },
   "overrides": {
-    "ajv": "8.18.0",
     "diff": "8.0.4",
     "flatted": "3.4.2",
     "lodash": "4.17.23",
-    "minimatch": "10.2.4",
     "qs": "6.14.2"
   },
   "devDependencies": {
