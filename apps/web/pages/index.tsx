@@ -8,7 +8,7 @@ import { toastOk } from '../lib/toast';
 import { ResponsiveTable } from '../components/ResponsiveTable';
 
 type CronItem = {
-  key: 'yandexPull'|'yandexMatch'|'yandexPush'|'lidarrPull'|'customMatch'|'customPush'|'backup';
+  key: string;
   title: string;
   enabled: boolean;
   cron?: string | null;
@@ -44,6 +44,7 @@ type RunShort = {
   finishedAt: string | null;
   message?: string | null;
   kind?: string | null;
+  progress: { total?: number; done?: number; pct?: number };
 };
 
 type ApiRunsResp = { ok?: boolean; runs?: RunShort[] };
@@ -92,7 +93,11 @@ type BusyKey =
   | 'yandexPushArtists'
   | 'yandexPushAlbums'
   | 'lidarrPullArtists'
-  | 'lidarrPullAlbums';
+  | 'lidarrPullAlbums'
+  | 'torrentsUnmatched'
+  | 'torrentsPoll'
+  | 'torrentsCopy';
+
 
 /** Какие kind из бекенда соответствуют какой кнопке */
 const KIND_MAP: Record<BusyKey, string[]> = {
@@ -105,7 +110,51 @@ const KIND_MAP: Record<BusyKey, string[]> = {
   yandexPushAlbums:   ['yandex.push.albums','yandex.push.all'],
   lidarrPullArtists:  ['lidarr.pull.artists','lidarr.pull.all','lidarr'],
   lidarrPullAlbums:   ['lidarr.pull.albums','lidarr.pull.all','lidarr'],
+  torrentsUnmatched:  ['torrents.unmatched'],
+  torrentsPoll:       ['torrents.poll'],
+  torrentsCopy:       ['torrents.copy'],
 };
+
+/** Какие Scheduler job key вызывают какие реальные эндпоинты */
+const SCHEDULER_JOB_ENDPOINTS: Record<string, { paths: string[]; body?: any }> = {
+  // === Custom ===
+  customMatch: {
+    paths: ['/api/sync/custom/match'],
+  },
+  customPush: {
+    paths: ['/api/sync/custom/push'],
+  },
+
+  // === Yandex ===
+  yandexPull: {
+    paths: ['/api/sync/yandex/pull-all'],
+  },
+  yandexMatch: {
+    paths: ['/api/sync/yandex/match'],
+  },
+  yandexPush: {
+    paths: ['/api/sync/yandex/push'],
+  },
+
+  // === Lidarr ===
+  lidarrPull: {
+    paths: ['/api/sync/lidarr/pull'],
+  },
+
+  // === Backup ===
+  backup: {
+    paths: ['/api/backup/run'],
+    // body не нужен
+  },
+
+  // === Navidrome ===
+  navidromePush: {
+    paths: ['/api/navidrome/apply'],
+    body: { dryRun: false },
+  },
+
+};
+
 
 export default function OverviewPage() {
   const [stats, setStats] = useState<StatsResp | null>(null);
@@ -127,6 +176,8 @@ export default function OverviewPage() {
 
   const [cronJobs, setCronJobs] = useState<CronItem[]>([]);
   const [now, setNow] = useState<number>(Date.now());
+  const [schedulerBusy, setSchedulerBusy] = useState<Record<string, boolean>>({});
+  const [schedulerRunIdByKey, setSchedulerRunIdByKey] = useState<Record<string, number | null>>({});
   const [apiBase, setApiBase] = useState<string>('/api'); // SSR fallback (если есть прокси)
   useEffect(() => {
     const b = (getApiBase() || '/api').replace(/\/+$/, '');
@@ -195,6 +246,22 @@ export default function OverviewPage() {
       setLatest(arr[0] ?? null);
     } catch {}
   }, []);
+
+  const findRunForJob = useCallback(
+    (key: string): RunShort | undefined => {
+      const rid = schedulerRunIdByKey[key];
+      if (typeof rid === 'number') {
+        return runs.find((r) => r.id === rid);
+      }
+      const asBusyKey = key as BusyKey;
+      const kinds = (KIND_MAP as any)[asBusyKey] as string[] | undefined;
+      if (!kinds || kinds.length === 0) return undefined;
+
+      return runs.find((r) => r.kind && kinds.includes(r.kind));
+    },
+    [runs, schedulerRunIdByKey],
+  );
+
 
   useEffect(() => {
     load(); loadRuns();
@@ -287,7 +354,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex artists…');
     markBusy('yandexMatchArtists');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'artists' });
+      await tryPostMany(['/api/sync/yandex/match'], { target: 'artists' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -295,7 +362,7 @@ export default function OverviewPage() {
     setMsg('Matching Yandex albums…');
     markBusy('yandexMatchAlbums');
     try {
-      await tryPostMany(['/api/sync/yandex/match'], { force: true, target: 'albums' });
+      await tryPostMany(['/api/sync/yandex/match'], { target: 'albums' });
       setMsg('Match started'); setTimeout(loadRuns, 300);
     } catch(e:any){ setMsg(`Match error: ${e?.message||String(e)}`); }
   }
@@ -318,7 +385,7 @@ export default function OverviewPage() {
     setMsg('Matching Custom artists…');
     markBusy('customMatch');
     try {
-      await tryPostMany(['/api/sync/custom/match'], { force: false });
+      await tryPostMany(['/api/sync/custom/match']);
       setMsg('Custom match started'); setTimeout(loadRuns, 300);
     } catch (e: any) {
       setMsg(`Custom match error: ${e?.message || String(e)}`);
@@ -334,17 +401,7 @@ export default function OverviewPage() {
       setMsg(`Push error: ${e?.message || String(e)}`);
     }
   }
-  async function pushCustomToLidarrFull() {
-    setMsg('Pushing (custom) to Lidarr…');
-    markBusy('customPush');
-    try {
-      await tryPostMany(['/api/sync/custom/push'], { force: true});
-      setMsg('Push started'); setTimeout(loadRuns, 300);
-    } catch (e: any) {
-      setMsg(`Push error: ${e?.message || String(e)}`);
-    }
-  }
-  // Soft-cancel run
+
   async function stopRun(id: number) {
     try {
       setStoppingId(id);
@@ -357,6 +414,56 @@ export default function OverviewPage() {
       setStoppingId(null);
     }
   }
+
+  const runSchedulerJob = useCallback(
+    async (key: string) => {
+      setMsg(`Starting job "${key}"…`);
+      setSchedulerBusy((prev) => ({ ...prev, [key]: true }));
+
+      try {
+        const cfg = SCHEDULER_JOB_ENDPOINTS[key];
+
+        let res: { ok?: boolean; runId?: number; error?: string } | undefined;
+
+        if (cfg) {
+          // Используем те же API, что и ручные кнопки (Overview / Settings)
+          res = await tryPostMany<{ ok?: boolean; runId?: number; error?: string }>(
+            cfg.paths,
+            cfg.body,
+          );
+        } else {
+          // Fallback на старую логику scheduler-эндпоинтов
+          res = await tryPostMany<{ ok?: boolean; runId?: number; error?: string }>([
+            `/api/settings/scheduler/${encodeURIComponent(key)}/run`,
+          ]);
+        }
+
+        const ok = res?.ok !== false && !res?.error;
+        const runId = res?.runId;
+        if (typeof runId === 'number') {
+          setSchedulerRunIdByKey((prev) => ({ ...prev, [key]: runId }));
+        }
+
+        setMsg(
+          ok
+            ? `Job "${key}" started${runId != null ? ` (run ${runId})` : ''}`
+            : `Job "${key}" failed${res?.error ? `: ${res.error}` : ''}`,
+        );
+
+        // чуть обновим состояния
+        setTimeout(() => {
+          loadRuns();
+          loadScheduler();
+        }, 300);
+      } catch (e: any) {
+        setMsg(`Job "${key}" start error: ${e?.message || String(e)}`);
+      } finally {
+        setSchedulerBusy((prev) => ({ ...prev, [key]: false }));
+      }
+    },
+    [loadRuns, loadScheduler],
+  );
+
 
   return (
     <>
@@ -394,10 +501,6 @@ export default function OverviewPage() {
                 <button className="btn btn-outline shrink-0" onClick={pushCustomToLidarr}
                         disabled={isBusy('customPush')}>
                   {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr'}
-                </button>
-                <button className="btn btn-outline shrink-0" onClick={pushCustomToLidarrFull}
-                        disabled={isBusy('customPush')}>
-                  {isBusy('customPush') ? 'Pushing…' : 'Push to Lidarr Force'}
                 </button>
               </div>
             </div>
@@ -725,6 +828,19 @@ export default function OverviewPage() {
                     <span className="text-gray-400">• started {new Date(r.startedAt).toLocaleString()}</span>
                     {r.message ? <span className="text-gray-400">• {r.message}</span> : null}
                   </div>
+                  {r.progress && typeof r.progress.pct === 'number' ? (
+                    <div className="mt-1">
+                      <div className="flex items-center justify-between text-xs text-neutral-400">
+                        <span>Progress {r.progress.pct}% ({r.progress.done}/{r.progress.total})</span>
+                      </div>
+                      <div className="mt-1 h-2 w-full rounded bg-neutral-800">
+                        <div
+                          className="h-2 rounded bg-indigo-500"
+                          style={{ width: `${r.progress.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="shrink-0">
                     <button className="btn btn-outline" onClick={() => stopRun(r.id)} disabled={stoppingId === r.id}>
                       {stoppingId === r.id ? 'Stopping…' : 'Stop'}
@@ -777,6 +893,7 @@ export default function OverviewPage() {
                   <th className="text-left">Next run</th>
                   <th className="text-left">In</th>
                   <th className="text-left">State</th>
+                  <th className="text-left">Actions</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -784,16 +901,61 @@ export default function OverviewPage() {
                   <tr key={j.key} className="border-t border-white/5">
                     <td className="py-1 pr-2">{j.title}</td>
                     <td className="py-1 pr-2 font-mono text-xs">{j.cron || '—'}</td>
-                    <td className="py-1 pr-2">{j.enabled ? <Badge tone="ok">on</Badge> :
-                      <Badge tone="muted">off</Badge>}</td>
                     <td className="py-1 pr-2">
-                      {j.cron ? (j.valid ? <Badge tone="ok">valid</Badge> : <Badge tone="err">invalid</Badge>) :
-                        <span className="text-gray-500">—</span>}
+                      {j.enabled ? <Badge tone="ok">on</Badge> : <Badge tone="muted">off</Badge>}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {j.cron ? (
+                        j.valid ? <Badge tone="ok">valid</Badge> : <Badge tone="err">invalid</Badge>
+                      ) : (
+                        <span className="text-gray-500">—</span>
+                      )}
                     </td>
                     <td className="py-1 pr-2">{j.nextRun ? new Date(j.nextRun).toLocaleString() : '—'}</td>
                     <td className="py-1 pr-2">{humanCountdown(j.nextRun)}</td>
                     <td className="py-1 pr-2">
                       {j.running ? <Badge tone="ok">running</Badge> : <Badge tone="muted">idle</Badge>}
+                    </td>
+                    <td className="py-1 pr-2">
+                      {(() => {
+                        const jobRun = findRunForJob(j.key);
+                        const isJobRunning = j.running || !!jobRun;
+                        const isStopping = !!(jobRun && stoppingId === jobRun.id);
+                        const isJobBusy = !!schedulerBusy[j.key];
+
+                        const canClick = !isJobBusy && !isStopping;
+
+                        const handleClick = () => {
+                          if (isJobRunning && jobRun) {
+                            stopRun(jobRun.id);
+                          } else {
+                            runSchedulerJob(j.key);
+                          }
+                        };
+
+                        const isPlay = !isJobRunning && !isJobBusy;
+                        const icon = isPlay ? '\u25B6\uFE0E' : '\u23F9\uFE0E'; // ▶︎ и ⏹︎ в текстовом виде
+                        const colorClass = isPlay
+                          ? 'text-emerald-300'   // зелёный play
+                          : 'text-rose-300';     // красный stop
+
+                        return (
+                          <button
+                            className={`btn btn-outline shrink-0 px-3 ${colorClass} ${
+                              !canClick ? 'opacity-50 cursor-not-allowed' : ''
+                            }`}
+                            onClick={handleClick}
+                            disabled={!canClick}
+                            title={
+                              isJobRunning
+                                ? (isStopping ? 'Stopping…' : 'Pause/stop job')
+                                : 'Run job now'
+                            }
+                          >
+                            {icon}
+                          </button>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

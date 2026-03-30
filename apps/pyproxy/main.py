@@ -1,8 +1,7 @@
 # apps/pyproxy/main.py
-import asyncio
-from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Body, HTTPException
 import logging
+from typing import List, Optional, Dict, Any, Set
+from fastapi import FastAPI, Body, HTTPException
 from pydantic import BaseModel
 from yandex_music import ClientAsync
 
@@ -23,6 +22,7 @@ class AlbumOut(BaseModel):
     year: Optional[int] = None
     artistId: Optional[int] = None
     rgMbid: Optional[str] = None  # на будущее для релиз-группы
+    genre: Optional[str] = None   # жанр альбома (если есть)
 
 class TrackOut(BaseModel):
     id: Optional[int] = None
@@ -34,6 +34,10 @@ class TrackOut(BaseModel):
     artistId: Optional[int] = None
     recMbid: Optional[str] = None  # на будущее: запись
     rgMbid: Optional[str] = None   # на будущее: релиз-группа
+    genre: Optional[str] = None       # жанр трека (если есть)
+    albumGenre: Optional[str] = None  # жанр альбома (дублируем для удобства)
+    liked: bool = False               # именно этот трек лайкнут пользователем
+
 
 class LikesResponse(BaseModel):
     artists: List[ArtistOut]
@@ -50,34 +54,6 @@ def to_int(x: Any) -> Optional[int]:
     except Exception:
         return None
 
-async def collect_tracks(token: str) -> List[Any]:
-    """
-    Возвращает список полных объектов треков YandexMusic (после батч-дозапроса /tracks).
-    """
-    client = await ClientAsync(token).init()
-    try:
-        likes = await client.users_likes_tracks()  # объект с .tracks или список
-        tracks_min = getattr(likes, "tracks", likes) or []
-        ids: List[str] = []
-
-        # Собираем пары track_id[:album_id] для батч-запроса /tracks
-        for t in tracks_min:
-            tid = getattr(t, "id", None)
-            aid = getattr(t, "album_id", None)
-            if tid is None:
-                continue
-            ids.append(f"{tid}:{aid}" if aid is not None else str(tid))
-
-        tracks_full: List[Any] = []
-        for i in range(0, len(ids), 100):
-            part = await client.tracks(ids[i:i + 100])
-            if part:
-                tracks_full.extend(part)
-        return tracks_full
-    finally:
-        # У ClientAsync внутри aiohttp-сессия; вручную её не закрываем —
-        # библиотека сама менеджит, но обернули на будущее.
-        pass
 
 def extract_main_artist(track_obj: Any) -> Dict[str, Optional[Any]]:
     a = (getattr(track_obj, "artists", None) or [None])[0]
@@ -97,6 +73,33 @@ def extract_first_album(track_obj: Any) -> Dict[str, Optional[Any]]:
         "title": getattr(alb, "title", None),
         "year": to_int(getattr(alb, "year", None) or getattr(alb, "release_year", None)),
     }
+
+def extract_album_genre(album_obj: Any) -> Optional[str]:
+    """
+    Мягко достаём жанр альбома.
+    В разных ответах Я.Музыки:
+      - поле genre может быть строкой,
+      - поле genres может быть списком объектов или строк.
+    """
+    if album_obj is None:
+        return None
+
+    g = getattr(album_obj, "genre", None)
+    if g:
+        return str(g)
+
+    g_list = getattr(album_obj, "genres", None)
+    if not g_list:
+        return None
+
+    first = g_list[0]
+    if isinstance(first, str):
+        return first
+    title = getattr(first, "title", None)
+    if title:
+        return str(title)
+
+    return None
 
 # ====== Endpoints ======
 @app.post("/verify")
@@ -125,19 +128,63 @@ async def verify(token: str = Body(..., embed=True)):
 @app.post("/likes", response_model=LikesResponse)
 async def likes(token: str = Body(..., embed=True)):
     """
-    Возвращает artists/albums/tracks для лайкнутых треков.
-    - artists: дедуп по id, иначе по имени (нормализованному)
-    - albums:  дедуп по album.id, иначе по (artistName,title)
-    - tracks:  без дедупа (или по id при наличии)
+    Возвращает artists/albums/tracks для ЛАЙКНУТЫХ треков.
+    Поведение:
+      - tracks: только лайкнутые треки;
+      - liked = true для всех треков в выдаче;
+      - genre: жанр трека (если есть; список жанров сериализован в строку);
+      - albumGenre: жанр альбома (если есть).
     """
     try:
         logger.info("py.likes.start")
-        tracks = await collect_tracks(token)
+        client = await ClientAsync(token).init()
+
+        # 1) Минимальные лайки
+        likes = await client.users_likes_tracks()
+        tracks_min = getattr(likes, "tracks", likes) or []
+
+        # 2) Дотягиваем полные объекты треков через /tracks
+        ids_for_tracks: List[str] = []
+        for t in tracks_min:
+            tid = getattr(t, "id", None)
+            aid = getattr(t, "album_id", None)
+            if tid is None:
+                continue
+            if aid is not None:
+                ids_for_tracks.append(f"{tid}:{aid}")
+            else:
+                ids_for_tracks.append(str(tid))
+
+        liked_tracks: List[Any] = []
+        for i in range(0, len(ids_for_tracks), 100):
+            part = await client.tracks(ids_for_tracks[i:i + 100])
+            if part:
+                liked_tracks.extend(part)
+
+        # 3) Собираем album_ids и дотягиваем meta альбомов (для жанра/года)
+        album_ids: Set[int] = set()
+        for t in liked_tracks:
+            alb = extract_first_album(t)
+            aid = alb.get("id")
+            if aid:
+                album_ids.add(aid)
+
+        album_meta_map: Dict[int, Any] = {}
+        if album_ids:
+            ids_list = list(album_ids)
+            for i in range(0, len(ids_list), 20):
+                chunk = ids_list[i:i + 20]
+                albums = await client.albums(chunk)
+                for alb in albums or []:
+                    aid = to_int(getattr(alb, "id", None))
+                    if not aid:
+                        continue
+                    album_meta_map[aid] = alb
 
         # ----- Artists (dedupe: по id, иначе по нормализованному имени) -----
         seen_by_id: Dict[int, str] = {}
         seen_by_key: Dict[str, str] = {}
-        for t in tracks:
+        for t in liked_tracks:
             artists = getattr(t, "artists", None) or []
             for a in artists:
                 name = getattr(a, "name", None)
@@ -159,41 +206,83 @@ async def likes(token: str = Body(..., embed=True)):
 
         # ----- Albums (dedupe: по album.id, иначе по (artistName,title)) -----
         seen_albums: Dict[str, AlbumOut] = {}
-        for t in tracks:
+        for t in liked_tracks:
             main_artist = extract_main_artist(t)
             alb = extract_first_album(t)
-            if not alb["title"]:
+            if not alb["title"] and alb["id"] is None:
                 continue
 
+            album_id = alb["id"]
+            album_obj = album_meta_map.get(album_id) if album_id is not None else None
+            album_genre = extract_album_genre(album_obj)
+
             key = (
-                f"id:{alb['id']}"
-                if alb["id"] is not None
+                f"id:{album_id}"
+                if album_id is not None
                 else f"pair:{norm(main_artist['name'] or '')}|||{norm(alb['title'] or '')}"
             )
-            if key not in seen_albums:
-                seen_albums[key] = AlbumOut(
-                    id=alb["id"],
-                    title=str(alb["title"]).strip(),
-                    artistName=str(main_artist["name"] or "").strip(),
-                    year=alb["year"],
-                    artistId=main_artist["id"],
-                )
+
+            if key in seen_albums:
+                continue
+
+            album_title = str(alb["title"] or "").strip()
+            if not album_title and album_obj is not None:
+                album_title = str(getattr(album_obj, "title", "")).strip()
+
+            seen_albums[key] = AlbumOut(
+                id=album_id,
+                title=album_title,
+                artistName=str(main_artist["name"] or "").strip(),
+                year=alb["year"],
+                artistId=main_artist["id"],
+                genre=album_genre,
+            )
+
         albums_out = list(seen_albums.values())
 
-        # ----- Tracks (нормализованные поля, без MBIDs на этом этапе) -----
-        # дедуп по track.id, иначе по (artist|||title|||duration)
+        # ----- Tracks (только лайкнутые, с жанрами) -----
         seen_tracks: Dict[str, TrackOut] = {}
-        for t in tracks:
+        for t in liked_tracks:
             main_artist = extract_main_artist(t)
             alb = extract_first_album(t)
 
             tid = to_int(getattr(t, "id", None))
             title = getattr(t, "title", None) or ""
             dur_ms = to_int(getattr(t, "duration_ms", None))
-            dur_sec = to_int((dur_ms // 1000) if isinstance(dur_ms, int) else getattr(t, "duration", None))
+            dur_sec = to_int(
+                (dur_ms // 1000) if isinstance(dur_ms, int) else getattr(t, "duration", None)
+            )
 
             artist_name = (main_artist["name"] or "").strip()
             album_title = (alb["title"] or "").strip()
+            album_id = alb["id"]
+
+            # жанр трека
+            track_genre_list = []
+            tg = getattr(t, "genres", None) or getattr(t, "genre", None)
+            if isinstance(tg, list):
+                for g in tg:
+                    if isinstance(g, str):
+                        track_genre_list.append(g)
+                    else:
+                        g_title = getattr(g, "title", None)
+                        if g_title:
+                            track_genre_list.append(str(g_title))
+            elif isinstance(tg, str):
+                track_genre_list.append(tg)
+
+            # приводим к строке (можно потом класть в JSON-поле как есть)
+            if track_genre_list:
+                track_genre: Optional[str] = str(track_genre_list)
+            else:
+                track_genre = "[]"
+
+            # жанр альбома
+            album_obj = album_meta_map.get(album_id) if album_id is not None else None
+            album_genre = extract_album_genre(album_obj)
+
+            if not album_title and album_obj is not None:
+                album_title = str(getattr(album_obj, "title", "")).strip()
 
             if tid is not None:
                 key = f"id:{tid}"
@@ -209,23 +298,27 @@ async def likes(token: str = Body(..., embed=True)):
                 artistName=artist_name,
                 albumTitle=album_title or None,
                 durationSec=dur_sec,
-                albumId=alb["id"],
+                albumId=album_id,
                 artistId=main_artist["id"],
                 recMbid=None,
                 rgMbid=None,
+                genre=track_genre,
+                albumGenre=album_genre,
+                liked=True,  # все треки здесь получены из users_likes_tracks
             )
 
         tracks_out = list(seen_tracks.values())
 
         logger.info(
             "py.likes.done artists=%d albums=%d tracks=%d",
-            len(artists_out), len(albums_out), len(tracks_out)
+            len(artists_out), len(albums_out), len(tracks_out),
         )
         return LikesResponse(artists=artists_out, albums=albums_out, tracks=tracks_out)
 
     except Exception as e:
         logger.exception("py.likes.fail: %s", e)
         raise HTTPException(status_code=500, detail="py-likes-failed")
+
 
 @app.get("/health")
 async def health():

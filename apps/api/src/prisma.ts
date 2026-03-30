@@ -7,12 +7,11 @@ const log = createLogger({ scope: 'db.prisma' });
 
 export async function initPrismaPragmas() {
   try {
-    // Включаем ограничения внешних ключей и тюним SQLite под наше использование
     await prisma.$executeRawUnsafe('PRAGMA foreign_keys=ON');
-    await prisma.$executeRawUnsafe('PRAGMA journal_mode=WAL');        // лучше для чтений параллельно с записью
-    await prisma.$executeRawUnsafe('PRAGMA synchronous=NORMAL');      // баланс надёжности/скорости
-    await prisma.$executeRawUnsafe('PRAGMA busy_timeout=30000');      // 30 секунд ожидания при блокировке
-    await prisma.$executeRawUnsafe('PRAGMA wal_autocheckpoint=1000'); // реже fsync при WAL
+    await prisma.$executeRawUnsafe('PRAGMA journal_mode=WAL');
+    await prisma.$executeRawUnsafe('PRAGMA synchronous=NORMAL');
+    await prisma.$executeRawUnsafe('PRAGMA busy_timeout=30000');
+    await prisma.$executeRawUnsafe('PRAGMA wal_autocheckpoint=1000');
 
     log.info('pragmas set', 'prisma.pragmas.ok', {
       foreign_keys: 'ON',

@@ -7,7 +7,7 @@ declare module 'streamroller' {
   }
 
   export interface SizeRollingOptions {
-    maxSize?: number | string; // например "50M"
+    maxSize?: number | string;
     backups?: number;
     compress?: boolean;
   }

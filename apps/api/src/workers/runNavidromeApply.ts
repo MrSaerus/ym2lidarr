@@ -12,8 +12,8 @@ type ApplyOpts = {
   navUrl: string;
   auth: NdAuth;
   target: PlanTarget;
-  policy?: Policy;       // игнорируется
-  withNdState?: boolean; // игнорируется
+  policy?: Policy;
+  withNdState?: boolean;
   dryRun?: boolean;
   reuseRunId?: number;
   authPass?: string;
@@ -38,7 +38,7 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       target: opts.target,
       policy: 'n/a',
       star_total: 0, star_done: 0,
-      unstar_total: 0, unstar_done: 0, // остаются в схеме run, но не используются
+      unstar_total: 0, unstar_done: 0,
       dryRun: !!opts.dryRun,
     });
     if (!run) return;
@@ -52,7 +52,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
     const client = new NavidromeClient(opts.navUrl, opts.auth, opts.authPass);
     await client.ensureAuthHealthy();
 
-    // План: резолвим недостающие ndId, ничего не сравниваем с состоянием ND
     const plan = await computeNavidromePlan({
       navUrl: opts.navUrl,
       auth: opts.auth,
@@ -61,11 +60,9 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       authPass: opts.authPass,
     });
 
-    // Обновим БД найденными ndId (artists/albums/tracks)
     if (!opts.dryRun) {
       const nowTs = new Date();
 
-      // --- Artists
       if (plan.resolved.artists.length) {
         await dblog(runId, 'info', 'Saving resolved ndId (artists)…', { count: plan.resolved.artists.length });
         for (const batch of chunk(plan.resolved.artists, 200)) {
@@ -78,7 +75,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
         }
       }
 
-      // --- Albums
       if (plan.resolved.albums.length) {
         await dblog(runId, 'info', 'Saving resolved ndId (albums)…', { count: plan.resolved.albums.length });
         for (const batch of chunk(plan.resolved.albums, 200)) {
@@ -91,7 +87,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
         }
       }
 
-      // --- Tracks → LikeSync.ndId + планирование лайка
       const trackPairs = plan.starSongMap.filter(x => x.ndSongId).map(x => ({ ymId: x.ymId, ndId: x.ndSongId! }));
       if (trackPairs.length) {
         await dblog(runId, 'info', 'Saving resolved ndId (tracks)…', { count: trackPairs.length });
@@ -125,7 +120,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       dryRun: !!opts.dryRun,
     });
 
-    // ===== Ставим лайки (только STAR)
     if (!opts.dryRun) {
       let starDone = 0;
 
@@ -160,7 +154,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
       }
     }
 
-    // ===== Подтверждение для треков (по желанию: оставил как было — это не UNSTAR)
     const after = await client.getStarred2();
     const starredSongIds = new Set((after.songs || []).map(s => s.id));
     await dblog(runId, 'info', 'Navidrome starred after-apply', { songs: after.songs?.length || 0 });
@@ -168,7 +161,6 @@ export async function runNavidromeApply(opts: ApplyOpts) {
     let perItemOk = 0;
     let perItemFail = 0;
 
-    // лёгкий кэш для getSong метаданных
     const getSongCache = new Map<string, { artist?: string; album?: string; title?: string }>();
     async function getSongMeta(id: string) {
       if (getSongCache.has(id)) return getSongCache.get(id)!;

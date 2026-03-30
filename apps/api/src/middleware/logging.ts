@@ -9,7 +9,6 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 
   const child = log.child({ scope: 'http', ctx: { reqId: id, path: req.path, method: req.method } });
 
-  // было info — стало debug, чтобы не дублировать access-лог
   child.debug('incoming request', 'api.request.start', { ip: req.ip });
 
   res.on('finish', () => {

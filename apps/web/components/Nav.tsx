@@ -5,7 +5,7 @@ import {
   HomeIcon,
   Cog6ToothIcon,
   ArchiveBoxArrowDownIcon,
-  QueueListIcon, MusicalNoteIcon, InboxStackIcon, PlayIcon, ServerStackIcon,
+  QueueListIcon, MusicalNoteIcon, InboxStackIcon, PlayIcon, ServerStackIcon, ListBulletIcon
 } from '@heroicons/react/24/outline';
 
 const tabs = [
@@ -16,7 +16,8 @@ const tabs = [
   { href: '/unified', label: 'Unified', Icon: InboxStackIcon },
   { href: '/settings', label: 'Settings', Icon: Cog6ToothIcon },
   { href: '/backups', label: 'Backups', Icon: ArchiveBoxArrowDownIcon },
-  { href: '/logs', label: 'Live Logs', Icon: QueueListIcon },
+  { href: '/tasks', label: 'Tasks', Icon: QueueListIcon },
+  { href: '/logs', label: 'Live Logs', Icon: ListBulletIcon },
 ];
 
 export default function Nav() {
@@ -26,7 +27,7 @@ export default function Nav() {
       <div className="mx-auto max-w-6xl">
         {/* Лента вкладок со скроллом на мобилке */}
         <div className="flex items-center justify-between gap-2">
-          <span className="font-bold mr-2 whitespace-nowrap">YM → Lidarr</span>
+          <span className="font-bold mr-2 whitespace-nowrap">YM2LIDARR</span>
           {/* при желании сюда можно вынести кнопку меню */}
         </div>
 

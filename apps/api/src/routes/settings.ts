@@ -3,10 +3,11 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { prisma } from '../prisma';
-import { reloadJobs, getCronStatuses } from '../scheduler';
+import { reloadJobs, getCronStatuses, ensureNotBusyOrThrow } from '../scheduler';
 import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
 import { createLogger } from '../lib/logger';
+import { runTorrentsUnmatched, runTorrentsPoll, runTorrentsCopyDownloaded } from '../workers/torrents';
 
 const r = Router();
 const log = createLogger({ scope: 'route.settings' });
@@ -24,25 +25,22 @@ function withTrailingSlash(s: string): string {
 }
 
 function joinUrl(base: string, path: string): string {
-  // path ожидаем без ведущего слэша
   return new URL(path, withTrailingSlash(base)).toString();
 }
 
-// Rate limiter: limit /test/yandex to 5 requests per minute per IP
 const testYandexLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5,              // limit each IP to 5 requests per windowMs
   message: { ok: false, error: 'Too many requests, please try again later.' },
 });
 
-// Разрешённые поля настроек (только новые имена)
 const ALLOWED_FIELDS = new Set([
   // yandex
   'yandexToken',
   'yandexDriver',
   'pyproxyUrl',
 
-  // расписания и флаги
+  // cron
   'cronYandexPull',
   'enableCronYandexPull',
   'cronYandexMatch',
@@ -104,6 +102,7 @@ const ALLOWED_FIELDS = new Set([
   'matchRetryDays',
 
   // qBittorrent
+  'torrentJackettQbtBaseUrl',
   'qbtUrl',
   'qbtUser',
   'qbtPass',
@@ -120,6 +119,26 @@ const ALLOWED_FIELDS = new Set([
   'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
   'cronNavidromePush',
   'enableCronNavidromePush',
+
+  // match force flags
+  'yandexMatchForce',
+  'customMatchForce',
+  'mbMatchForce',
+
+  // Torrents puller
+  'cronTorrentRunUnmatched',
+  'cronTorrentQbtPoll',
+  'cronTorrentCopyDownloaded',
+  'enableCronTorrentRunUnmatched',
+  'enableCronTorrentQbtPoll',
+  'enableCronTorrentCopyDownloaded',
+  'torrentRunUnmatchedLimit',
+  'torrentRunUnmatchedMinSeeders',
+  'torrentRunUnmatchedLimitPerIndexer',
+  'torrentRunUnmatchedAutoStart',
+  'torrentRunUnmatchedParallelSearches',
+  'torrentQbtPollBatchSize',
+  'torrentCopyBatchSize',
 ]);
 
 function trimToNull(v: unknown): string | null {
@@ -136,7 +155,6 @@ function pickSettings(input: any) {
     if (ALLOWED_FIELDS.has(k)) (out as any)[k] = (input as any)[k];
   }
 
-  // нормализации (существующие)
   if ('yandexMatchTarget' in out) {
     const v = String(out.yandexMatchTarget || '').toLowerCase();
     out.yandexMatchTarget = ['artists','albums','both'].includes(v) ? v : 'both';
@@ -162,7 +180,6 @@ function pickSettings(input: any) {
     out.mode = v === 'albums' ? 'albums' : 'artists';
   }
 
-  // bools
   [
     'lidarrAllowNoMetadata',
     'backupEnabled',
@@ -174,9 +191,13 @@ function pickSettings(input: any) {
     'enableCronLidarrPull',
     'allowRepush',
     'qbtDeleteFiles',
+    'yandexMatchForce',
+    'customMatchForce',
+    'mbMatchForce',
   ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
-
-  // URL/пути
+  if ('torrentJackettQbtBaseUrl' in out && typeof out.torrentJackettQbtBaseUrl === 'string') {
+    out.torrentJackettQbtBaseUrl = stripTrailingSlashes(out.torrentJackettQbtBaseUrl);
+  }
   if ('qbtUrl' in out && typeof out.qbtUrl === 'string') {
     out.qbtUrl = stripTrailingSlashes(out.qbtUrl);
   }
@@ -190,7 +211,6 @@ function pickSettings(input: any) {
     out.rootFolderPath = stripTrailingSlashes(out.rootFolderPath);
   }
 
-  // числовые
   if ('backupRetention' in out && out.backupRetention != null) {
     const n = parseInt(String(out.backupRetention), 10);
     if (!Number.isFinite(n) || n < 1) delete out.backupRetention;
@@ -205,7 +225,6 @@ function pickSettings(input: any) {
     if (Number.isFinite(n)) out.metadataProfileId = n; else delete out.metadataProfileId;
   }
 
-  // enum
   if ('notifyType' in out) {
     const v = String(out.notifyType || '').toLowerCase();
     out.notifyType = ['telegram', 'webhook', 'none', 'disabled'].includes(v) ? (v === 'disabled' ? 'none' : v) : 'none';
@@ -230,7 +249,7 @@ function pickSettings(input: any) {
     out.likesPolicySourcePriority = ['yandex','navidrome'].includes(v) ? v : 'yandex';
   }
   if ('navidromeUser' in out)  out.navidromeUser  = trimToNull(out.navidromeUser);
-  if ('navidromePass' in out)  out.navidromePass  = trimToNull(out.navidromePass);          // пустая строка -> null
+  if ('navidromePass' in out)  out.navidromePass  = trimToNull(out.navidromePass);
   if ('navidromeToken' in out) out.navidromeToken = trimToNull(out.navidromeToken);
   if ('navidromeSalt' in out)  out.navidromeSalt  = trimToNull(out.navidromeSalt);
 
@@ -255,10 +274,6 @@ async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: strin
     getMetadataProfiles(s as any),
   ]);
 
-  // Выбираем root:
-  // 1) если один — его
-  // 2) иначе — с дефолтными профилями
-  // 3) иначе — первый
   let chosenRoot: any = null;
   if (Array.isArray(roots) && roots.length) {
     if (roots.length === 1) chosenRoot = roots[0];
@@ -266,30 +281,22 @@ async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: strin
   }
 
   const rootFolderPath = chosenRoot?.path ? sanitizePath(chosenRoot.path) : null;
-
-  // Выбираем профили:
   const qpFromRoot = toNum(chosenRoot?.defaultQualityProfileId);
   const mpFromRoot = toNum(chosenRoot?.defaultMetadataProfileId);
-
   const qpFirst = Array.isArray(qps) && qps.length ? toNum(qps[0]?.id) : null;
   const mpFirst = Array.isArray(mps) && mps.length ? toNum(mps[0]?.id) : null;
-
   const qualityProfileId = qpFromRoot ?? qpFirst ?? null;
   const metadataProfileId = mpFromRoot ?? mpFirst ?? null;
-
-  // Мониторинг по умолчанию пусть будет 'all'
   const monitor: 'all' | 'future' | 'none' = 'all';
 
   return { rootFolderPath, qualityProfileId, metadataProfileId, monitor };
 }
 
-// helper, чтобы не дублировать POST/PUT
 async function saveSettingsHandler(req: any, res: any) {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
   try {
     const data = pickSettings(req.body);
 
-    // не затираем пароль Навидрома пустой строкой
     if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
 
     lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
@@ -324,7 +331,7 @@ r.get('/', async (req, res) => {
     }
     const safe = { ...s };
     safe.qbtPass = '';
-    safe.navidromePass = ''; // маскируем пароль Навидрома
+    safe.navidromePass = '';
     lg.debug('settings loaded', 'settings.get.done', { hasSettings: true });
     return res.json(safe);
   } catch (e: any) {
@@ -345,6 +352,55 @@ r.get('/scheduler', async (req, res) => {
   } catch (e: any) {
     lg.error('get scheduler statuses failed', 'settings.scheduler.fail', { err: e?.message });
     res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// POST /api/settings/scheduler/:key/run
+r.post('/scheduler/:key/run', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId, key: req.params?.key } });
+  const key = String(req.params?.key || '');
+
+  try {
+    if (key === 'torrentsUnmatched') {
+      await ensureNotBusyOrThrow(['torrents:unmatched', 'torrents:'], ['torrentsUnmatched'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsUnmatched.start');
+      await runTorrentsUnmatched();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsUnmatched.done');
+      return res.json({ ok: true });
+    }
+
+    if (key === 'torrentsPoll') {
+      await ensureNotBusyOrThrow(['torrents:poll', 'torrents:'], ['torrentsPoll'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsPoll.start');
+      await runTorrentsPoll();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsPoll.done');
+      return res.json({ ok: true });
+    }
+
+    if (key === 'torrentsCopy') {
+      await ensureNotBusyOrThrow(['torrents:copy', 'torrents:'], ['torrentsCopy'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.torrentsCopy.start');
+      await runTorrentsCopyDownloaded();
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsCopy.done');
+      return res.json({ ok: true });
+    }
+
+    lg.warn('unknown scheduler key for manual run', 'settings.scheduler.run.unknown', { key });
+    return res.status(404).json({ ok: false, error: 'Unknown scheduler key' });
+  } catch (e: any) {
+    const status = e?.status === 409 ? 409 : 500;
+    if (status === 409) {
+      lg.warn('manual scheduler run rejected: busy', 'settings.scheduler.run.busy', {
+        key,
+        err: e?.message || String(e),
+      });
+    } else {
+      lg.error('manual scheduler run failed', 'settings.scheduler.run.fail', {
+        key,
+        err: e?.message || String(e),
+      });
+    }
+    return res.status(status).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -380,8 +436,6 @@ r.post('/test/yandex', testYandexLimiter, async (req, res) => {
 });
 
 // POST /api/settings/test/lidarr
-// ТЕПЕРЬ: при успешном коннекте подбираем дефолтные root/profile и,
-// если поля ещё пустые — сохраняем их в БД.
 r.post('/test/lidarr', async (req, res) => {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
   lg.info('test lidarr requested', 'settings.test.lidarr.start');
@@ -413,7 +467,6 @@ r.post('/test/lidarr', async (req, res) => {
 
     const ok = r2.statusCode >= 200 && r2.statusCode < 300;
 
-    // Если всё ок — подтянем дефолты из Lidarr
     let defaults: any = null;
     let applied: Record<string, any> = {};
     let appliedCount = 0;
@@ -422,7 +475,6 @@ r.post('/test/lidarr', async (req, res) => {
       const d = await computeLidarrDefaults({ lidarrUrl: base, lidarrApiKey });
       defaults = d;
 
-      // Применяем, если в БД пусто
       const needUpdate: any = {};
       if (!s0?.rootFolderPath && d.rootFolderPath) needUpdate.rootFolderPath = d.rootFolderPath;
       if (!s0?.qualityProfileId && d.qualityProfileId != null) needUpdate.qualityProfileId = d.qualityProfileId;
@@ -442,7 +494,6 @@ r.post('/test/lidarr', async (req, res) => {
         applied = needUpdate;
         appliedCount = Object.keys(needUpdate).length;
 
-        // Перезапускаем джобы (на случай, если monitor/profile влияют)
         await reloadJobs();
       }
     }
@@ -535,10 +586,10 @@ r.post('/test/qbt', async (req, res) => {
   }
 });
 
-// POST /api/settings — сохранить
+// POST /api/settings
 r.post('/', saveSettingsHandler);
 
-// PUT /api/settings — тоже сохранить
+// PUT /api/settings
 r.put('/', saveSettingsHandler);
 
 export default r;

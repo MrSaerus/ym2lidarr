@@ -5,8 +5,6 @@ import { createLogger } from '../lib/logger';
 
 const r = Router();
 const log = createLogger({ scope: 'route.export' });
-
-// Excel-friendly BOM for CSV
 const CSV_BOM = '\uFEFF';
 
 /** ========== JSON ========== */

@@ -9,10 +9,6 @@ export type LidarrCreds = {
 
 const log = createLogger({ scope: 'util.lidarrCreds' });
 
-/**
- * Получить URL и API-ключ Lidarr из БД (settings.id=1) с фолбэком на ENV.
- * Хвостовые слэши у URL убираются.
- */
 export async function getLidarrCreds(): Promise<LidarrCreds> {
     log.debug('loading lidarr creds', 'lidarr.creds.start');
     const s = await prisma.setting.findFirst({ where: { id: 1 } });

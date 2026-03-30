@@ -5,19 +5,71 @@ import { createLogger } from '../lib/logger';
 
 const router = Router();
 const log = createLogger({ scope: 'route.runs' });
-
-// Поддержим и с префиксом, и без него — на случай app.use('/api', router) ИЛИ app.use(router)
 const PREFIXES = ['', '/api'];
 
 function toInt(x: any, def: number): number {
   const n = Number(x);
   return Number.isFinite(n) ? n : def;
 }
+
 function safeParseJson(s: string | null): any {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return s; }
 }
+
+function safeParseObj(s: string | null): Record<string, any> {
+  if (!s) return {};
+  try {
+    const v = JSON.parse(s);
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function toNum(v: any): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function deriveProgress(stats: Record<string, any>): { total: number; done: number; pct: number } | null {
+  let total = 0;
+  let done = 0;
+  let found = false;
+
+  const addPair = (tRaw: any, dRaw: any) => {
+    const t = toNum(tRaw);
+    const d = toNum(dRaw);
+    if (t == null || d == null) return;
+    if (t <= 0) return;
+
+    total += t;
+    done += Math.min(d, t);
+    found = true;
+  };
+
+  if (stats.total != null || stats.done != null) addPair(stats.total, stats.done);
+
+  for (const k of Object.keys(stats)) {
+    if (!k.endsWith('_total')) continue;
+    const dKey = k.replace(/_total$/, '_done');
+    if (!(dKey in stats)) continue;
+    addPair(stats[k], stats[dKey]);
+  }
+
+  if (!found || total <= 0) return null;
+
+  if (done < 0) done = 0;
+  if (done > total) done = total;
+
+  const pct = Math.max(0, Math.min(100, Math.floor((done / total) * 100)));
+  return { total, done, pct };
+}
+
 function mapRun(run: any) {
+  const stats = safeParseObj(run.stats ?? null);
+  const progress = deriveProgress(stats);
+
   return {
     id: run.id,
     status: run.status,
@@ -25,12 +77,10 @@ function mapRun(run: any) {
     finishedAt: run.finishedAt,
     message: run.message ?? null,
     kind: (run as any).kind ?? null,
+    progress,
   };
 }
 
-// -------- РОУТЫ --------
-
-// Список последних запусков (?limit=1..200)
 for (const p of PREFIXES) {
   router.get(`${p}/runs`, async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId, prefix: p || '(none)' } });
@@ -53,7 +103,6 @@ for (const p of PREFIXES) {
   });
 }
 
-// Последний запуск; если нет — ok:false (НЕ 400)
 for (const p of PREFIXES) {
   router.get(`${p}/runs/latest`, async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId, prefix: p || '(none)' } });
@@ -74,7 +123,6 @@ for (const p of PREFIXES) {
   });
 }
 
-// Детали одного запуска
 for (const p of PREFIXES) {
   router.get(`${p}/runs/:id`, async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId, prefix: p || '(none)' } });
@@ -98,7 +146,6 @@ for (const p of PREFIXES) {
   });
 }
 
-// Логи запуска инкрементально по id (id > after)
 for (const p of PREFIXES) {
   router.get(`${p}/runs/:id/logs`, async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId, prefix: p || '(none)' } });
@@ -127,7 +174,7 @@ for (const p of PREFIXES) {
         ts: l.ts,
         level: l.level,
         message: l.message,
-        data: safeParseJson(l.data), // отдаём уже распарсенным объектом
+        data: safeParseJson(l.data),
         runId: l.runId,
       }));
       const nextAfter = mapped.length ? mapped[mapped.length - 1].id : after;
@@ -142,7 +189,6 @@ for (const p of PREFIXES) {
   });
 }
 
-// NEW: мягкая остановка ранa — выставляем stats.cancel=true
 for (const p of PREFIXES) {
   router.post(`${p}/runs/:id/stop`, async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId, prefix: p || '(none)' } });

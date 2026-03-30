@@ -26,7 +26,6 @@ function num(v: any, def: number) {
     return Number.isFinite(n) && n > 0 ? n : def;
 }
 
-// Параметры пагинации/сортировки/поиска
 function parsePaging(req: any) {
     const pageRaw = num(req.query.page, 1);
     const pageSizeRaw = num(req.query.pageSize, 50);
@@ -38,7 +37,6 @@ function parsePaging(req: any) {
     return { page, pageSize, q, sortBy, sortDir };
 }
 
-// НОВОЕ: общие константы для busy-проверок
 const Y_PREFIXES = ['yandex.'];
 const Y_JOB_KEYS = ['yandexPull', 'yandexMatch', 'yandexPush'] as const;
 
@@ -75,7 +73,7 @@ r.post('/match', async (req, res) => {
 
         lg.info('yandex match requested', 'yandex.match.start', { target, force });
 
-        const result: any = await runYandexMatch(target, { force });
+        const result: any = await runYandexMatch(target);
         lg.info('yandex match started', 'yandex.match.done', { runId: result?.runId ?? null });
         res.json({ ok: true, runId: result?.runId ?? null });
     } catch (e: any) {
@@ -120,14 +118,12 @@ r.get('/artists', async (req, res) => {
     lg.info('yandex artists requested', 'yandex.artists.start', { page, pageSize, q, sortBy, sortDir, missingMb });
 
     try {
-        // Берём только present:true и только записи с ЧИСЛОВЫМ ymId
         let rows = await prisma.yandexArtist.findMany({
             where: { present: true },
             select: { ymId: true, name: true, mbid: true },
         });
         rows = rows.filter((a) => /^\d+$/.test(String(a.ymId || '')));
 
-        // Фильтр q
         if (q) {
             const ql = q.toLowerCase();
             rows = rows.filter(
@@ -140,7 +136,6 @@ r.get('/artists', async (req, res) => {
         if (missingMb) {
             rows = rows.filter((a) => !a.mbid || a.mbid.trim() === '');
         }
-        // Сортировка
         rows.sort((a, b) => {
             if (sortBy === 'id') {
                 const ai = parseInt(String(a.ymId), 10);
@@ -155,13 +150,11 @@ r.get('/artists', async (req, res) => {
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
-        // Пагинация
         const total = rows.length;
         const start = (page - 1) * pageSize;
         const end = Math.min(start + pageSize, total);
         const pageItems = rows.slice(start, end);
 
-        // Ответ под фронт
         const items = pageItems.map((x) => {
             const idNum = Number(x.ymId) || 0;
             const mbid = x.mbid || null;
@@ -191,14 +184,12 @@ r.get('/albums', async (req, res) => {
     lg.info('yandex albums requested', 'yandex.albums.start', { page, pageSize, q, sortBy, sortDir, missingMb });
 
     try {
-        // Берём только present:true и только с ЧИСЛОВЫМ ymId
         let rows = await prisma.yandexAlbum.findMany({
             where: { present: true },
             select: { ymId: true, title: true, artist: true, year: true, rgMbid: true },
         });
         rows = rows.filter((r) => /^\d+$/.test(String(r.ymId || '')));
 
-        // Фильтр q
         if (q) {
             const ql = q.toLowerCase();
             rows = rows.filter(
@@ -212,7 +203,6 @@ r.get('/albums', async (req, res) => {
        if (missingMb) {
            rows = rows.filter((r) => !r.rgMbid || r.rgMbid.trim() === '');
        }
-        // Сортировка
         rows.sort((a, b) => {
             let cmp = 0;
             if (sortBy === 'id') {
@@ -229,7 +219,6 @@ r.get('/albums', async (req, res) => {
                     });
                 }
             } else {
-                // title (по умолчанию) — сортируем по "Artist — Title"
                 const at = [a.artist, a.title].filter(Boolean).join(' — ');
                 const bt = [b.artist, b.title].filter(Boolean).join(' — ');
                 cmp = at.localeCompare(bt, ['ru', 'en'], { sensitivity: 'base', numeric: true });
@@ -237,13 +226,11 @@ r.get('/albums', async (req, res) => {
             return sortDir === 'asc' ? cmp : -cmp;
         });
 
-        // Пагинация
         const total = rows.length;
         const start = (page - 1) * pageSize;
         const end = Math.min(start + pageSize, total);
         const pageItems = rows.slice(start, end);
 
-        // Ответ под фронт
         const items = pageItems.map((x) => {
             const idNum = Number(x.ymId) || 0;
             const rgMbid = x.rgMbid || null;

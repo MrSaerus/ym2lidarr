@@ -34,7 +34,6 @@ export async function notify(kind: Kind, status: Status, stats: any) {
     return;
   }
 
-  // нормализуем тип: поддерживаем legacy 'none'
   const rawType = (s?.notifyType || 'disabled').toLowerCase();
   const type = rawType === 'none' ? 'disabled' : rawType;
 
@@ -121,10 +120,8 @@ export async function notify(kind: Kind, status: Status, stats: any) {
       return;
     }
 
-    // неизвестный тип
     log.warn('skipped: unknown notify type', 'notify.skipped.unknown', { type });
   } catch (e: any) {
-    // финальная ловушка
     log.error('notify failed', 'notify.error', { type, error: String(e?.message || e) });
   }
 }
