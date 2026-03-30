@@ -11,8 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
  && rm -rf /var/lib/apt/lists/*
 COPY apps/pyproxy/requirements.txt .
-RUN pip install --upgrade pip setuptools wheel \
-     && pip install --no-cache-dir -r requirements.txt --require-hashes
+COPY apps/pyproxy/build-requirements.txt .
+
+RUN python -m pip install --no-cache-dir -r /app/build-requirements.txt \
+ && python -m pip install --no-cache-dir -r /app/requirements.txt --require-hashes
 COPY apps/pyproxy /app
 EXPOSE 8080
 CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8080"]
