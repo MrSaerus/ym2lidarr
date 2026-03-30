@@ -1,8 +1,18 @@
-FROM python:3.13-slim@sha256:58c30f5bfaa718b5803a53393190b9c68bd517c44c6c94c1b6c8c172bcfad040
+FROM python:3.14-slim@sha256:0aecac02dc3d4c5dbb024b753af084cafe41f5416e02193f1ce345d671ec966e
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    make \
+    rustc \
+    cargo \
+    ca-certificates  \
+    wget \
+ && rm -rf /var/lib/apt/lists/*
 COPY apps/pyproxy/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt --require-hashes
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget && rm -rf /var/lib/apt/lists/*
+RUN pip install --upgrade pip setuptools wheel \
+     && pip install --no-cache-dir -r requirements.txt --require-hashes
 COPY apps/pyproxy /app
 EXPOSE 8080
 CMD ["uvicorn","main:app","--host","0.0.0.0","--port","8080"]
