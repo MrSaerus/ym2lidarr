@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM --platform=$BUILDPLATFORM node:25-bookworm-slim@sha256:2688bfed319481b4e9c7af4d874736777c932516b55bc1b087cc4fafcbca3e5d AS builder
+FROM --platform=$BUILDPLATFORM node:25-bookworm-slim@sha256:71be4054ee7a5fc8d0b2a66060705988b09a782025d70ba9318b29ff1a931fc0 AS builder
 WORKDIR /app
 
 ARG VERSION=dev
@@ -19,7 +19,7 @@ COPY apps/web ./apps/web
 RUN npm --workspace apps/web run build
 
 # ---------- runner ----------
-FROM --platform=$TARGETPLATFORM nginx:1.29.3-alpine-slim@sha256:4c175d0d849aae0e0eedc64d718ef6323bed2bc68ee673e2d0a1bd5d501d0e5f AS web
+FROM --platform=$TARGETPLATFORM nginx:1.29.7-alpine-slim@sha256:0848ca84c476868cbeb6a5c2c009a98821b8540f96c44b1ba06820db50262e35 AS web
 WORKDIR /var/www/html
 ENV NODE_ENV=production
 ENV PORT=3000
