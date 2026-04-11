@@ -5,11 +5,12 @@ all: build
 build_local:
 	npm ci
 	npx prisma generate --config prisma.config.ts
-	npm --workspace apps/api run build
-
-build:
 	npm run lint
 	npm --workspace apps/api run test:ci
+	npm --workspace apps/api run build
+	npm --workspace apps/web run build
+
+build:
 	docker compose -f docker-compose.build.yml build --no-cache
 	docker compose -f docker-compose.build.single.yml build --no-cache
 
