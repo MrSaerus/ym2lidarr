@@ -52,7 +52,7 @@ type Settings = {
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
-  monitor?: string | null;
+  monitor?: 'all' | 'future' | 'none' | null;
 
   // Custom + enable
   cronCustomMatch?: string | null;
@@ -1448,7 +1448,7 @@ export default function SettingsPage() {
 
                   <FormRow
                     label="Monitor policy"
-                    help="Что мониторить у артиста при добавлении. Обычно 'all'."
+                    help="Что мониторить у артиста при добавлении."
                   >
                     <select
                       className="select"
@@ -1456,11 +1456,12 @@ export default function SettingsPage() {
                       onChange={(e) =>
                         setSettings({
                           ...settings,
-                          monitor: e.target.value,
+                          monitor: e.target.value as any,
                         })
                       }
                     >
                       <option value="all">all</option>
+                      <option value="future">future</option>
                       <option value="none">none</option>
                     </select>
                   </FormRow>
