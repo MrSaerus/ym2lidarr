@@ -457,12 +457,28 @@ export default function SettingsPage() {
     setMsg('Navidrome plan — запускаю…');
     setNavBusy((s) => ({ ...s, plan: true }));
     try {
-      await api<any>('/api/navidrome/plan', { method: 'POST' });
-      setMsg('Navidrome plan started');
-    } catch (e: any) {
+      const body = {
+        navidromeUrl: settings.navidromeUrl || '',
+        navidromeUser: settings.navidromeUser || '',
+        navidromePass: settings.navidromePass || '',
+        navidromeToken: settings.navidromeToken || '',
+        navidromeSalt: settings.navidromeSalt || '',
+        target: settings.navidromeSyncTarget || 'all',
+        policy: settings.likesPolicySourcePriority || 'yandex',
+      };
+
+      const r = await api<any>('/api/navidrome/plan', {
+        method: 'POST',
+        body,
+      });
+
       setMsg(
-        `Navidrome plan error: ${e?.message || String(e)}`,
+        r?.runId
+          ? `Navidrome plan started (runId=${r.runId})`
+          : 'Navidrome plan started',
       );
+    } catch (e: any) {
+      setMsg(`Navidrome plan error: ${e?.message || String(e)}`);
     } finally {
       setNavBusy((s) => ({ ...s, plan: false }));
     }
@@ -473,26 +489,31 @@ export default function SettingsPage() {
     setNavBusy((s) => ({ ...s, push: true }));
     try {
       const body = {
+        navidromeUrl: settings.navidromeUrl || '',
+        navidromeUser: settings.navidromeUser || '',
+        navidromePass: settings.navidromePass || '',
+        navidromeToken: settings.navidromeToken || '',
+        navidromeSalt: settings.navidromeSalt || '',
         target: settings.navidromeSyncTarget || 'all',
         policy: settings.likesPolicySourcePriority || 'yandex',
         dryRun: false,
       };
+
       const r = await api<any>('/api/navidrome/apply', {
         method: 'POST',
         body,
       });
+
       const started = r?.ok || !!r?.runId;
-      if (!started)
-        throw new Error(r?.error || 'apply: unknown error');
+      if (!started) throw new Error(r?.error || 'apply: unknown error');
+
       setMsg(
         r?.runId
           ? `Navidrome apply started (runId=${r.runId})`
           : 'Navidrome apply started',
       );
     } catch (e: any) {
-      setMsg(
-        `Navidrome push error: ${e?.message || String(e)}`,
-      );
+      setMsg(`Navidrome push error: ${e?.message || String(e)}`);
     } finally {
       setNavBusy((s) => ({ ...s, push: false }));
     }
