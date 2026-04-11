@@ -348,7 +348,12 @@ async function saveSettingsHandler(req: any, res: any) {
       update: { ...data },
     });
 
-    setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+    const savedDriver = saved.yandexDriver === 'native' ? 'native' : 'pyproxy';
+    setPyproxyUrl(
+      savedDriver === 'pyproxy'
+        ? (saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '')
+        : ''
+    );
     await reloadJobs();
 
     lg.info('settings saved and jobs reloaded', 'settings.save.done');
@@ -454,23 +459,38 @@ r.post('/test/yandex', testYandexLimiter, async (req, res) => {
 
   try {
     const body = req.body || {};
-    let token: string | undefined =
-      typeof body.token === 'string' && body.token.trim() ? body.token.trim() : undefined;
+    const s = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    if (!token) {
-      const s = await prisma.setting.findFirst({ where: { id: 1 } });
-      token = s?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN || undefined;
-    }
+    const token =
+      (typeof body.token === 'string' && body.token.trim()) ? body.token.trim() :
+        s?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN || undefined;
+
     if (!token) {
       lg.warn('no yandex token provided', 'settings.test.yandex.notoken');
       return res.status(400).json({ ok: false, error: 'No Yandex token' });
     }
 
-    const s = await prisma.setting.findFirst({ where: { id: 1 } });
-    setPyproxyUrl(s?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+    const driver =
+      body?.yandexDriver === 'native' ? 'native' :
+        body?.yandexDriver === 'pyproxy' ? 'pyproxy' :
+          (s?.yandexDriver === 'native' ? 'native' : 'pyproxy');
+
+    const pyproxyUrl =
+      (typeof body.pyproxyUrl === 'string' && body.pyproxyUrl.trim())
+        ? stripTrailingSlashes(body.pyproxyUrl)
+        : (s?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+
+    if (driver === 'pyproxy') {
+      setPyproxyUrl(pyproxyUrl);
+    } else {
+      setPyproxyUrl('');
+    }
 
     const resp = await yandexVerifyToken(token);
-    lg.info('test yandex completed', 'settings.test.yandex.done', { ok: (resp as any)?.ok ?? true });
+    lg.info('test yandex completed', 'settings.test.yandex.done', {
+      ok: (resp as any)?.ok ?? true,
+      driver,
+    });
     res.json(resp);
   } catch (e: any) {
     lg.error('test yandex failed', 'settings.test.yandex.fail', { err: e?.message });

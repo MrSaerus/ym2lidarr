@@ -348,7 +348,11 @@ export default function SettingsPage() {
     try {
       const r = await api<any>('/api/settings/test/yandex', {
         method: 'POST',
-        body: { token: settings.yandexToken || '' },
+        body: {
+          token: settings.yandexToken || '',
+          pyproxyUrl: settings.pyproxyUrl || '',
+          yandexDriver: settings.yandexDriver,
+        },
       });
       setMsg(
         r?.ok
