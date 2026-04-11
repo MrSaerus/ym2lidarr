@@ -2,6 +2,11 @@
 
 all: build
 
+build_local:
+	npm ci
+	npx prisma generate --config prisma.config.ts
+	npm --workspace apps/api run build
+
 build:
 	npm run lint
 	npm --workspace apps/api run test:ci
