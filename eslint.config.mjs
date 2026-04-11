@@ -1,15 +1,17 @@
-// eslint.config.mjs — flat config for ESLint v9+
+// eslint.config.mjs
+import { defineConfig } from 'eslint/config';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-import importPlugin from 'eslint-plugin-import';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
+import nextPlugin from '@next/eslint-plugin-next';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default [
+export default defineConfig([
   {
     ignores: [
       'eslint.config.*',
@@ -26,62 +28,51 @@ export default [
       'apps/api/__**',
       'apps/api/coverage/**',
       'apps/api/reports/**',
-      'apps/api/jest.setup.ts'
+      'apps/api/jest.setup.ts',
+      'apps/api/src/generated/**',
     ],
   },
 
   js.configs.recommended,
 
-  // API (Node/TS)
-  ...tseslint.config({
+  {
     files: ['apps/api/**/*.{ts,js}'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: ['./apps/api/tsconfig.json'],
+        projectService: true,
         tsconfigRootDir: __dirname,
       },
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: { ...globals.node, ...globals.es2021 },
     },
-    plugins: { import: importPlugin, '@typescript-eslint': tseslint.plugin },
-    settings: {
-      'import/resolver': {
-        typescript: { project: ['./tsconfig.base.json', './apps/*/tsconfig.json'] },
-      },
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
     },
     rules: {
       'no-unused-vars': 'off',
       'no-console': 'off',
-      'import/order': 'off',
-      '@typescript-eslint/consistent-type-imports': 'warn',
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
-      ],
       'no-empty': ['warn', { allowEmptyCatch: true }],
-    },
-  }),
-  {
-    files: ['apps/api/**/*.{ts,js}'],
-    plugins: { '@typescript-eslint': tseslint.plugin },
-    rules: {
+
+      '@typescript-eslint/consistent-type-imports': 'warn',
       '@typescript-eslint/no-unused-vars': [
         'warn',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
       ],
-      '@typescript-eslint/consistent-type-imports': 'warn',
     },
   },
 
-  // Web (Next/TSX)
-  ...tseslint.config({
+  {
     files: ['apps/web/**/*.{ts,tsx,js,jsx}'],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        project: ['./apps/web/tsconfig.json'],
+        projectService: true,
         tsconfigRootDir: __dirname,
       },
       ecmaVersion: 2022,
@@ -89,39 +80,34 @@ export default [
       globals: { ...globals.browser, ...globals.es2021, process: 'readonly' },
     },
     plugins: {
-      import: importPlugin,
       '@typescript-eslint': tseslint.plugin,
       'react-hooks': reactHooks,
+      '@next/next': nextPlugin,
     },
     settings: {
-      'import/resolver': {
-        typescript: { project: ['./tsconfig.base.json', './apps/*/tsconfig.json'] },
+      next: {
+        rootDir: 'apps/web/',
       },
     },
     rules: {
+      ...nextPlugin.configs.recommended.rules,
+
       'no-unused-vars': 'off',
       'no-console': 'off',
-      'import/order': 'off',
+      'no-empty': ['warn', { allowEmptyCatch: true }],
+
       '@typescript-eslint/consistent-type-imports': 'warn',
       '@typescript-eslint/no-unused-vars': [
         'warn',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+        },
       ],
-      'no-empty': ['warn', { allowEmptyCatch: true }],
-      // React hooks
+
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
-    },
-  }),
-  {
-    files: ['apps/web/**/*.{ts,tsx,js,jsx}'],
-    plugins: { '@typescript-eslint': tseslint.plugin },
-    rules: {
-      '@typescript-eslint/no-unused-vars': [
-        'warn',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', ignoreRestSiblings: true },
-      ],
-      '@typescript-eslint/consistent-type-imports': 'warn',
     },
   },
 
@@ -132,9 +118,7 @@ export default [
       sourceType: 'module',
       globals: { ...globals.node, ...globals.es2021 },
     },
-    rules: {},
   },
 
-  // совместимость с Prettier
   prettier,
-];
+]);
