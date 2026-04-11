@@ -14,8 +14,6 @@ ENV NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT}
 ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}
 ENV NEXT_PUBLIC_REPO_URL=${REPO_URL}
 
-ENV DATABASE_URL="file:/app/data/app.db"
-
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssl \
  && rm -rf /var/lib/apt/lists/*
@@ -49,7 +47,6 @@ ARG REPO_URL=""
 ENV NODE_ENV=production
 ENV PORT_API=4000
 ENV PORT=3000
-ENV DATABASE_URL="file:/app/data/app.db"
 ENV NEXT_PUBLIC_APP_VERSION=${VERSION}
 ENV NEXT_PUBLIC_GIT_COMMIT=${GIT_COMMIT}
 ENV NEXT_PUBLIC_BUILD_DATE=${BUILD_DATE}

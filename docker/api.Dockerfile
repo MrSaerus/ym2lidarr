@@ -16,8 +16,6 @@ COPY apps/api/src ./apps/api/src
 COPY apps/api/jest.config.cjs ./apps/api/jest.config.cjs
 COPY apps/api/jest.setup.ts ./apps/api/jest.setup.ts
 
-ENV DATABASE_URL="file:/app/data/app.db"
-
 RUN npm ci
 RUN npx prisma generate --config prisma.config.ts
 RUN npm --workspace apps/api run build
@@ -27,8 +25,7 @@ FROM node:25-bookworm-slim@sha256:71be4054ee7a5fc8d0b2a66060705988b09a782025d70b
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    PORT=4000 \
-    DATABASE_URL="file:/app/data/app.db"
+    PORT=4000
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates openssl tini ffmpeg \

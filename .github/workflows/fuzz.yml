@@ -11,9 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  DATABASE_URL: "file:./apps/api/data/app.db"
-
 jobs:
   fuzz:
     name: API fast-check fuzz tests

@@ -16,7 +16,6 @@ concurrency:
 env:
   NODE_VERSION: "20"
   CI: "true"
-  DATABASE_URL: "file:./apps/api/data/app.db"
 
 jobs:
   tests:
