@@ -189,12 +189,20 @@ function pickSettings(input: any) {
     'enableCronCustomMatch',
     'enableCronCustomPush',
     'enableCronLidarrPull',
+    'enableCronNavidromePush',
+    'enableCronTorrentRunUnmatched',
+    'enableCronTorrentQbtPoll',
+    'enableCronTorrentCopyDownloaded',
+    'torrentRunUnmatchedAutoStart',
     'allowRepush',
     'qbtDeleteFiles',
     'yandexMatchForce',
     'customMatchForce',
     'mbMatchForce',
-  ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
+  ].forEach((k) => {
+    if (k in out) out[k] = !!out[k];
+  });
+
   if ('torrentJackettQbtBaseUrl' in out && typeof out.torrentJackettQbtBaseUrl === 'string') {
     out.torrentJackettQbtBaseUrl = stripTrailingSlashes(out.torrentJackettQbtBaseUrl);
   }
@@ -294,10 +302,22 @@ async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: strin
 
 async function saveSettingsHandler(req: any, res: any) {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
-  try {
-    const data = pickSettings(req.body);
 
-    if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
+  try {
+    const raw = req.body || {};
+    const data = pickSettings(raw);
+
+    const clearNavidromePass = raw.clearNavidromePass === true;
+    const hasRawNavidromePass = Object.prototype.hasOwnProperty.call(raw, 'navidromePass');
+    const rawNavidromePass = raw.navidromePass;
+
+    if (clearNavidromePass) {
+      data.navidromePass = '';
+    }
+
+    else if (hasRawNavidromePass && typeof rawNavidromePass === 'string' && rawNavidromePass.trim() === '') {
+      delete data.navidromePass;
+    }
 
     lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
 
@@ -309,8 +329,8 @@ async function saveSettingsHandler(req: any, res: any) {
 
     setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
     await reloadJobs();
-    lg.info('settings saved and jobs reloaded', 'settings.save.done');
 
+    lg.info('settings saved and jobs reloaded', 'settings.save.done');
     res.json({ ok: true });
   } catch (e: any) {
     lg.error('save settings failed', 'settings.save.fail', { err: e?.message });
@@ -331,6 +351,7 @@ r.get('/', async (req, res) => {
     }
     const safe = { ...s };
     safe.qbtPass = '';
+    safe.navidromePassConfigured = !!safe.navidromePass;
     safe.navidromePass = '';
     lg.debug('settings loaded', 'settings.get.done', { hasSettings: true });
     return res.json(safe);

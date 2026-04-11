@@ -331,7 +331,7 @@ export async function reloadJobs() {
           const pass = st?.navidromePass || '';
           const token = st?.navidromeToken || '';
           const salt = st?.navidromeSalt || '';
-          const target = (st?.navidromeSyncTarget as any) || 'tracks';
+          const target = (st?.navidromeSyncTarget as any) || 'all';
           const policy = (st?.likesPolicySourcePriority as any) || 'yandex';
           if (!navUrl || !user || (!pass && !(token && salt))) {
             lg.warn('navidrome not configured, skip', 'cron.nav.push.skip.misconfig');

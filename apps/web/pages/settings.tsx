@@ -29,10 +29,11 @@ type Settings = {
   navidromePass?: string | null;
   navidromeToken?: string | null;
   navidromeSalt?: string | null;
-  navidromeSyncTarget?: 'both' | 'artists' | 'albums' | 'tracks';
+  navidromeSyncTarget?: 'all' | 'artists' | 'albums' | 'tracks';
   likesPolicySourcePriority?: 'yandex' | 'navidrome';
   cronNavidromePush?: string | null;
   enableCronNavidromePush?: boolean | null;
+  navidromePassConfigured?: boolean;
 
   // Lidarr
   lidarrUrl?: string | null;
@@ -129,10 +130,11 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     navidromePass: s.navidromePass ?? '',
     navidromeToken: s.navidromeToken ?? '',
     navidromeSalt: s.navidromeSalt ?? '',
-    navidromeSyncTarget: (s.navidromeSyncTarget as any) || 'artists',
+    navidromeSyncTarget: (s.navidromeSyncTarget as any) || 'all',
     likesPolicySourcePriority: (s.likesPolicySourcePriority as any) || 'yandex',
     cronNavidromePush: s.cronNavidromePush ?? '15 */6 * * *',
     enableCronNavidromePush: s.enableCronNavidromePush ?? false,
+    navidromePassConfigured: !!s.navidromePassConfigured,
 
     // Lidarr
     lidarrUrl: s.lidarrUrl ?? 'http://lidarr:8686',
@@ -217,6 +219,7 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState('');
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<number | null>(null);
+  const [clearNavidromePass, setClearNavidromePass] = useState(false);
   const [navBusy, setNavBusy] = useState<{ plan: boolean; push: boolean }>({
     plan: false,
     push: false,
@@ -301,6 +304,7 @@ export default function SettingsPage() {
       const r = await api<any>('/api/settings');
       const raw = (r && 'settings' in r) ? (r as any).settings : r;
       setSettings(withDefaults(raw));
+      setClearNavidromePass(false);
       setMsg('');
     } catch (e: any) {
       setMsg(e?.message || String(e));
@@ -316,7 +320,15 @@ export default function SettingsPage() {
   async function save() {
     setMsg('Saving…');
     try {
-      await api('/api/settings', { method: 'PUT', body: settings });
+      await api('/api/settings', {
+        method: 'PUT',
+        body: {
+          ...settings,
+          clearNavidromePass,
+        },
+      });
+
+      await load();
       setMsg('Saved');
       toastOk('Settings saved');
     } catch (e: any) {
@@ -375,11 +387,11 @@ export default function SettingsPage() {
       const r = await api<any>('/api/navidrome/test', {
         method: 'POST',
         body: {
-          url: settings.navidromeUrl || '',
-          user: settings.navidromeUser || '',
-          pass: settings.navidromePass || '',
-          token: settings.navidromeToken || '',
-          salt: settings.navidromeSalt || '',
+          navidromeUrl: settings.navidromeUrl || '',
+          navidromeUser: settings.navidromeUser || '',
+          navidromePass: settings.navidromePass || '',
+          navidromeToken: settings.navidromeToken || '',
+          navidromeSalt: settings.navidromeSalt || '',
         },
       });
       const ok = !!r?.ok;
@@ -461,7 +473,7 @@ export default function SettingsPage() {
     setNavBusy((s) => ({ ...s, push: true }));
     try {
       const body = {
-        target: settings.navidromeSyncTarget || 'tracks',
+        target: settings.navidromeSyncTarget || 'all',
         policy: settings.likesPolicySourcePriority || 'yandex',
         dryRun: false,
       };
@@ -910,20 +922,47 @@ export default function SettingsPage() {
                   </FormRow>
                   <FormRow
                     label="Password"
-                    help="Используется если token/salt не заданы."
+                    help="Если пароль сохранён или введён, используется он независимо от token/salt. Token+salt используются только когда пароля нет."
                   >
-                    <input
-                      className="input"
-                      type="password"
-                      value={settings.navidromePass || ''}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          navidromePass: e.target.value,
-                        })
-                      }
-                      placeholder="••••••••"
-                    />
+                    <div className="space-y-2">
+                      {settings.navidromePassConfigured && !settings.navidromePass && !clearNavidromePass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password is configured. Leave the field empty to keep it unchanged.
+                        </div>
+                      )}
+
+                      {settings.navidromePassConfigured && !settings.navidromePass && clearNavidromePass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password will be cleared on save.
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          className="input flex-1"
+                          type="password"
+                          value={settings.navidromePass || ''}
+                          onChange={(e) => {
+                            setClearNavidromePass(false);
+                            setSettings({
+                              ...settings,
+                              navidromePass: e.target.value,
+                            });
+                          }}
+                          placeholder="••••••••"
+                        />
+
+                        {settings.navidromePassConfigured && !settings.navidromePass && (
+                          <button
+                            type="button"
+                            className="btn btn-outline whitespace-nowrap"
+                            onClick={() => setClearNavidromePass((v) => !v)}
+                          >
+                            {clearNavidromePass ? 'Keep saved password' : 'Clear saved password'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </FormRow>
                 </div>
 
@@ -968,18 +1007,17 @@ export default function SettingsPage() {
                 >
                   <select
                     className="select"
-                    value={settings.navidromeSyncTarget || 'artists'}
+                    value={settings.navidromeSyncTarget || 'all'}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        navidromeSyncTarget:
-                          e.target.value as any,
+                        navidromeSyncTarget: e.target.value as any,
                       })
                     }
                   >
                     <option value="artists">artists</option>
                     <option value="albums">albums</option>
-                    <option value="both">both</option>
+                    <option value="all">all</option>
                     <option value="tracks">tracks</option>
                   </select>
                 </FormRow>
