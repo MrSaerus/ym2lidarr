@@ -1,11 +1,12 @@
 // prisma/schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL") // e.g. file:./data/app.db
 }
 
 // /* ===================== Ingest: Yandex ===================== */

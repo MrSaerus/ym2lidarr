@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY apps/pyproxy/requirements.txt .
 COPY apps/pyproxy/build-requirements.txt .
 
-RUN python -m pip install --no-cache-dir -r /app/build-requirements.txt \
+RUN python -m pip install --no-cache-dir -r /app/build-requirements.txt --require-hashes \
  && python -m pip install --no-cache-dir -r /app/requirements.txt --require-hashes
 COPY apps/pyproxy /app
 EXPOSE 8080

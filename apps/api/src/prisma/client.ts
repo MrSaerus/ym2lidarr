@@ -1,8 +1,14 @@
-// apps/api/src/prisma.ts
-import { PrismaClient } from '@prisma/client';
-import { createLogger } from './lib/logger';
+// apps/api/src/prisma/client.ts
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaClient } from '../generated/prisma/client';
+import { createLogger } from '../lib/logger';
+import { resolveDatabaseUrl } from './database';
 
-export const prisma = new PrismaClient();
+const adapter = new PrismaBetterSqlite3({
+  url: resolveDatabaseUrl(),
+});
+
+export const prisma = new PrismaClient({ adapter });
 const log = createLogger({ scope: 'db.prisma' });
 
 export async function initPrismaPragmas() {

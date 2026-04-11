@@ -1,5 +1,5 @@
 // apps/api/src/services/torrents/qbt/status.ts
-import { TorrentStatus } from '@prisma/client';
+import { TorrentStatus } from '../../../prisma';
 import { prisma } from '../../../prisma';
 import { QbtClient } from '../../qbittorrent';
 

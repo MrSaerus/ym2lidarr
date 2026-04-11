@@ -4,17 +4,6 @@ import { createLogger } from '../lib/logger';
 
 const log = createLogger({ scope: 'service.yandex-unmatched' });
 
-const hasYmIdFields = (() => {
-  try {
-    const model = (prisma as any)?._dmmf?.datamodel?.models?.find((m: any) => m?.name === 'TorrentTask');
-    const fields = model?.fields;
-    if (!Array.isArray(fields)) return false;
-    return fields.some((f: any) => f?.name === 'ymArtistId');
-  } catch {
-    return false;
-  }
-})();
-
 type PlannedLike = {
   likeId: number;
   kind: 'album'|'track'|'artist';
@@ -147,11 +136,9 @@ export async function planUnmatchedLikes(opts?: { limit?: number }) {
       source: 'yandex',
     };
 
-    if (hasYmIdFields) {
-      if (input.ymArtistId) data.ymArtistId = input.ymArtistId;
-      if (input.ymAlbumId)  data.ymAlbumId  = input.ymAlbumId;
-      if (input.ymTrackId)  data.ymTrackId  = input.ymTrackId;
-    }
+    if (input.ymArtistId) data.ymArtistId = input.ymArtistId;
+    if (input.ymAlbumId)  data.ymAlbumId  = input.ymAlbumId;
+    if (input.ymTrackId)  data.ymTrackId  = input.ymTrackId;
 
     const createdTask = await prisma.torrentTask.create({ data });
     await prisma.yandexLikeSync.update({

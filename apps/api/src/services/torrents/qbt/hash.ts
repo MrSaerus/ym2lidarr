@@ -1,7 +1,7 @@
 // apps/api/src/services/torrents/qbt/hash.ts
 import { fetch } from 'undici';
 import { createHash } from 'node:crypto';
-import type { TorrentRelease } from '@prisma/client';
+import type { TorrentRelease } from '../../../prisma';
 import { parseMagnetHash } from './magnet';
 import { log } from '../index';
 
