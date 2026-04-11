@@ -9,7 +9,7 @@ import {
   copyDownloadedTask, autoCopyDownloaded, autoPollQbt,
 } from '../services/torrents';
 import { isTaskKind, isCollisionPolicy } from '../types/torrents';
-import { TorrentStatus } from '@prisma/client';
+import { TorrentStatus } from '../prisma';
 import { searchTaskWithJackett } from '../services/torznab';
 import { prisma } from '../prisma';
 const r = Router();

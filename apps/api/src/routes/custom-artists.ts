@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import { startRun } from '../log';
 import { runCustomArtistsMatch } from '../workers';
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../prisma';
 
 import { ensureNotBusyOrThrow } from '../scheduler';
 import { createLogger } from '../lib/logger';

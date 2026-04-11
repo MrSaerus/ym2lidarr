@@ -2,7 +2,7 @@
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { upsertRelease, updateTaskStatus, calcNextErrorScheduledAt } from './torrents';
-import { TorrentStatus } from '@prisma/client';
+import { TorrentStatus } from '../prisma';
 import { fetch } from 'undici';
 
 const log = createLogger({ scope: 'service.torznab' });

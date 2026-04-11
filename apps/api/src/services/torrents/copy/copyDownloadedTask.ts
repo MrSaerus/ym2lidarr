@@ -2,7 +2,7 @@
 import { prisma } from '../../../prisma';
 import { QbtClient } from '../../qbittorrent';
 import path from 'node:path';
-import { TorrentStatus } from '@prisma/client';
+import { TorrentStatus } from '../../../prisma';
 import fs from 'node:fs/promises';
 import { resolveAlbumTargetDir, safe } from '../fs/paths';
 import { pathExists, rmrf } from '../fs/fileOps';

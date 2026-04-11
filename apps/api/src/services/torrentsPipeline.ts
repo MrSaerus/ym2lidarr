@@ -4,7 +4,7 @@ import { createLogger } from '../lib/logger';
 import { createTask, addTaskToQbt, pickBestRelease } from './torrents';
 import { searchTaskWithJackett } from './torznab';
 import { dblog, bailIfCancelled, patchRunStats } from '../workers/_common';
-import { TorrentStatus, AlbumTorrentState } from '@prisma/client';
+import { TorrentStatus, AlbumTorrentState } from '../prisma';
 
 const log = createLogger({ scope: 'svc.pipeline' });
 

@@ -1,6 +1,6 @@
 // apps/api/src/services/torrents/qbt/poll.ts
 import { prisma } from '../../../prisma';
-import { AlbumTorrentState, TorrentStatus } from '@prisma/client';
+import { AlbumTorrentState, TorrentStatus } from '../../../prisma/index';
 import { QbtClient } from '../../qbittorrent';
 import { detectTorrentLayout } from '../layout/detectLayout';
 import { TorrentLayout } from '../types';
