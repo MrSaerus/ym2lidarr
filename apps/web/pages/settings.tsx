@@ -68,10 +68,15 @@ type Settings = {
   backupRetention?: number | null;
 
   // Notifications
-  notifyType: 'disabled' | 'telegram' | 'webhook';
+  notifyType: 'none' | 'telegram' | 'webhook';
   telegramBot?: string | null;
   telegramChatId?: string | null;
   webhookUrl?: string | null;
+  webhookSecret?: string | null;
+
+  // Matching behavior
+  allowRepush?: boolean | null;
+  matchRetryDays?: number | null;
 
   // qBittorrent
   torrentQbtCategory?: string | null;
@@ -171,10 +176,15 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     mbMatchForce: s.mbMatchForce ?? false,
 
     // Notifications
-    notifyType: (s.notifyType as any) || 'disabled',
+    notifyType: (s.notifyType as any) || 'none',
     telegramBot: s.telegramBot ?? '',
     telegramChatId: s.telegramChatId ?? '',
     webhookUrl: s.webhookUrl ?? '',
+    webhookSecret: s.webhookSecret ?? '',
+
+    // Matching behavior
+    allowRepush: s.allowRepush ?? false,
+    matchRetryDays: s.matchRetryDays ?? null,
 
     // qBittorrent
     torrentQbtCategory: s.torrentQbtCategory ?? 'YM2LIDARR',
@@ -212,6 +222,7 @@ type SettingsTab =
   | 'lidarr'
   | 'custom'
   | 'backup'
+  | 'notifications'
   | 'qbt'
   | 'torrents';
 
@@ -652,6 +663,7 @@ export default function SettingsPage() {
     { id: 'lidarr', label: 'Lidarr' },
     { id: 'custom', label: 'Custom' },
     { id: 'backup', label: 'Backup' },
+    { id: 'notifications', label: 'Notifications' },
     { id: 'qbt', label: 'qBittorrent' },
     { id: 'torrents', label: 'Torrents puller' },
   ];
@@ -1866,7 +1878,108 @@ export default function SettingsPage() {
                 </div>
               </section>
             )}
+            {/* Tnotifications */}
+            {activeTab === 'notifications' && (
+              <section className="panel p-4 space-y-3">
+                <div className="section-title">Notifications</div>
 
+                <FormRow
+                  label="Notify type"
+                  help="Куда отправлять уведомления о завершении/ошибках."
+                >
+                  <select
+                    className="select"
+                    value={settings.notifyType || 'none'}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        notifyType: e.target.value as any,
+                      })
+                    }
+                  >
+                    <option value="none">disabled</option>
+                    <option value="telegram">telegram</option>
+                    <option value="webhook">webhook</option>
+                  </select>
+                </FormRow>
+
+                {settings.notifyType === 'telegram' && (
+                  <>
+                    <FormRow
+                      label="Telegram bot token"
+                      help="Токен Telegram-бота."
+                    >
+                      <input
+                        className="input"
+                        value={settings.telegramBot || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            telegramBot: e.target.value,
+                          })
+                        }
+                        placeholder="123456:ABC..."
+                      />
+                    </FormRow>
+
+                    <FormRow
+                      label="Telegram chat id"
+                      help="ID чата, куда отправлять уведомления."
+                    >
+                      <input
+                        className="input"
+                        value={settings.telegramChatId || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            telegramChatId: e.target.value,
+                          })
+                        }
+                        placeholder="-1001234567890"
+                      />
+                    </FormRow>
+                  </>
+                )}
+
+                {settings.notifyType === 'webhook' && (
+                  <>
+                    <FormRow
+                      label="Webhook URL"
+                      help="Endpoint для POST-уведомлений."
+                    >
+                      <input
+                        className="input"
+                        value={settings.webhookUrl || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            webhookUrl: e.target.value,
+                          })
+                        }
+                        placeholder="https://example.com/hook"
+                      />
+                    </FormRow>
+
+                    <FormRow
+                      label="Webhook secret"
+                      help="Будет отправлен в заголовке X-Webhook-Secret."
+                    >
+                      <input
+                        className="input"
+                        value={settings.webhookSecret || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            webhookSecret: e.target.value,
+                          })
+                        }
+                        placeholder="optional secret"
+                      />
+                    </FormRow>
+                  </>
+                )}
+              </section>
+            )}
             {/* Torrents puller */}
             {activeTab === 'torrents' && (
               <section className="panel p-4 space-y-3">
