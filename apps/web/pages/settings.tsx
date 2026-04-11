@@ -83,6 +83,7 @@ type Settings = {
   qbtWebhookSecret?: string | null;
   torrentDownloadsDir?: string | null;
   musicLibraryDir?: string | null;
+  qbtPassConfigured?: boolean;
 
   // Torrents puller
   cronTorrentRunUnmatched?: string | null;
@@ -181,6 +182,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     qbtUrl: s.qbtUrl ?? 'http://qbittorrent:8080',
     qbtUser: s.qbtUser ?? 'admin',
     qbtPass: s.qbtPass ?? '',
+    qbtPassConfigured: !!s.qbtPassConfigured,
     qbtDeleteFiles: s.qbtDeleteFiles ?? true,
     qbtWebhookSecret: s.qbtWebhookSecret ?? '',
     torrentDownloadsDir: s.torrentDownloadsDir ?? '/home/Downloads',
@@ -220,6 +222,7 @@ export default function SettingsPage() {
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<number | null>(null);
   const [clearNavidromePass, setClearNavidromePass] = useState(false);
+  const [clearQbtPass, setClearQbtPass] = useState(false);
   const [navBusy, setNavBusy] = useState<{ plan: boolean; push: boolean }>({
     plan: false,
     push: false,
@@ -305,6 +308,7 @@ export default function SettingsPage() {
       const raw = (r && 'settings' in r) ? (r as any).settings : r;
       setSettings(withDefaults(raw));
       setClearNavidromePass(false);
+      setClearQbtPass(false);
       setMsg('');
     } catch (e: any) {
       setMsg(e?.message || String(e));
@@ -325,6 +329,7 @@ export default function SettingsPage() {
         body: {
           ...settings,
           clearNavidromePass,
+          clearQbtPass,
         },
       });
 
@@ -440,9 +445,22 @@ export default function SettingsPage() {
   async function testQbt() {
     setMsg('Testing qBittorrent…');
     try {
+      const body: any = {
+        qbtUrl: settings.qbtUrl || '',
+        qbtUser: settings.qbtUser || '',
+      };
+
+      if (settings.qbtPass) {
+        body.qbtPass = settings.qbtPass;
+      } else if (clearQbtPass) {
+        body.qbtPass = '';
+      }
+
       const r = await api<any>('/api/settings/test/qbt', {
         method: 'POST',
+        body,
       });
+
       setMsg(
         r?.ok
           ? `qBittorrent OK (webApi: ${r.webApi || 'unknown'})`
@@ -1660,6 +1678,22 @@ export default function SettingsPage() {
                   />
                 </FormRow>
                 <FormRow
+                  label="Category"
+                  help="Категория, которую приложение будет ставить задачам в qBittorrent."
+                >
+                  <input
+                    className="input"
+                    value={settings.torrentQbtCategory || ''}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        torrentQbtCategory: e.target.value,
+                      })
+                    }
+                    placeholder="YM2LIDARR"
+                  />
+                </FormRow>
+                <FormRow
                   label="Downloaded dir"
                   help="Папка со скаченными файлами"
                 >
@@ -1705,19 +1739,49 @@ export default function SettingsPage() {
                       placeholder="admin"
                     />
                   </FormRow>
-                  <FormRow label="Password">
-                    <input
-                      className="input"
-                      type="password"
-                      value={settings.qbtPass || ''}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qbtPass: e.target.value,
-                        })
-                      }
-                      placeholder="••••••••"
-                    />
+                  <FormRow
+                    label="Password"
+                    help="Сохранённый пароль можно оставить как есть, очистить или заменить новым."
+                  >
+                    <div className="space-y-2">
+                      {settings.qbtPassConfigured && !settings.qbtPass && !clearQbtPass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password is configured. Leave the field empty to keep it unchanged.
+                        </div>
+                      )}
+
+                      {settings.qbtPassConfigured && !settings.qbtPass && clearQbtPass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password will be cleared on save.
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          className="input flex-1"
+                          type="password"
+                          value={settings.qbtPass || ''}
+                          onChange={(e) => {
+                            setClearQbtPass(false);
+                            setSettings({
+                              ...settings,
+                              qbtPass: e.target.value,
+                            });
+                          }}
+                          placeholder="••••••••"
+                        />
+
+                        {settings.qbtPassConfigured && !settings.qbtPass && (
+                          <button
+                            type="button"
+                            className="btn btn-outline whitespace-nowrap"
+                            onClick={() => setClearQbtPass((v) => !v)}
+                          >
+                            {clearQbtPass ? 'Keep saved password' : 'Clear saved password'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </FormRow>
                 </div>
 
@@ -1744,11 +1808,7 @@ export default function SettingsPage() {
                   label="Webhook secret"
                   help={
                     <>
-                      Секрет для{' '}
-                      <code>
-                        {settings.qbtUrl}
-                        /api/webhooks/lidarr?secret=…
-                      </code>
+                      Секрет для <code>/api/torrents/qbt/webhook?secret=…</code>
                     </>
                   }
                 >

@@ -18,8 +18,8 @@ export async function runTorrentsUnmatched(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });
   const limit = settings?.torrentRunUnmatchedLimit ?? 10;
   const minSeeders = settings?.torrentRunUnmatchedMinSeeders ?? 1;
-  const limitPerIndexer = settings?.torrentRunUnmatchedLimitPerIndexer ?? 20;
-  const autoStart = settings?.torrentRunUnmatchedAutoStart ?? true;
+  const limitPerIndexer = settings?.torrentRunUnmatchedLimitPerIndexer ?? 10;
+  const autoStart = settings?.torrentRunUnmatchedAutoStart ?? false;
   const parallelSearches = settings?.torrentRunUnmatchedParallelSearches ?? 10;
 
   const run = await startRunWithKind(
@@ -141,7 +141,7 @@ export async function runTorrentsPoll(reuseRunId?: number) {
 
 export async function runTorrentsCopyDownloaded(reuseRunId?: number) {
   const settings = await prisma.setting.findFirst({ where: { id: 1 } });
-  const batchSize = settings?.torrentCopyBatchSize ?? 20;
+  const batchSize = settings?.torrentCopyBatchSize ?? 50;
 
   const run = await startRunWithKind(
     'torrents.copy',

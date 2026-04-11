@@ -101,13 +101,16 @@ const ALLOWED_FIELDS = new Set([
   'allowRepush',
   'matchRetryDays',
 
-  // qBittorrent
+// qBittorrent
+  'torrentQbtCategory',
   'torrentJackettQbtBaseUrl',
   'qbtUrl',
   'qbtUser',
   'qbtPass',
   'qbtDeleteFiles',
   'qbtWebhookSecret',
+  'torrentDownloadsDir',
+  'musicLibraryDir',
 
   // Navidrome
   'navidromeUrl',
@@ -178,6 +181,15 @@ function pickSettings(input: any) {
   if ('mode' in out) {
     const v = String(out.mode || '').toLowerCase();
     out.mode = v === 'albums' ? 'albums' : 'artists';
+  }
+  if ('torrentQbtCategory' in out) {
+    out.torrentQbtCategory = trimToNull(out.torrentQbtCategory);
+  }
+  if ('torrentDownloadsDir' in out) {
+    out.torrentDownloadsDir = trimToNull(out.torrentDownloadsDir);
+  }
+  if ('musicLibraryDir' in out) {
+    out.musicLibraryDir = trimToNull(out.musicLibraryDir);
   }
 
   [
@@ -310,6 +322,15 @@ async function saveSettingsHandler(req: any, res: any) {
     const clearNavidromePass = raw.clearNavidromePass === true;
     const hasRawNavidromePass = Object.prototype.hasOwnProperty.call(raw, 'navidromePass');
     const rawNavidromePass = raw.navidromePass;
+    const clearQbtPass = raw.clearQbtPass === true;
+    const hasRawQbtPass = Object.prototype.hasOwnProperty.call(raw, 'qbtPass');
+    const rawQbtPass = raw.qbtPass;
+
+    if (clearQbtPass) {
+      data.qbtPass = '';
+    } else if (hasRawQbtPass && typeof rawQbtPass === 'string' && rawQbtPass.trim() === '') {
+      delete data.qbtPass;
+    }
 
     if (clearNavidromePass) {
       data.navidromePass = '';
@@ -350,6 +371,7 @@ r.get('/', async (req, res) => {
       return res.json({});
     }
     const safe = { ...s };
+    safe.qbtPassConfigured = !!safe.qbtPass;
     safe.qbtPass = '';
     safe.navidromePassConfigured = !!safe.navidromePass;
     safe.navidromePass = '';
@@ -577,21 +599,25 @@ r.post('/test/qbt', async (req, res) => {
   lg.info('test qbt requested', 'settings.test.qbt.start');
 
   try {
+    const body = req.body || {};
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
-    const base = (s?.qbtUrl || '').replace(/\/+$/, '');
-    const user = s?.qbtUser || '';
-    const pass = s?.qbtPass || '';
+
+    const hasUrl = typeof body.qbtUrl === 'string';
+    const hasUser = typeof body.qbtUser === 'string';
+    const hasPass = Object.prototype.hasOwnProperty.call(body, 'qbtPass');
+
+    const base = String(hasUrl ? body.qbtUrl : (s?.qbtUrl || '')).trim().replace(/\/+$/, '');
+    const user = String(hasUser ? body.qbtUser : (s?.qbtUser || '')).trim();
+    const pass = String(hasPass ? (body.qbtPass ?? '') : (s?.qbtPass || ''));
 
     if (!base) {
       lg.warn('qbt url is not set', 'settings.test.qbt.nourl');
       return res.status(400).json({ ok: false, error: 'qbtUrl is not set' });
     }
 
-    // webapiVersion (без auth)
     const r1 = await fetch(`${base}/api/v2/app/webapiVersion`);
     const webApi = await r1.text();
 
-    // login (auth)
     const r2 = await fetch(`${base}/api/v2/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -599,7 +625,12 @@ r.post('/test/qbt', async (req, res) => {
     });
     const okLogin = r2.ok;
 
-    lg.info('test qbt completed', 'settings.test.qbt.done', { ok: r1.ok && okLogin, webApi, loginOk: okLogin });
+    lg.info('test qbt completed', 'settings.test.qbt.done', {
+      ok: r1.ok && okLogin,
+      webApi,
+      loginOk: okLogin,
+    });
+
     res.json({ ok: r1.ok && okLogin, webApi, login: okLogin });
   } catch (e: any) {
     lg.error('test qbt failed', 'settings.test.qbt.fail', { err: e?.message });
