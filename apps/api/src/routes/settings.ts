@@ -528,15 +528,17 @@ r.post('/test/lidarr', async (req, res) => {
       const data = { ...raw };
       if (raw.qbtPass === '') delete (data as any).qbtPass;
 
+      const updateData = { ...data, ...needUpdate };
+
       if (Object.keys(needUpdate).length > 0) {
         await prisma.setting.upsert({
           where: { id: 1 },
-          create: { id: 1, ...data },
-          update: { ...data },
+          create: { id: 1, ...updateData },
+          update: { ...updateData },
         });
+
         applied = needUpdate;
         appliedCount = Object.keys(needUpdate).length;
-
         await reloadJobs();
       }
     }
