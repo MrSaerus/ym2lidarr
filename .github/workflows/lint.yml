@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Prisma generate (apps/api)
-        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+        run: npx prisma generate --config prisma.config.ts
 
       - name: Build API
         run: npm --workspace apps/api run build --if-present
@@ -40,5 +40,5 @@ jobs:
       - name: Build Web
         run: npm --workspace apps/web run build --if-present
 
-      - name: Run tests
+      - name: Run lint
         run: npm run lint

@@ -5,11 +5,14 @@ on:
     branches: ["**"]
   pull_request:
   schedule:
-    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+    - cron: "0 5 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  DATABASE_URL: "file:./apps/api/data/app.db"
 
 jobs:
   fuzz:
@@ -17,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: 20
@@ -25,8 +29,8 @@ jobs:
       - name: Install deps (root + workspaces)
         run: npm ci
 
-      - name: Prisma generate (apps/api)
-        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+      - name: Prisma generate
+        run: npx prisma generate --config prisma.config.ts
 
       - name: Run fuzz tests (API)
         run: npm -w apps/api run test:fuzz --if-present

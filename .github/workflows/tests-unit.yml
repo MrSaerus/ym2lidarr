@@ -16,6 +16,7 @@ concurrency:
 env:
   NODE_VERSION: "20"
   CI: "true"
+  DATABASE_URL: "file:./apps/api/data/app.db"
 
 jobs:
   tests:
@@ -35,14 +36,15 @@ jobs:
       - name: Install deps (root + workspaces)
         run: npm ci
 
-      - name: Prisma generate (apps/api)
-        run: npx -w apps/api prisma generate --schema ../../prisma/schema.prisma
+      - name: Prisma generate
+        run: npx prisma generate --config prisma.config.ts
 
       - name: Build API (optional)
         run: npm --workspace apps/api run build --if-present
 
       - name: Run tests (unit)
         run: npm --workspace apps/api run test:ci
+
       - name: Show coverage summary
         run: |
           if [ -f apps/api/reports/coverage/lcov.info ]; then
