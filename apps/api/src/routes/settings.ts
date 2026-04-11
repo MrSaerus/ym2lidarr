@@ -191,7 +191,15 @@ function pickSettings(input: any) {
   if ('musicLibraryDir' in out) {
     out.musicLibraryDir = trimToNull(out.musicLibraryDir);
   }
-
+  if ('matchRetryDays' in out) {
+    if (out.matchRetryDays === '' || out.matchRetryDays == null) {
+      out.matchRetryDays = null;
+    } else {
+      const n = parseInt(String(out.matchRetryDays), 10);
+      if (Number.isFinite(n) && n >= 0) out.matchRetryDays = n;
+      else delete out.matchRetryDays;
+    }
+  }
   [
     'lidarrAllowNoMetadata',
     'backupEnabled',

@@ -1565,6 +1565,50 @@ export default function SettingsPage() {
                     </label>
                   </div>
                 </FormRow>
+                <div className="mt-4 border-t border-gray-200 pt-4 space-y-3">
+                  <div className="text-sm font-medium text-gray-400">
+                    Matching behavior
+                  </div>
+
+                  <FormRow
+                    label="Match retry days"
+                    help="Через сколько дней разрешать повторный match после неудачи."
+                  >
+                    <input
+                      className="input"
+                      type="number"
+                      min={0}
+                      value={settings.matchRetryDays ?? ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          matchRetryDays:
+                            e.target.value === '' ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="7"
+                    />
+                  </FormRow>
+
+                  <FormRow
+                    label="Allow repush"
+                    help="Разрешить повторный push уже обработанных элементов."
+                  >
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={!!settings.allowRepush}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            allowRepush: e.target.checked,
+                          })
+                        }
+                      />
+                      Enabled
+                    </label>
+                  </FormRow>
+                </div>
               </section>
             )}
 
