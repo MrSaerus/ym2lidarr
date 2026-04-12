@@ -8,7 +8,13 @@ import { Prisma } from '../prisma';
 
 export async function runYandexPull(tokenOverride?: string, reuseRunId?: number) {
   const setting = await prisma.setting.findFirst({ where: { id: 1 } });
-  setPyproxyUrl(setting?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+  const driver = setting?.yandexDriver === 'native' ? 'native' : 'pyproxy';
+
+  if (driver === 'pyproxy') {
+    setPyproxyUrl(setting?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+  } else {
+    setPyproxyUrl('');
+  }
 
   const watermark = new Date();
   const token =
@@ -39,10 +45,10 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
   if (!run) return;
   const runId = run.id;
   const t0 = now();
-  await evStart(runId, { kind: 'yandex.pull', driver: 'pyproxy' });
+  await evStart(runId, { kind: 'yandex.pull', driver });
 
   try {
-    await dblog(runId, 'info', 'Pulling likes from Yandex (pyproxy)…', { driver: 'pyproxy' });
+    await dblog(runId, 'info', `Pulling likes from Yandex (${driver})…`, { driver });
     if (await bailIfCancelled(runId, 'pull-start')) return;
 
     const { artists, albums, tracks } = await yandexPullLikes(token);

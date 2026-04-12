@@ -4,7 +4,7 @@
 **Yandex Music**
 
 - Driver: pyproxy (по умолчанию) или native. Рекомендуется pyproxy.
-- PyProxy URL: например, http://pyproxy:8080.
+- PyProxy URL: например, http://pyproxy:8080. (**ВАЖНО**: для single версии нужно использовать localhost, для остальных нужно использовать название контейнера)
 - Yandex token: OAuth токен ЯМ.
 - Sync cron (Yandex): CRON-выражение или пусто (отключено).
 

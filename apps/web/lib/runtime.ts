@@ -6,3 +6,8 @@ export function getRuntimeEnv(key: string): string | undefined {
   const v = (process.env as Record<string, any>)[key];
   return typeof v === 'string' ? v : undefined;
 }
+
+export function isRuntimeConfigReady(): boolean {
+  if (typeof window === 'undefined') return true;
+  return typeof (window as any).NEXT_PUBLIC_API_BASE === 'string';
+}

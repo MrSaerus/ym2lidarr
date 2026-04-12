@@ -55,11 +55,12 @@ navidromeRouter.post('/plan', async (req, res, next) => {
   try {
     const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    const url   = str(setting?.navidromeUrl ?? req.body?.navidromeUrl);
-    const user  = str(setting?.navidromeUser ?? req.body?.navidromeUser);
-    const pass  = str(setting?.navidromePass ?? req.body?.navidromePass);
-    const token = str(setting?.navidromeToken ?? req.body?.navidromeToken);
-    const salt  = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
+    const rawUrl = str(req.body?.navidromeUrl ?? setting?.navidromeUrl);
+    const url    = stripTrailingSlashes(rawUrl);
+    const user   = str(req.body?.navidromeUser  ?? setting?.navidromeUser);
+    const pass   = str(req.body?.navidromePass  ?? setting?.navidromePass);
+    const token  = str(req.body?.navidromeToken ?? setting?.navidromeToken);
+    const salt   = str(req.body?.navidromeSalt  ?? setting?.navidromeSalt);
 
     if (!url || !user || (!pass && !(token && salt))) {
       res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
@@ -67,14 +68,18 @@ navidromeRouter.post('/plan', async (req, res, next) => {
     }
 
     const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
+    const policy = String(req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex').toLowerCase() === 'navidrome'
+      ? 'navidrome'
+      : 'yandex';
     const auth = chooseAuth(user, pass, token, salt);
 
     log.info('navidrome plan requested (new logic)', 'route.nav.plan.start', { target });
 
     const runId = await runNavidromePlan({
-      navUrl: stripTrailingSlashes(url),
+      navUrl: url,
       auth,
       target,
+      policy,
     });
 
     log.info('navidrome plan started', 'route.nav.plan.ok', { runId });
@@ -90,12 +95,12 @@ navidromeRouter.post('/apply', async (req, res, next) => {
   try {
     const setting = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    const rawUrl = str(setting?.navidromeUrl ?? req.body?.navidromeUrl);
+    const rawUrl = str(req.body?.navidromeUrl ?? setting?.navidromeUrl);
     const url    = stripTrailingSlashes(rawUrl);
-    const user   = str(setting?.navidromeUser ?? req.body?.navidromeUser);
-    const pass   = str(setting?.navidromePass ?? req.body?.navidromePass);
-    const token  = str(setting?.navidromeToken ?? req.body?.navidromeToken);
-    const salt   = str(setting?.navidromeSalt ?? req.body?.navidromeSalt);
+    const user   = str(req.body?.navidromeUser ?? setting?.navidromeUser);
+    const pass   = str(req.body?.navidromePass ?? setting?.navidromePass);
+    const token  = str(req.body?.navidromeToken ?? setting?.navidromeToken);
+    const salt   = str(req.body?.navidromeSalt ?? setting?.navidromeSalt);
 
     if (!url || !user || (!pass && !(token && salt))) {
       res.status(400).json({ ok: false, error: 'Navidrome is not configured: url+user and pass OR token+salt required' });
@@ -103,6 +108,9 @@ navidromeRouter.post('/apply', async (req, res, next) => {
     }
 
     const target = normalizeTarget(req.body?.target ?? setting?.navidromeSyncTarget ?? 'all');
+    const policy = String(req.body?.policy ?? setting?.likesPolicySourcePriority ?? 'yandex').toLowerCase() === 'navidrome'
+      ? 'navidrome'
+      : 'yandex';
     const dryRun = !!req.body?.dryRun;
     const auth = chooseAuth(user, pass, token, salt);
 
@@ -111,7 +119,7 @@ navidromeRouter.post('/apply', async (req, res, next) => {
     const run = await startRun('navidrome.apply', {
       phase: 'apply',
       target,
-      policy: 'n/a',
+      policy,
       star_total: 0, star_done: 0,
       unstar_total: 0, unstar_done: 0,
       dryRun,
@@ -122,13 +130,14 @@ navidromeRouter.post('/apply', async (req, res, next) => {
       return;
     }
 
-    await patchRunStats(runId, { phase: 'apply' });
+    await patchRunStats(runId, { phase: 'apply', policy });
 
     setImmediate(() => {
       runNavidromeApply({
         navUrl: url,
         auth,
         target,
+        policy,
         dryRun,
         reuseRunId: runId,
         authPass: pass || undefined,
