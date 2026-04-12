@@ -636,7 +636,7 @@ r.post('/test/qbt', async (req, res) => {
     const hasUser = typeof body.qbtUser === 'string';
     const hasPass = Object.prototype.hasOwnProperty.call(body, 'qbtPass');
 
-    const base = String(hasUrl ? body.qbtUrl : (s?.qbtUrl || '')).trim().replace(/\/+$/, '');
+    const base = stripTrailingSlashes(String(hasUrl ? body.qbtUrl : (s?.qbtUrl || '')).trim());
     const user = String(hasUser ? body.qbtUser : (s?.qbtUser || '')).trim();
     const pass = String(hasPass ? (body.qbtPass ?? '') : (s?.qbtPass || ''));
 
