@@ -632,11 +632,22 @@ r.post('/test/qbt', async (req, res) => {
     const body = req.body || {};
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    const hasUrl = typeof body.qbtUrl === 'string';
+    const savedBase = stripTrailingSlashes(String(s?.qbtUrl || '').trim());
     const hasUser = typeof body.qbtUser === 'string';
     const hasPass = Object.prototype.hasOwnProperty.call(body, 'qbtPass');
 
-    const base = stripTrailingSlashes(String(hasUrl ? body.qbtUrl : (s?.qbtUrl || '')).trim());
+    // qbtUrl из body больше не используем как sink для fetch
+    if (typeof body.qbtUrl === 'string') {
+      const requestedBase = stripTrailingSlashes(String(body.qbtUrl).trim());
+      if (requestedBase && requestedBase !== savedBase) {
+        return res.status(400).json({
+          ok: false,
+          error: 'qbtUrl override is not allowed in test endpoint. Save settings first.',
+        });
+      }
+    }
+
+    const base = savedBase;
     const user = String(hasUser ? body.qbtUser : (s?.qbtUser || '')).trim();
     const pass = String(hasPass ? (body.qbtPass ?? '') : (s?.qbtPass || ''));
 
