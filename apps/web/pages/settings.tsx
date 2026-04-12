@@ -4,6 +4,7 @@ import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import FormRow from '../components/FormRow';
 import { toastOk, toastWarn, toastErr } from '../lib/toast';
+import { isRuntimeConfigReady } from '../lib/runtime';
 
 type Settings = {
   // Yandex Music
@@ -29,10 +30,11 @@ type Settings = {
   navidromePass?: string | null;
   navidromeToken?: string | null;
   navidromeSalt?: string | null;
-  navidromeSyncTarget?: 'both' | 'artists' | 'albums' | 'tracks';
+  navidromeSyncTarget?: 'all' | 'artists' | 'albums' | 'tracks';
   likesPolicySourcePriority?: 'yandex' | 'navidrome';
   cronNavidromePush?: string | null;
   enableCronNavidromePush?: boolean | null;
+  navidromePassConfigured?: boolean;
 
   // Lidarr
   lidarrUrl?: string | null;
@@ -51,7 +53,7 @@ type Settings = {
   rootFolderPath?: string | null;
   qualityProfileId?: number | null;
   metadataProfileId?: number | null;
-  monitor?: string | null;
+  monitor?: 'all' | 'future' | 'none' | null;
 
   // Custom + enable
   cronCustomMatch?: string | null;
@@ -67,10 +69,15 @@ type Settings = {
   backupRetention?: number | null;
 
   // Notifications
-  notifyType: 'disabled' | 'telegram' | 'webhook';
+  notifyType: 'none' | 'telegram' | 'webhook';
   telegramBot?: string | null;
   telegramChatId?: string | null;
   webhookUrl?: string | null;
+  webhookSecret?: string | null;
+
+  // Matching behavior
+  allowRepush?: boolean | null;
+  matchRetryDays?: number | null;
 
   // qBittorrent
   torrentQbtCategory?: string | null;
@@ -82,6 +89,7 @@ type Settings = {
   qbtWebhookSecret?: string | null;
   torrentDownloadsDir?: string | null;
   musicLibraryDir?: string | null;
+  qbtPassConfigured?: boolean;
 
   // Torrents puller
   cronTorrentRunUnmatched?: string | null;
@@ -129,10 +137,11 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     navidromePass: s.navidromePass ?? '',
     navidromeToken: s.navidromeToken ?? '',
     navidromeSalt: s.navidromeSalt ?? '',
-    navidromeSyncTarget: (s.navidromeSyncTarget as any) || 'artists',
+    navidromeSyncTarget: (s.navidromeSyncTarget as any) || 'all',
     likesPolicySourcePriority: (s.likesPolicySourcePriority as any) || 'yandex',
     cronNavidromePush: s.cronNavidromePush ?? '15 */6 * * *',
     enableCronNavidromePush: s.enableCronNavidromePush ?? false,
+    navidromePassConfigured: !!s.navidromePassConfigured,
 
     // Lidarr
     lidarrUrl: s.lidarrUrl ?? 'http://lidarr:8686',
@@ -168,10 +177,15 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     mbMatchForce: s.mbMatchForce ?? false,
 
     // Notifications
-    notifyType: (s.notifyType as any) || 'disabled',
+    notifyType: (s.notifyType as any) || 'none',
     telegramBot: s.telegramBot ?? '',
     telegramChatId: s.telegramChatId ?? '',
     webhookUrl: s.webhookUrl ?? '',
+    webhookSecret: s.webhookSecret ?? '',
+
+    // Matching behavior
+    allowRepush: s.allowRepush ?? false,
+    matchRetryDays: s.matchRetryDays ?? null,
 
     // qBittorrent
     torrentQbtCategory: s.torrentQbtCategory ?? 'YM2LIDARR',
@@ -179,6 +193,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     qbtUrl: s.qbtUrl ?? 'http://qbittorrent:8080',
     qbtUser: s.qbtUser ?? 'admin',
     qbtPass: s.qbtPass ?? '',
+    qbtPassConfigured: !!s.qbtPassConfigured,
     qbtDeleteFiles: s.qbtDeleteFiles ?? true,
     qbtWebhookSecret: s.qbtWebhookSecret ?? '',
     torrentDownloadsDir: s.torrentDownloadsDir ?? '/home/Downloads',
@@ -208,6 +223,7 @@ type SettingsTab =
   | 'lidarr'
   | 'custom'
   | 'backup'
+  | 'notifications'
   | 'qbt'
   | 'torrents';
 
@@ -217,6 +233,8 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState('');
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<number | null>(null);
+  const [clearNavidromePass, setClearNavidromePass] = useState(false);
+  const [clearQbtPass, setClearQbtPass] = useState(false);
   const [navBusy, setNavBusy] = useState<{ plan: boolean; push: boolean }>({
     plan: false,
     push: false,
@@ -299,8 +317,18 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       const r = await api<any>('/api/settings');
-      const raw = (r && 'settings' in r) ? (r as any).settings : r;
+
+      if (typeof r === 'string') {
+        throw new Error('API returned HTML instead of JSON. Check NEXT_PUBLIC_API_BASE / proxy config.');
+      }
+
+      const raw =
+        r && typeof r === 'object' && 'settings' in r
+          ? (r as any).settings
+          : r;
       setSettings(withDefaults(raw));
+      setClearNavidromePass(false);
+      setClearQbtPass(false);
       setMsg('');
     } catch (e: any) {
       setMsg(e?.message || String(e));
@@ -310,13 +338,26 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!isRuntimeConfigReady()) {
+      const t = setTimeout(() => load(), 50);
+      return () => clearTimeout(t);
+    }
     load();
   }, [load]);
 
   async function save() {
     setMsg('Saving…');
     try {
-      await api('/api/settings', { method: 'PUT', body: settings });
+      await api('/api/settings', {
+        method: 'PUT',
+        body: {
+          ...settings,
+          clearNavidromePass,
+          clearQbtPass,
+        },
+      });
+
+      await load();
       setMsg('Saved');
       toastOk('Settings saved');
     } catch (e: any) {
@@ -331,7 +372,11 @@ export default function SettingsPage() {
     try {
       const r = await api<any>('/api/settings/test/yandex', {
         method: 'POST',
-        body: { token: settings.yandexToken || '' },
+        body: {
+          token: settings.yandexToken || '',
+          pyproxyUrl: settings.pyproxyUrl || '',
+          yandexDriver: settings.yandexDriver,
+        },
       });
       setMsg(
         r?.ok
@@ -375,11 +420,11 @@ export default function SettingsPage() {
       const r = await api<any>('/api/navidrome/test', {
         method: 'POST',
         body: {
-          url: settings.navidromeUrl || '',
-          user: settings.navidromeUser || '',
-          pass: settings.navidromePass || '',
-          token: settings.navidromeToken || '',
-          salt: settings.navidromeSalt || '',
+          navidromeUrl: settings.navidromeUrl || '',
+          navidromeUser: settings.navidromeUser || '',
+          navidromePass: settings.navidromePass || '',
+          navidromeToken: settings.navidromeToken || '',
+          navidromeSalt: settings.navidromeSalt || '',
         },
       });
       const ok = !!r?.ok;
@@ -428,9 +473,22 @@ export default function SettingsPage() {
   async function testQbt() {
     setMsg('Testing qBittorrent…');
     try {
+      const body: any = {
+        qbtUrl: settings.qbtUrl || '',
+        qbtUser: settings.qbtUser || '',
+      };
+
+      if (settings.qbtPass) {
+        body.qbtPass = settings.qbtPass;
+      } else if (clearQbtPass) {
+        body.qbtPass = '';
+      }
+
       const r = await api<any>('/api/settings/test/qbt', {
         method: 'POST',
+        body,
       });
+
       setMsg(
         r?.ok
           ? `qBittorrent OK (webApi: ${r.webApi || 'unknown'})`
@@ -445,12 +503,28 @@ export default function SettingsPage() {
     setMsg('Navidrome plan — запускаю…');
     setNavBusy((s) => ({ ...s, plan: true }));
     try {
-      await api<any>('/api/navidrome/plan', { method: 'POST' });
-      setMsg('Navidrome plan started');
-    } catch (e: any) {
+      const body = {
+        navidromeUrl: settings.navidromeUrl || '',
+        navidromeUser: settings.navidromeUser || '',
+        navidromePass: settings.navidromePass || '',
+        navidromeToken: settings.navidromeToken || '',
+        navidromeSalt: settings.navidromeSalt || '',
+        target: settings.navidromeSyncTarget || 'all',
+        policy: settings.likesPolicySourcePriority || 'yandex',
+      };
+
+      const r = await api<any>('/api/navidrome/plan', {
+        method: 'POST',
+        body,
+      });
+
       setMsg(
-        `Navidrome plan error: ${e?.message || String(e)}`,
+        r?.runId
+          ? `Navidrome plan started (runId=${r.runId})`
+          : 'Navidrome plan started',
       );
+    } catch (e: any) {
+      setMsg(`Navidrome plan error: ${e?.message || String(e)}`);
     } finally {
       setNavBusy((s) => ({ ...s, plan: false }));
     }
@@ -461,26 +535,31 @@ export default function SettingsPage() {
     setNavBusy((s) => ({ ...s, push: true }));
     try {
       const body = {
-        target: settings.navidromeSyncTarget || 'tracks',
+        navidromeUrl: settings.navidromeUrl || '',
+        navidromeUser: settings.navidromeUser || '',
+        navidromePass: settings.navidromePass || '',
+        navidromeToken: settings.navidromeToken || '',
+        navidromeSalt: settings.navidromeSalt || '',
+        target: settings.navidromeSyncTarget || 'all',
         policy: settings.likesPolicySourcePriority || 'yandex',
         dryRun: false,
       };
+
       const r = await api<any>('/api/navidrome/apply', {
         method: 'POST',
         body,
       });
+
       const started = r?.ok || !!r?.runId;
-      if (!started)
-        throw new Error(r?.error || 'apply: unknown error');
+      if (!started) throw new Error(r?.error || 'apply: unknown error');
+
       setMsg(
         r?.runId
           ? `Navidrome apply started (runId=${r.runId})`
           : 'Navidrome apply started',
       );
     } catch (e: any) {
-      setMsg(
-        `Navidrome push error: ${e?.message || String(e)}`,
-      );
+      setMsg(`Navidrome push error: ${e?.message || String(e)}`);
     } finally {
       setNavBusy((s) => ({ ...s, push: false }));
     }
@@ -597,6 +676,7 @@ export default function SettingsPage() {
     { id: 'lidarr', label: 'Lidarr' },
     { id: 'custom', label: 'Custom' },
     { id: 'backup', label: 'Backup' },
+    { id: 'notifications', label: 'Notifications' },
     { id: 'qbt', label: 'qBittorrent' },
     { id: 'torrents', label: 'Torrents puller' },
   ];
@@ -910,20 +990,47 @@ export default function SettingsPage() {
                   </FormRow>
                   <FormRow
                     label="Password"
-                    help="Используется если token/salt не заданы."
+                    help="Если пароль сохранён или введён, используется он независимо от token/salt. Token+salt используются только когда пароля нет."
                   >
-                    <input
-                      className="input"
-                      type="password"
-                      value={settings.navidromePass || ''}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          navidromePass: e.target.value,
-                        })
-                      }
-                      placeholder="••••••••"
-                    />
+                    <div className="space-y-2">
+                      {settings.navidromePassConfigured && !settings.navidromePass && !clearNavidromePass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password is configured. Leave the field empty to keep it unchanged.
+                        </div>
+                      )}
+
+                      {settings.navidromePassConfigured && !settings.navidromePass && clearNavidromePass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password will be cleared on save.
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          className="input flex-1"
+                          type="password"
+                          value={settings.navidromePass || ''}
+                          onChange={(e) => {
+                            setClearNavidromePass(false);
+                            setSettings({
+                              ...settings,
+                              navidromePass: e.target.value,
+                            });
+                          }}
+                          placeholder="••••••••"
+                        />
+
+                        {settings.navidromePassConfigured && !settings.navidromePass && (
+                          <button
+                            type="button"
+                            className="btn btn-outline whitespace-nowrap"
+                            onClick={() => setClearNavidromePass((v) => !v)}
+                          >
+                            {clearNavidromePass ? 'Keep saved password' : 'Clear saved password'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </FormRow>
                 </div>
 
@@ -968,18 +1075,17 @@ export default function SettingsPage() {
                 >
                   <select
                     className="select"
-                    value={settings.navidromeSyncTarget || 'artists'}
+                    value={settings.navidromeSyncTarget || 'all'}
                     onChange={(e) =>
                       setSettings({
                         ...settings,
-                        navidromeSyncTarget:
-                          e.target.value as any,
+                        navidromeSyncTarget: e.target.value as any,
                       })
                     }
                   >
                     <option value="artists">artists</option>
                     <option value="albums">albums</option>
-                    <option value="both">both</option>
+                    <option value="all">all</option>
                     <option value="tracks">tracks</option>
                   </select>
                 </FormRow>
@@ -1355,7 +1461,7 @@ export default function SettingsPage() {
 
                   <FormRow
                     label="Monitor policy"
-                    help="Что мониторить у артиста при добавлении. Обычно 'all'."
+                    help="Что мониторить у артиста при добавлении."
                   >
                     <select
                       className="select"
@@ -1363,11 +1469,12 @@ export default function SettingsPage() {
                       onChange={(e) =>
                         setSettings({
                           ...settings,
-                          monitor: e.target.value,
+                          monitor: e.target.value as any,
                         })
                       }
                     >
                       <option value="all">all</option>
+                      <option value="future">future</option>
                       <option value="none">none</option>
                     </select>
                   </FormRow>
@@ -1471,6 +1578,50 @@ export default function SettingsPage() {
                     </label>
                   </div>
                 </FormRow>
+                <div className="mt-4 border-t border-gray-200 pt-4 space-y-3">
+                  <div className="text-sm font-medium text-gray-400">
+                    Matching behavior
+                  </div>
+
+                  <FormRow
+                    label="Match retry days"
+                    help="Через сколько дней разрешать повторный match после неудачи."
+                  >
+                    <input
+                      className="input"
+                      type="number"
+                      min={0}
+                      value={settings.matchRetryDays ?? ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          matchRetryDays:
+                            e.target.value === '' ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="7"
+                    />
+                  </FormRow>
+
+                  <FormRow
+                    label="Allow repush"
+                    help="Разрешить повторный push уже обработанных элементов."
+                  >
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={!!settings.allowRepush}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            allowRepush: e.target.checked,
+                          })
+                        }
+                      />
+                      Enabled
+                    </label>
+                  </FormRow>
+                </div>
               </section>
             )}
 
@@ -1601,6 +1752,22 @@ export default function SettingsPage() {
                   />
                 </FormRow>
                 <FormRow
+                  label="Category"
+                  help="Категория, которую приложение будет ставить задачам в qBittorrent."
+                >
+                  <input
+                    className="input"
+                    value={settings.torrentQbtCategory || ''}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        torrentQbtCategory: e.target.value,
+                      })
+                    }
+                    placeholder="YM2LIDARR"
+                  />
+                </FormRow>
+                <FormRow
                   label="Downloaded dir"
                   help="Папка со скаченными файлами"
                 >
@@ -1646,19 +1813,49 @@ export default function SettingsPage() {
                       placeholder="admin"
                     />
                   </FormRow>
-                  <FormRow label="Password">
-                    <input
-                      className="input"
-                      type="password"
-                      value={settings.qbtPass || ''}
-                      onChange={(e) =>
-                        setSettings({
-                          ...settings,
-                          qbtPass: e.target.value,
-                        })
-                      }
-                      placeholder="••••••••"
-                    />
+                  <FormRow
+                    label="Password"
+                    help="Сохранённый пароль можно оставить как есть, очистить или заменить новым."
+                  >
+                    <div className="space-y-2">
+                      {settings.qbtPassConfigured && !settings.qbtPass && !clearQbtPass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password is configured. Leave the field empty to keep it unchanged.
+                        </div>
+                      )}
+
+                      {settings.qbtPassConfigured && !settings.qbtPass && clearQbtPass && (
+                        <div className="text-xs text-amber-300">
+                          Saved password will be cleared on save.
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <input
+                          className="input flex-1"
+                          type="password"
+                          value={settings.qbtPass || ''}
+                          onChange={(e) => {
+                            setClearQbtPass(false);
+                            setSettings({
+                              ...settings,
+                              qbtPass: e.target.value,
+                            });
+                          }}
+                          placeholder="••••••••"
+                        />
+
+                        {settings.qbtPassConfigured && !settings.qbtPass && (
+                          <button
+                            type="button"
+                            className="btn btn-outline whitespace-nowrap"
+                            onClick={() => setClearQbtPass((v) => !v)}
+                          >
+                            {clearQbtPass ? 'Keep saved password' : 'Clear saved password'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </FormRow>
                 </div>
 
@@ -1685,11 +1882,7 @@ export default function SettingsPage() {
                   label="Webhook secret"
                   help={
                     <>
-                      Секрет для{' '}
-                      <code>
-                        {settings.qbtUrl}
-                        /api/webhooks/lidarr?secret=…
-                      </code>
+                      Секрет для <code>/api/torrents/qbt/webhook?secret=…</code>
                     </>
                   }
                 >
@@ -1743,7 +1936,108 @@ export default function SettingsPage() {
                 </div>
               </section>
             )}
+            {/* Tnotifications */}
+            {activeTab === 'notifications' && (
+              <section className="panel p-4 space-y-3">
+                <div className="section-title">Notifications</div>
 
+                <FormRow
+                  label="Notify type"
+                  help="Куда отправлять уведомления о завершении/ошибках."
+                >
+                  <select
+                    className="select"
+                    value={settings.notifyType || 'none'}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        notifyType: e.target.value as any,
+                      })
+                    }
+                  >
+                    <option value="none">disabled</option>
+                    <option value="telegram">telegram</option>
+                    <option value="webhook">webhook</option>
+                  </select>
+                </FormRow>
+
+                {settings.notifyType === 'telegram' && (
+                  <>
+                    <FormRow
+                      label="Telegram bot token"
+                      help="Токен Telegram-бота."
+                    >
+                      <input
+                        className="input"
+                        value={settings.telegramBot || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            telegramBot: e.target.value,
+                          })
+                        }
+                        placeholder="123456:ABC..."
+                      />
+                    </FormRow>
+
+                    <FormRow
+                      label="Telegram chat id"
+                      help="ID чата, куда отправлять уведомления."
+                    >
+                      <input
+                        className="input"
+                        value={settings.telegramChatId || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            telegramChatId: e.target.value,
+                          })
+                        }
+                        placeholder="-1001234567890"
+                      />
+                    </FormRow>
+                  </>
+                )}
+
+                {settings.notifyType === 'webhook' && (
+                  <>
+                    <FormRow
+                      label="Webhook URL"
+                      help="Endpoint для POST-уведомлений."
+                    >
+                      <input
+                        className="input"
+                        value={settings.webhookUrl || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            webhookUrl: e.target.value,
+                          })
+                        }
+                        placeholder="https://example.com/hook"
+                      />
+                    </FormRow>
+
+                    <FormRow
+                      label="Webhook secret"
+                      help="Будет отправлен в заголовке X-Webhook-Secret."
+                    >
+                      <input
+                        className="input"
+                        value={settings.webhookSecret || ''}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            webhookSecret: e.target.value,
+                          })
+                        }
+                        placeholder="optional secret"
+                      />
+                    </FormRow>
+                  </>
+                )}
+              </section>
+            )}
             {/* Torrents puller */}
             {activeTab === 'torrents' && (
               <section className="panel p-4 space-y-3">

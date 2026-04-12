@@ -179,6 +179,7 @@ RUN pip install --no-cache-dir -r requirements.txt --require-hashes
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/apps/api/src/prisma ./apps/api/src/prisma
 COPY --from=builder /app/apps/web/out /var/www/html
 
 COPY /docker/single/docker-entrypoint.sh /

@@ -101,13 +101,16 @@ const ALLOWED_FIELDS = new Set([
   'allowRepush',
   'matchRetryDays',
 
-  // qBittorrent
+// qBittorrent
+  'torrentQbtCategory',
   'torrentJackettQbtBaseUrl',
   'qbtUrl',
   'qbtUser',
   'qbtPass',
   'qbtDeleteFiles',
   'qbtWebhookSecret',
+  'torrentDownloadsDir',
+  'musicLibraryDir',
 
   // Navidrome
   'navidromeUrl',
@@ -179,7 +182,24 @@ function pickSettings(input: any) {
     const v = String(out.mode || '').toLowerCase();
     out.mode = v === 'albums' ? 'albums' : 'artists';
   }
-
+  if ('torrentQbtCategory' in out) {
+    out.torrentQbtCategory = trimToNull(out.torrentQbtCategory);
+  }
+  if ('torrentDownloadsDir' in out) {
+    out.torrentDownloadsDir = trimToNull(out.torrentDownloadsDir);
+  }
+  if ('musicLibraryDir' in out) {
+    out.musicLibraryDir = trimToNull(out.musicLibraryDir);
+  }
+  if ('matchRetryDays' in out) {
+    if (out.matchRetryDays === '' || out.matchRetryDays == null) {
+      out.matchRetryDays = null;
+    } else {
+      const n = parseInt(String(out.matchRetryDays), 10);
+      if (Number.isFinite(n) && n >= 0) out.matchRetryDays = n;
+      else delete out.matchRetryDays;
+    }
+  }
   [
     'lidarrAllowNoMetadata',
     'backupEnabled',
@@ -189,12 +209,20 @@ function pickSettings(input: any) {
     'enableCronCustomMatch',
     'enableCronCustomPush',
     'enableCronLidarrPull',
+    'enableCronNavidromePush',
+    'enableCronTorrentRunUnmatched',
+    'enableCronTorrentQbtPoll',
+    'enableCronTorrentCopyDownloaded',
+    'torrentRunUnmatchedAutoStart',
     'allowRepush',
     'qbtDeleteFiles',
     'yandexMatchForce',
     'customMatchForce',
     'mbMatchForce',
-  ].forEach((k) => { if (k in out) out[k] = !!out[k]; });
+  ].forEach((k) => {
+    if (k in out) out[k] = !!out[k];
+  });
+
   if ('torrentJackettQbtBaseUrl' in out && typeof out.torrentJackettQbtBaseUrl === 'string') {
     out.torrentJackettQbtBaseUrl = stripTrailingSlashes(out.torrentJackettQbtBaseUrl);
   }
@@ -294,10 +322,31 @@ async function computeLidarrDefaults(s: { lidarrUrl: string; lidarrApiKey: strin
 
 async function saveSettingsHandler(req: any, res: any) {
   const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
-  try {
-    const data = pickSettings(req.body);
 
-    if ('navidromePass' in data && data.navidromePass === '') delete data.navidromePass;
+  try {
+    const raw = req.body || {};
+    const data = pickSettings(raw);
+
+    const clearNavidromePass = raw.clearNavidromePass === true;
+    const hasRawNavidromePass = Object.prototype.hasOwnProperty.call(raw, 'navidromePass');
+    const rawNavidromePass = raw.navidromePass;
+    const clearQbtPass = raw.clearQbtPass === true;
+    const hasRawQbtPass = Object.prototype.hasOwnProperty.call(raw, 'qbtPass');
+    const rawQbtPass = raw.qbtPass;
+
+    if (clearQbtPass) {
+      data.qbtPass = '';
+    } else if (hasRawQbtPass && typeof rawQbtPass === 'string' && rawQbtPass.trim() === '') {
+      delete data.qbtPass;
+    }
+
+    if (clearNavidromePass) {
+      data.navidromePass = '';
+    }
+
+    else if (hasRawNavidromePass && typeof rawNavidromePass === 'string' && rawNavidromePass.trim() === '') {
+      delete data.navidromePass;
+    }
 
     lg.info('save settings requested', 'settings.save.start', { keys: Object.keys(data) });
 
@@ -307,10 +356,15 @@ async function saveSettingsHandler(req: any, res: any) {
       update: { ...data },
     });
 
-    setPyproxyUrl(saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+    const savedDriver = saved.yandexDriver === 'native' ? 'native' : 'pyproxy';
+    setPyproxyUrl(
+      savedDriver === 'pyproxy'
+        ? (saved.pyproxyUrl || process.env.YA_PYPROXY_URL || '')
+        : ''
+    );
     await reloadJobs();
-    lg.info('settings saved and jobs reloaded', 'settings.save.done');
 
+    lg.info('settings saved and jobs reloaded', 'settings.save.done');
     res.json({ ok: true });
   } catch (e: any) {
     lg.error('save settings failed', 'settings.save.fail', { err: e?.message });
@@ -330,7 +384,9 @@ r.get('/', async (req, res) => {
       return res.json({});
     }
     const safe = { ...s };
+    safe.qbtPassConfigured = !!safe.qbtPass;
     safe.qbtPass = '';
+    safe.navidromePassConfigured = !!safe.navidromePass;
     safe.navidromePass = '';
     lg.debug('settings loaded', 'settings.get.done', { hasSettings: true });
     return res.json(safe);
@@ -411,23 +467,38 @@ r.post('/test/yandex', testYandexLimiter, async (req, res) => {
 
   try {
     const body = req.body || {};
-    let token: string | undefined =
-      typeof body.token === 'string' && body.token.trim() ? body.token.trim() : undefined;
+    const s = await prisma.setting.findFirst({ where: { id: 1 } });
 
-    if (!token) {
-      const s = await prisma.setting.findFirst({ where: { id: 1 } });
-      token = s?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN || undefined;
-    }
+    const token =
+      (typeof body.token === 'string' && body.token.trim()) ? body.token.trim() :
+        s?.yandexToken || process.env.YANDEX_MUSIC_TOKEN || process.env.YM_TOKEN || undefined;
+
     if (!token) {
       lg.warn('no yandex token provided', 'settings.test.yandex.notoken');
       return res.status(400).json({ ok: false, error: 'No Yandex token' });
     }
 
-    const s = await prisma.setting.findFirst({ where: { id: 1 } });
-    setPyproxyUrl(s?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+    const driver =
+      body?.yandexDriver === 'native' ? 'native' :
+        body?.yandexDriver === 'pyproxy' ? 'pyproxy' :
+          (s?.yandexDriver === 'native' ? 'native' : 'pyproxy');
+
+    const pyproxyUrl =
+      (typeof body.pyproxyUrl === 'string' && body.pyproxyUrl.trim())
+        ? stripTrailingSlashes(body.pyproxyUrl)
+        : (s?.pyproxyUrl || process.env.YA_PYPROXY_URL || '');
+
+    if (driver === 'pyproxy') {
+      setPyproxyUrl(pyproxyUrl);
+    } else {
+      setPyproxyUrl('');
+    }
 
     const resp = await yandexVerifyToken(token);
-    lg.info('test yandex completed', 'settings.test.yandex.done', { ok: (resp as any)?.ok ?? true });
+    lg.info('test yandex completed', 'settings.test.yandex.done', {
+      ok: (resp as any)?.ok ?? true,
+      driver,
+    });
     res.json(resp);
   } catch (e: any) {
     lg.error('test yandex failed', 'settings.test.yandex.fail', { err: e?.message });
@@ -485,15 +556,17 @@ r.post('/test/lidarr', async (req, res) => {
       const data = { ...raw };
       if (raw.qbtPass === '') delete (data as any).qbtPass;
 
+      const updateData = { ...data, ...needUpdate };
+
       if (Object.keys(needUpdate).length > 0) {
         await prisma.setting.upsert({
           where: { id: 1 },
-          create: { id: 1, ...data },
-          update: { ...data },
+          create: { id: 1, ...updateData },
+          update: { ...updateData },
         });
+
         applied = needUpdate;
         appliedCount = Object.keys(needUpdate).length;
-
         await reloadJobs();
       }
     }
@@ -556,21 +629,36 @@ r.post('/test/qbt', async (req, res) => {
   lg.info('test qbt requested', 'settings.test.qbt.start');
 
   try {
+    const body = req.body || {};
     const s = await prisma.setting.findFirst({ where: { id: 1 } });
-    const base = (s?.qbtUrl || '').replace(/\/+$/, '');
-    const user = s?.qbtUser || '';
-    const pass = s?.qbtPass || '';
+
+    const savedBase = stripTrailingSlashes(String(s?.qbtUrl || '').trim());
+    const hasUser = typeof body.qbtUser === 'string';
+    const hasPass = Object.prototype.hasOwnProperty.call(body, 'qbtPass');
+
+    // qbtUrl из body больше не используем как sink для fetch
+    if (typeof body.qbtUrl === 'string') {
+      const requestedBase = stripTrailingSlashes(String(body.qbtUrl).trim());
+      if (requestedBase && requestedBase !== savedBase) {
+        return res.status(400).json({
+          ok: false,
+          error: 'qbtUrl override is not allowed in test endpoint. Save settings first.',
+        });
+      }
+    }
+
+    const base = savedBase;
+    const user = String(hasUser ? body.qbtUser : (s?.qbtUser || '')).trim();
+    const pass = String(hasPass ? (body.qbtPass ?? '') : (s?.qbtPass || ''));
 
     if (!base) {
       lg.warn('qbt url is not set', 'settings.test.qbt.nourl');
       return res.status(400).json({ ok: false, error: 'qbtUrl is not set' });
     }
 
-    // webapiVersion (без auth)
     const r1 = await fetch(`${base}/api/v2/app/webapiVersion`);
     const webApi = await r1.text();
 
-    // login (auth)
     const r2 = await fetch(`${base}/api/v2/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -578,7 +666,12 @@ r.post('/test/qbt', async (req, res) => {
     });
     const okLogin = r2.ok;
 
-    lg.info('test qbt completed', 'settings.test.qbt.done', { ok: r1.ok && okLogin, webApi, loginOk: okLogin });
+    lg.info('test qbt completed', 'settings.test.qbt.done', {
+      ok: r1.ok && okLogin,
+      webApi,
+      loginOk: okLogin,
+    });
+
     res.json({ ok: r1.ok && okLogin, webApi, login: okLogin });
   } catch (e: any) {
     lg.error('test qbt failed', 'settings.test.qbt.fail', { err: e?.message });

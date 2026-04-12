@@ -178,9 +178,9 @@ export default function OverviewPage() {
   const [now, setNow] = useState<number>(Date.now());
   const [schedulerBusy, setSchedulerBusy] = useState<Record<string, boolean>>({});
   const [schedulerRunIdByKey, setSchedulerRunIdByKey] = useState<Record<string, number | null>>({});
-  const [apiBase, setApiBase] = useState<string>('/api'); // SSR fallback (если есть прокси)
+  const [apiBase, setApiBase] = useState<string>('');
   useEffect(() => {
-    const b = (getApiBase() || '/api').replace(/\/+$/, '');
+    const b = (getApiBase() || '').replace(/\/+$/, '');
     setApiBase(b);
   }, []);
   const loadScheduler = useCallback(async () => {

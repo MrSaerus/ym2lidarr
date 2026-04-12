@@ -24,7 +24,7 @@
     "morgan": "^1.10.1",
     "node-cron": "^3.0.3",
     "streamroller": "^3.1.5",
-    "undici": "^7.24.6",
+    "undici": "^8.0.2",
     "undici-proxy": "^0.3.0",
     "zod": "^4.1.5"
   },

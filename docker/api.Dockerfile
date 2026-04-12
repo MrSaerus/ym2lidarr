@@ -40,7 +40,8 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
-COPY --from=builder /app/apps/api/src/generated ./apps/api/dist/generated
+COPY --from=builder /app/apps/api/src/prisma ./apps/api/src/prisma
+COPY --from=builder /app/apps/api/src/generated ./apps/api/src/generated
 
 VOLUME ["/app/data"]
 
