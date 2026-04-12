@@ -4,6 +4,7 @@ import Nav from '../components/Nav';
 import { api } from '../lib/api';
 import FormRow from '../components/FormRow';
 import { toastOk, toastWarn, toastErr } from '../lib/toast';
+import { isRuntimeConfigReady } from '../lib/runtime';
 
 type Settings = {
   // Yandex Music
@@ -316,7 +317,15 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       const r = await api<any>('/api/settings');
-      const raw = (r && 'settings' in r) ? (r as any).settings : r;
+
+      if (typeof r === 'string') {
+        throw new Error('API returned HTML instead of JSON. Check NEXT_PUBLIC_API_BASE / proxy config.');
+      }
+
+      const raw =
+        r && typeof r === 'object' && 'settings' in r
+          ? (r as any).settings
+          : r;
       setSettings(withDefaults(raw));
       setClearNavidromePass(false);
       setClearQbtPass(false);
@@ -329,6 +338,10 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!isRuntimeConfigReady()) {
+      const t = setTimeout(() => load(), 50);
+      return () => clearTimeout(t);
+    }
     load();
   }, [load]);
 
