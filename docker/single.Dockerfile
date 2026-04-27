@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM node:25-bookworm-slim@sha256:435f3537a088a01fd208bb629a4b69c28d85deb9a60af8a710cafc3befd6e3be AS builder
+FROM node:25-bookworm-slim@sha256:e49fd70491eb042270f974167c874d6245287263ffc16422fcf93b3c150409d8 AS builder
 WORKDIR /app
 
 ARG NEXT_PUBLIC_API_BASE
@@ -36,7 +36,7 @@ RUN npm --workspace apps/web run build
 
 
 # ---------- runner ----------
-FROM node:25-bookworm-slim@sha256:71be4054ee7a5fc8d0b2a66060705988b09a782025d70ba9318b29ff1a931fc0 AS api
+FROM node:25-bookworm-slim@sha256:e49fd70491eb042270f974167c874d6245287263ffc16422fcf93b3c150409d8 AS api
 WORKDIR /app
 
 ARG VERSION=dev
