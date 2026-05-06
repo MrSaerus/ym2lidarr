@@ -1,6 +1,7 @@
 // apps/api/src/routes/yandex.ts
 import { Router } from 'express';
 import { prisma } from '../prisma';
+import { TorrentStatus } from '../prisma';
 
 // НОВОЕ: взаимная блокировка ручных запусков с кроном
 import { ensureNotBusyOrThrow } from '../scheduler';
@@ -35,6 +36,23 @@ function parsePaging(req: any) {
     const sortBy = String(req.query.sortBy ?? 'name'); // artists: 'name' | 'id'; albums: 'title' | 'artist' | 'id'
     const sortDir = String(req.query.sortDir ?? 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
     return { page, pageSize, q, sortBy, sortDir };
+}
+
+type MbFilter = 'all' | 'missing' | 'with';
+type DownloadedFilter = 'all' | 'downloaded' | 'notDownloaded';
+
+function parseMbFilter(req: any): MbFilter {
+    const mb = String(req.query?.mb ?? '').trim();
+    if (mb === 'all' || mb === 'missing' || mb === 'with') return mb;
+
+    // Backward compatibility with old frontend URL: ?missingMb=1
+    return String(req.query?.missingMb ?? '0') === '1' ? 'missing' : 'all';
+}
+
+function parseDownloadedFilter(req: any): DownloadedFilter {
+    const v = String(req.query?.downloaded ?? 'all').trim();
+    if (v === 'downloaded' || v === 'notDownloaded') return v;
+    return 'all';
 }
 
 const Y_PREFIXES = ['yandex.'];
@@ -114,8 +132,8 @@ r.post('/push', async (req, res) => {
 r.get('/artists', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
-    const missingMb = String(req.query?.missingMb ?? '0') === '1';
-    lg.info('yandex artists requested', 'yandex.artists.start', { page, pageSize, q, sortBy, sortDir, missingMb });
+    const mbFilter = parseMbFilter(req);
+    lg.info('yandex artists requested', 'yandex.artists.start', { page, pageSize, q, sortBy, sortDir, mbFilter });
 
     try {
         let rows = await prisma.yandexArtist.findMany({
@@ -133,8 +151,10 @@ r.get('/artists', async (req, res) => {
                 String(a.ymId).includes(q),
             );
         }
-        if (missingMb) {
+        if (mbFilter === 'missing') {
             rows = rows.filter((a) => !a.mbid || a.mbid.trim() === '');
+        } else if (mbFilter === 'with') {
+            rows = rows.filter((a) => !!a.mbid && a.mbid.trim() !== '');
         }
         rows.sort((a, b) => {
             if (sortBy === 'id') {
@@ -180,8 +200,8 @@ r.get('/artists', async (req, res) => {
 r.get('/albums', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
-    const missingMb = String(req.query?.missingMb ?? '0') === '1';
-    lg.info('yandex albums requested', 'yandex.albums.start', { page, pageSize, q, sortBy, sortDir, missingMb });
+    const mbFilter = parseMbFilter(req);
+    lg.info('yandex albums requested', 'yandex.albums.start', { page, pageSize, q, sortBy, sortDir, mbFilter });
 
     try {
         let rows = await prisma.yandexAlbum.findMany({
@@ -200,9 +220,11 @@ r.get('/albums', async (req, res) => {
                 String(r.ymId).includes(q),
             );
         }
-       if (missingMb) {
-           rows = rows.filter((r) => !r.rgMbid || r.rgMbid.trim() === '');
-       }
+        if (mbFilter === 'missing') {
+            rows = rows.filter((r) => !r.rgMbid || r.rgMbid.trim() === '');
+        } else if (mbFilter === 'with') {
+            rows = rows.filter((r) => !!r.rgMbid && r.rgMbid.trim() !== '');
+        }
         rows.sort((a, b) => {
             let cmp = 0;
             if (sortBy === 'id') {
@@ -250,6 +272,163 @@ r.get('/albums', async (req, res) => {
         res.json({ page, pageSize, total, items });
     } catch (e: any) {
         lg.error('yandex albums failed', 'yandex.albums.fail', { err: e?.message });
+        res.status(500).json({ message: e?.message || String(e) });
+    }
+});
+
+
+// ===== TRACKS =====
+r.get('/tracks', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+    const { page, pageSize, q, sortBy, sortDir } = parsePaging(req);
+    const mbFilter = parseMbFilter(req);
+    const downloadedFilter = parseDownloadedFilter(req);
+    lg.info('yandex tracks requested', 'yandex.tracks.start', {
+        page, pageSize, q, sortBy, sortDir, mbFilter, downloadedFilter,
+    });
+
+    try {
+        let rows = await prisma.yandexTrack.findMany({
+            where: { present: true },
+            select: {
+                ymId: true,
+                title: true,
+                artist: true,
+                album: true,
+                durationSec: true,
+                ymAlbumId: true,
+                recMbid: true,
+                rgMbid: true,
+            },
+        });
+        rows = rows.filter((r) => /^\d+$/.test(String(r.ymId || '')));
+
+        if (q) {
+            const ql = q.toLowerCase();
+            rows = rows.filter(
+              (r) =>
+                (r.title || '').toLowerCase().includes(ql) ||
+                (r.artist || '').toLowerCase().includes(ql) ||
+                (r.album || '').toLowerCase().includes(ql) ||
+                (r.recMbid ? r.recMbid.toLowerCase().includes(ql) : false) ||
+                (r.rgMbid ? r.rgMbid.toLowerCase().includes(ql) : false) ||
+                String(r.ymId).includes(q),
+            );
+        }
+
+        if (mbFilter === 'missing') {
+            rows = rows.filter((r) =>
+              (!r.recMbid || r.recMbid.trim() === '') &&
+              (!r.rgMbid || r.rgMbid.trim() === ''),
+            );
+        } else if (mbFilter === 'with') {
+            rows = rows.filter((r) =>
+              (!!r.recMbid && r.recMbid.trim() !== '') ||
+              (!!r.rgMbid && r.rgMbid.trim() !== ''),
+            );
+        }
+
+        const completedStatuses = [
+            TorrentStatus.downloaded,
+            TorrentStatus.moving,
+            TorrentStatus.moved,
+        ];
+
+        const downloadedTasks = await prisma.torrentTask.findMany({
+            where: {
+                status: { in: completedStatuses },
+                OR: [
+                    // Direct track task: mark only that exact track.
+                    { ymTrackId: { not: null } },
+                    // Album task: mark every cached Yandex track from that album.
+                    // Important: track tasks may also have ymAlbumId, so keep this scoped to album tasks.
+                    { scope: 'album', ymAlbumId: { not: null } },
+                ],
+            },
+            select: { scope: true, ymTrackId: true, ymAlbumId: true },
+        });
+
+        const downloadedTrackIds = new Set<string>();
+        const downloadedAlbumIds = new Set<string>();
+
+        for (const t of downloadedTasks) {
+            const ymTrackId = String(t.ymTrackId || '').trim();
+            const ymAlbumId = String(t.ymAlbumId || '').trim();
+            if (ymTrackId) downloadedTrackIds.add(ymTrackId);
+            if (t.scope === 'album' && ymAlbumId) downloadedAlbumIds.add(ymAlbumId);
+        }
+
+        const isDownloaded = (r: { ymId: string | number; ymAlbumId?: string | null }) => {
+            const ymTrackId = String(r.ymId || '').trim();
+            const ymAlbumId = String(r.ymAlbumId || '').trim();
+            return downloadedTrackIds.has(ymTrackId) || (!!ymAlbumId && downloadedAlbumIds.has(ymAlbumId));
+        };
+
+        if (downloadedFilter === 'downloaded') {
+            rows = rows.filter((r) => isDownloaded(r));
+        } else if (downloadedFilter === 'notDownloaded') {
+            rows = rows.filter((r) => !isDownloaded(r));
+        }
+
+        rows.sort((a, b) => {
+            let cmp = 0;
+            if (sortBy === 'id') {
+                cmp = (parseInt(String(a.ymId), 10) || 0) - (parseInt(String(b.ymId), 10) || 0);
+            } else if (sortBy === 'artist') {
+                cmp = (a.artist || '').localeCompare(b.artist || '', ['ru', 'en'], {
+                    sensitivity: 'base',
+                    numeric: true,
+                });
+                if (cmp === 0) cmp = (a.title || '').localeCompare(b.title || '', ['ru', 'en'], { sensitivity: 'base', numeric: true });
+            } else if (sortBy === 'album') {
+                cmp = (a.album || '').localeCompare(b.album || '', ['ru', 'en'], {
+                    sensitivity: 'base',
+                    numeric: true,
+                });
+                if (cmp === 0) cmp = (a.title || '').localeCompare(b.title || '', ['ru', 'en'], { sensitivity: 'base', numeric: true });
+            } else {
+                cmp = (a.title || '').localeCompare(b.title || '', ['ru', 'en'], {
+                    sensitivity: 'base',
+                    numeric: true,
+                });
+            }
+            return sortDir === 'asc' ? cmp : -cmp;
+        });
+
+        const total = rows.length;
+        const start = (page - 1) * pageSize;
+        const end = Math.min(start + pageSize, total);
+        const pageItems = rows.slice(start, end);
+
+        const items = pageItems.map((x) => {
+            const idNum = Number(x.ymId) || 0;
+            const ymAlbumId = x.ymAlbumId && /^\d+$/.test(String(x.ymAlbumId)) ? String(x.ymAlbumId) : null;
+            const recMbid = x.recMbid || null;
+            const rgMbid = x.rgMbid || null;
+            return {
+                id: idNum,
+                yandexTrackId: idNum,
+                title: x.title,
+                artistName: x.artist || '',
+                albumTitle: x.album || '',
+                durationSec: x.durationSec ?? null,
+                yandexAlbumId: ymAlbumId ? Number(ymAlbumId) : null,
+                yandexUrl: ymAlbumId
+                  ? `https://music.yandex.ru/album/${ymAlbumId}/track/${idNum}`
+                  : `https://music.yandex.ru/track/${idNum}`,
+                recMbid,
+                rgMbid,
+                mbUrl: recMbid
+                  ? `https://musicbrainz.org/recording/${recMbid}`
+                  : (rgMbid ? `https://musicbrainz.org/release-group/${rgMbid}` : undefined),
+                downloaded: isDownloaded(x),
+            };
+        });
+
+        lg.debug('yandex tracks prepared', 'yandex.tracks.done', { total, returned: items.length });
+        res.json({ page, pageSize, total, items });
+    } catch (e: any) {
+        lg.error('yandex tracks failed', 'yandex.tracks.fail', { err: e?.message });
         res.status(500).json({ message: e?.message || String(e) });
     }
 });
