@@ -319,6 +319,43 @@ export default function SettingsPage() {
 
 
 
+
+  async function forceSearchYandexLinkedArtists() {
+    setMsg('Запускаю ArtistSearch в Lidarr только для артистов, связанных из Yandex…');
+    setRunning(true);
+    try {
+      const r = await api<StartRunRes>('/api/lidarr/search-yandex-artists', {
+        method: 'POST',
+        body: { mode: 'normal' },
+      });
+      const started = r?.started ?? r?.ok ?? false;
+      const runId = r?.runId ?? null;
+
+      if (started) {
+        setLastRun(runId);
+        setMsg(
+          runId
+            ? `Стартовал ArtistSearch для Lidarr-артистов из Yandex-связей (runId=${runId}).`
+            : 'Стартовал ArtistSearch для Lidarr-артистов из Yandex-связей.',
+        );
+      } else {
+        setMsg(
+          `Не удалось стартовать: ${r?.error || 'неизвестная ошибка'}`,
+        );
+      }
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      setMsg(
+        /409|Busy/i.test(m)
+          ? 'Сейчас занято: уже идёт другой запуск.'
+          : `Ошибка: ${m}`,
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
+
   async function forceSearchYandexMbNotDownloaded() {
     setMsg('Запускаю поиск по торрентам для Yandex-альбомов с MusicBrainz без скачивания…');
     setRunning(true);
@@ -1338,6 +1375,16 @@ export default function SettingsPage() {
                     {running
                       ? 'Запускаю…'
                       : 'Искать по торрентам — все артисты'}
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded bg-sky-700 text-white disabled:opacity-50"
+                    onClick={forceSearchYandexLinkedArtists}
+                    disabled={running}
+                    title="Запустить ArtistSearch только для Lidarr-артистов, которые связаны с Yandex через artist MBID или album release-group MBID"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — Lidarr из Yandex'}
                   </button>
                   <button
                     className="px-4 py-2 rounded bg-amber-600 text-white disabled:opacity-50"
