@@ -281,3 +281,25 @@
         .form-row-label { padding-top: 0; }
     }
 }
+
+/* External service link chips */
+.link-chip--lidarr {
+  background: rgba(53, 169, 229, 0.16);
+  border-color: rgba(53, 169, 229, 0.45);
+  color: #8bd7ff;
+}
+
+.link-chip--lidarr:hover {
+  background: rgba(53, 169, 229, 0.28);
+}
+
+
+.link-chip--navidrome {
+  background: rgba(79, 70, 229, 0.16);
+  border-color: rgba(79, 70, 229, 0.45);
+  color: #c4b5fd;
+}
+
+.link-chip--navidrome:hover {
+  background: rgba(79, 70, 229, 0.28);
+}

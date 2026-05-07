@@ -152,6 +152,10 @@ const SCHEDULER_JOB_ENDPOINTS: Record<string, { paths: string[]; body?: any }> =
     paths: ['/api/navidrome/apply'],
     body: { dryRun: false },
   },
+  navidromeBackfill: {
+    paths: ['/api/navidrome/backfill-links'],
+    body: { dryRun: false, limit: 1000 },
+  },
 
 };
 

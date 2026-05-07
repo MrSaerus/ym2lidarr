@@ -3,6 +3,11 @@ jest.mock('../src/prisma', () => require('../__mocks__/prisma'));
 jest.mock('../src/scheduler', () => require('../__mocks__/src/scheduler'));
 jest.mock('../src/workers.ts', () => require('../__mocks__/src/workers.ts'));
 
+jest.mock('../src/services/mb', () => ({
+  assertMusicBrainzContactEmailConfigured: jest.fn(async () => 'test@example.com'),
+  mbGetArtistAlbumsCount: jest.fn(async () => 0),
+}));
+
 import { prisma } from '../__mocks__/prisma';
 import customArtistsRouter from '../src/routes/custom-artists';
 import { makeApp, withServer } from '../__mocks__/helpers';

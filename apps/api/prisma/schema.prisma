@@ -117,9 +117,9 @@ model YandexLikeSync {
 
   trackRef YandexTrack? @relation(fields: [ymId], references: [ymId])
 
+  @@unique([kind, ymId])
   @@index([status, lastTriedAt])
   @@index([kind, ymId])
-  @@unique([kind, ymId])
 }
 
 // /* ===================== Ingest: Lidarr ===================== */
@@ -388,11 +388,11 @@ model TorrentRelease {
   updatedAt  DateTime        @updatedAt
   status     String          @default("new")
 
+  @@unique([taskId, magnet])
   @@index([taskId])
   @@index([indexerId])
   @@index([seeders, score])
   @@index([pubDate])
-  @@unique([taskId, magnet])
 }
 
 // /* ===================== Settings ===================== */
@@ -414,6 +414,8 @@ model Setting {
 
   yandexDriver String  @default("pyproxy")
   pyproxyUrl   String?
+
+  musicBrainzEmail String?
 
   yandexToken  String?
   lidarrUrl    String?
@@ -455,13 +457,14 @@ model Setting {
   enableCronTorrentQbtPoll        Boolean @default(false)
   enableCronTorrentCopyDownloaded Boolean @default(false)
 
-  enableCronYandexPull    Boolean @default(false)
-  enableCronYandexMatch   Boolean @default(false)
-  enableCronYandexPush    Boolean @default(false)
-  enableCronCustomMatch   Boolean @default(false)
-  enableCronCustomPush    Boolean @default(false)
-  enableCronLidarrPull    Boolean @default(false)
-  enableCronNavidromePush Boolean @default(false)
+  enableCronYandexPull        Boolean @default(false)
+  enableCronYandexMatch       Boolean @default(false)
+  enableCronYandexPush        Boolean @default(false)
+  enableCronCustomMatch       Boolean @default(false)
+  enableCronCustomPush        Boolean @default(false)
+  enableCronLidarrPull        Boolean @default(false)
+  enableCronNavidromePush     Boolean @default(false)
+  enableCronNavidromeBackfill Boolean @default(false)
 
   torrentRunUnmatchedLimit            Int? // limit
   torrentRunUnmatchedMinSeeders       Int? // minSeeders
@@ -493,6 +496,7 @@ model Setting {
   navidromeSyncTarget       String?
   likesPolicySourcePriority String?
   cronNavidromePush         String?
+  cronNavidromeBackfill     String? @default("30 */6 * * *")
 
   yandexMatchForce Boolean? @default(false)
   customMatchForce Boolean? @default(false)

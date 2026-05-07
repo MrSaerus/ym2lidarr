@@ -37,6 +37,12 @@ export interface RunUnmatchedOptions {
   dryRun?: boolean;
   autoStart?: boolean;
   parallelSearches?: number;
+  /**
+   * unmatched: legacy flow for Yandex albums/artists without MusicBrainz mapping.
+   * yandexMbNotDownloaded: Yandex albums with MusicBrainz release-group mapping,
+   * but without confirmed local/library download.
+   */
+  mode?: 'unmatched' | 'yandexMbNotDownloaded';
 }
 
 async function ensureNotCancelled(runId?: number, phase?: string) {
@@ -138,32 +144,42 @@ async function ensureJackettAvailable(runId?: number, phase?: string) {
   throw new JackettUnavailableError(msg);
 }
 
-export async function runUnmatchedInternal(
-  opts: RunUnmatchedOptions,
-  runId?: number,
-) {
-  const {
-    limit = 50,
-    minSeeders = 1,
-    limitPerIndexer = 20,
-    dryRun = false,
-    autoStart = true,
-    parallelSearches = 10,
-  } = opts;
+type YandexAlbumTorrentCandidate = {
+  id: number;
+  ymId: string;
+  title: string;
+  artist: string | null;
+  year: number | null;
+};
 
-  const lg = log.child({ ctx: { runId, limit, minSeeders, parallelSearches } });
+type TorrentCandidateSelection = {
+  albums: YandexAlbumTorrentCandidate[];
+  artists: Array<{ ymId: string; name: string }>;
+  meta: Record<string, number | string>;
+};
 
-  if (runId) {
-    await dblog(
-      runId,
-      'info',
-      `Run-unmatched start (limit=${limit}, minSeeders=${minSeeders}, dryRun=${dryRun})`,
-    );
-  }
+function chunked<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
+function hasText(v: unknown): boolean {
+  return String(v ?? '').trim().length > 0;
+}
+
+function normMbid(v: unknown): string {
+  return String(v || '')
+    .replace(/^mbid:/i, '')
+    .trim()
+    .toLowerCase();
+}
+
+async function selectLegacyUnmatchedCandidates(limit: number): Promise<TorrentCandidateSelection> {
+  // Old behavior: search Yandex items that have not been matched to MusicBrainz yet.
   const oneDayAgo = new Date(Date.now() - 60 * 1000);
 
-  const yAlbums = await prisma.yandexAlbum.findMany({
+  const albums = await prisma.yandexAlbum.findMany({
     where: {
       present: true,
       rgMbid: null,
@@ -177,7 +193,7 @@ export async function runUnmatchedInternal(
     orderBy: { updatedAt: 'desc' },
   });
 
-  const yArtists = await prisma.yandexArtist.findMany({
+  const artists = await prisma.yandexArtist.findMany({
     where: {
       present: true,
       OR: [{ mbid: null }, { mbAlbumsCount: 0 }],
@@ -187,9 +203,201 @@ export async function runUnmatchedInternal(
     orderBy: { updatedAt: 'desc' },
   });
 
+  return {
+    albums,
+    artists,
+    meta: {
+      selectionMode: 'unmatched',
+      selectedAlbums: albums.length,
+      selectedArtists: artists.length,
+    },
+  };
+}
+
+async function selectYandexMbNotDownloadedCandidates(limit: number): Promise<TorrentCandidateSelection> {
+  // New behavior: search Yandex albums that already have MusicBrainz release-group MBID,
+  // but are not confirmed as downloaded by Lidarr, Navidrome or an active/final YM2LIDARR task.
+  const scanLimit = Math.max(limit * 5, limit);
+
+  const rows = await prisma.yandexAlbum.findMany({
+    where: {
+      present: true,
+      rgMbid: { not: null },
+    },
+    select: {
+      id: true,
+      ymId: true,
+      title: true,
+      artist: true,
+      year: true,
+      rgMbid: true,
+      ndId: true,
+      torrentState: true,
+    },
+    take: scanLimit,
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  const ymAlbumIds = Array.from(new Set(rows.map((x) => String(x.ymId || '').trim()).filter(Boolean)));
+  const rgMbids = Array.from(new Set(rows.map((x) => normMbid(x.rgMbid)).filter(Boolean)));
+
+  const lidarrDownloadedMbids = new Set<string>();
+  for (const mbidsChunk of chunked(rgMbids, 500)) {
+    const lidarrAlbums = await prisma.lidarrAlbum.findMany({
+      where: {
+        removed: false,
+        mbid: { in: mbidsChunk },
+        sizeOnDisk: { gt: 0 },
+      },
+      select: { mbid: true },
+    });
+
+    for (const a of lidarrAlbums) {
+      const mbid = normMbid(a.mbid);
+      if (mbid) lidarrDownloadedMbids.add(mbid);
+    }
+  }
+
+  const serviceActiveOrFinalAlbumIds = new Set<string>();
+  for (const idsChunk of chunked(ymAlbumIds, 500)) {
+    const tasks = await prisma.torrentTask.findMany({
+      where: {
+        scope: 'album',
+        ymAlbumId: { in: idsChunk },
+        status: {
+          in: [
+            TorrentStatus.added,
+            TorrentStatus.downloading,
+            TorrentStatus.downloaded,
+            TorrentStatus.moving,
+            TorrentStatus.moved,
+          ],
+        },
+      },
+      select: { ymAlbumId: true },
+    });
+
+    for (const t of tasks) {
+      const ymAlbumId = String(t.ymAlbumId || '').trim();
+      if (ymAlbumId) serviceActiveOrFinalAlbumIds.add(ymAlbumId);
+    }
+  }
+
+  const navidromeSyncedAlbumIds = new Set<string>();
+  for (const idsChunk of chunked(ymAlbumIds, 500)) {
+    const tracks = await prisma.yandexTrack.findMany({
+      where: {
+        ymAlbumId: { in: idsChunk },
+        likeSyncs: {
+          some: {
+            kind: 'track',
+            OR: [
+              { status: 'synced' },
+              { starConfirmedAt: { not: null } },
+            ],
+          },
+        },
+      },
+      select: { ymAlbumId: true },
+      distinct: ['ymAlbumId'],
+    });
+
+    for (const t of tracks) {
+      const ymAlbumId = String(t.ymAlbumId || '').trim();
+      if (ymAlbumId) navidromeSyncedAlbumIds.add(ymAlbumId);
+    }
+  }
+
+  let skippedLidarr = 0;
+  let skippedNavidrome = 0;
+  let skippedService = 0;
+
+  const albums: YandexAlbumTorrentCandidate[] = [];
+
+  for (const a of rows) {
+    const ymAlbumId = String(a.ymId || '').trim();
+    const mbid = normMbid(a.rgMbid);
+
+    if (!ymAlbumId || !mbid) continue;
+
+    if (lidarrDownloadedMbids.has(mbid)) {
+      skippedLidarr += 1;
+      continue;
+    }
+
+    if (hasText(a.ndId) || navidromeSyncedAlbumIds.has(ymAlbumId)) {
+      skippedNavidrome += 1;
+      continue;
+    }
+
+    if (a.torrentState === AlbumTorrentState.downloaded || serviceActiveOrFinalAlbumIds.has(ymAlbumId)) {
+      skippedService += 1;
+      continue;
+    }
+
+    albums.push({
+      id: a.id,
+      ymId: a.ymId,
+      title: a.title,
+      artist: a.artist ?? null,
+      year: a.year ?? null,
+    });
+
+    if (albums.length >= limit) break;
+  }
+
+  return {
+    albums,
+    artists: [],
+    meta: {
+      selectionMode: 'yandexMbNotDownloaded',
+      scannedAlbums: rows.length,
+      matchedMbAlbums: rows.length,
+      selectedAlbums: albums.length,
+      selectedArtists: 0,
+      skippedLidarrDownloaded: skippedLidarr,
+      skippedNavidromeDownloaded: skippedNavidrome,
+      skippedServiceDownloaded: skippedService,
+    },
+  };
+}
+
+export async function runUnmatchedInternal(
+  opts: RunUnmatchedOptions,
+  runId?: number,
+) {
+  const {
+    limit = 50,
+    minSeeders = 1,
+    limitPerIndexer = 20,
+    dryRun = false,
+    autoStart = true,
+    parallelSearches = 10,
+  } = opts;
+
+  const mode = opts.mode || 'unmatched';
+
+  const lg = log.child({ ctx: { runId, limit, minSeeders, parallelSearches, mode } });
+
+  if (runId) {
+    await dblog(
+      runId,
+      'info',
+      `Run-unmatched start (mode=${mode}, limit=${limit}, minSeeders=${minSeeders}, dryRun=${dryRun})`,
+    );
+  }
+
+  const selection = mode === 'yandexMbNotDownloaded'
+    ? await selectYandexMbNotDownloadedCandidates(limit)
+    : await selectLegacyUnmatchedCandidates(limit);
+
+  const yAlbums = selection.albums;
+  const yArtists = selection.artists;
+
   await ensureNotCancelled(runId, 'torrents:unmatched.select');
 
   const stats = {
+    ...selection.meta,
     t_total: yAlbums.length,
     t_done: 0,
     albumsTotal: yAlbums.length,
@@ -252,7 +460,7 @@ export async function runUnmatchedInternal(
       );
     }
 
-    return { ok: true as const, dryRun: true as const, stats, plan };
+    return { ok: true as const, dryRun: true as const, mode, stats, plan };
   }
 
   await ensureJackettAvailable(runId, 'torrents:unmatched.start');

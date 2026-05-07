@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runUnmatchedInternal } from '../services/torrentsPipeline';
+import { startRun, endRun } from '../log';
 
 const r = Router();
 const log = createLogger({ scope: 'route.pipeline' });
@@ -113,6 +114,7 @@ r.post('/run-unmatched', async (req, res) => {
         dryRun,
         autoStart,
         parallelSearches,
+        mode: 'unmatched',
       },
       undefined,
     );
@@ -129,4 +131,103 @@ r.post('/run-unmatched', async (req, res) => {
     res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
+
+/**
+ * POST /api/pipeline/run-yandex-mb-not-downloaded
+ * Async torrent search for Yandex albums that have MusicBrainz release-group MBID,
+ * but are not downloaded in Lidarr/Navidrome/YM2LIDARR.
+ */
+r.post('/run-yandex-mb-not-downloaded', async (req, res) => {
+  const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
+  try {
+    const body = req.body || {};
+
+    const limit = Number.isFinite(+body.limit)
+      ? Math.max(1, Math.min(10000, +body.limit))
+      : 5000;
+
+    const minSeeders = Number.isFinite(+body.minSeeders)
+      ? Math.max(0, +body.minSeeders)
+      : 1;
+
+    const limitPerIndexer = Number.isFinite(+body.limitPerIndexer)
+      ? Math.max(1, Math.min(200, +body.limitPerIndexer))
+      : 20;
+
+    const dryRun = body.dryRun === true || body.dryRun === 'true';
+    const autoStart = body.autoStart !== false && body.autoStart !== 'false';
+
+    const parallelSearches = Number.isFinite(+body.parallelSearches)
+      ? Math.max(1, Math.min(50, +body.parallelSearches))
+      : 10;
+
+    const run = await startRun('torrents.yandex.mb_not_downloaded', {
+      phase: 'start',
+      mode: 'yandexMbNotDownloaded',
+      limit,
+      minSeeders,
+      limitPerIndexer,
+      dryRun,
+      autoStart,
+      parallelSearches,
+      t_total: 0,
+      t_done: 0,
+      albumsTotal: 0,
+      selectedAlbums: 0,
+      addedToQbt: 0,
+    });
+
+    lg.info('yandex mb not-downloaded torrent search started', 'pipeline.yandex.mbnotdl.start', {
+      runId: run.id,
+      limit,
+      minSeeders,
+      limitPerIndexer,
+      dryRun,
+      autoStart,
+      parallelSearches,
+    });
+
+    runUnmatchedInternal(
+      {
+        limit,
+        minSeeders,
+        limitPerIndexer,
+        dryRun,
+        autoStart,
+        parallelSearches,
+        mode: 'yandexMbNotDownloaded',
+      },
+      run.id,
+    )
+      .then(async (result) => {
+        await endRun(
+          run.id,
+          'ok',
+          `Yandex MB not-downloaded torrent search complete (albums=${result?.stats?.albumsTotal ?? 0}, qbt=${result?.stats?.addedToQbt ?? 0})`,
+          result?.stats || {},
+        );
+      })
+      .catch(async (e: any) => {
+        const msg = e?.message || String(e);
+        lg.error('yandex mb not-downloaded torrent search worker failed', 'pipeline.yandex.mbnotdl.worker.fail', {
+          runId: run.id,
+          err: msg,
+        });
+        try {
+          await endRun(run.id, 'error', msg, { error: msg });
+        } catch {
+          // ignore secondary run-finalization failure
+        }
+      });
+
+    res.json({ ok: true, started: true, runId: run.id, limit, dryRun, autoStart });
+  } catch (e: any) {
+    lg.error('yandex mb not-downloaded torrent search failed to start', 'pipeline.yandex.mbnotdl.fail', {
+      err: e?.message || String(e),
+    });
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
 export default r;

@@ -7,7 +7,7 @@ import type { Prisma } from '../prisma';
 
 import { ensureNotBusyOrThrow } from '../scheduler';
 import { createLogger } from '../lib/logger';
-import { mbGetArtistAlbumsCount } from '../services/mb';
+import { assertMusicBrainzContactEmailConfigured, mbGetArtistAlbumsCount } from '../services/mb';
 
 const r = Router();
 const log = createLogger({ scope: 'route.custom-artists' });
@@ -311,6 +311,7 @@ r.post('/:id/match', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     try {
         await ensureNotBusyOrThrow(['custom.'], ['customMatch', 'customPush'] as any);
+        await assertMusicBrainzContactEmailConfigured();
 
         const id = parseInt(String(req.params.id), 10);
         if (!id) {
@@ -329,7 +330,7 @@ r.post('/:id/match', async (req, res) => {
 
         res.json({ ok: true, started: true, runId: run.id });
     } catch (e: any) {
-        const status = e?.status === 409 ? 409 : 500;
+        const status = e?.status === 400 ? 400 : (e?.status === 409 ? 409 : 500);
         if (status === 409) {
             lg.warn('custom match rejected: busy', 'custom.artists.match.busy', { err: e?.message });
         } else {
@@ -344,6 +345,7 @@ r.post('/match-all', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     try {
         await ensureNotBusyOrThrow(['custom.'], ['customMatch', 'customPush'] as any);
+        await assertMusicBrainzContactEmailConfigured();
 
         const force =
           req.body?.force === true || String(req.query.force || '').toLowerCase() === 'true';
@@ -357,7 +359,7 @@ r.post('/match-all', async (req, res) => {
 
         res.json({ ok: true, started: true, runId: run.id });
     } catch (e: any) {
-        const status = e?.status === 409 ? 409 : 500;
+        const status = e?.status === 400 ? 400 : (e?.status === 409 ? 409 : 500);
         if (status === 409) {
             lg.warn('custom match-all rejected: busy', 'custom.artists.matchAll.busy', { err: e?.message });
         } else {

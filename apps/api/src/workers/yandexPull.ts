@@ -205,6 +205,12 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
         : null;
       const ymAlbumIdStr = String(tr?.albumId ?? '').trim();
       const ymArtistIdStr = String(tr?.artistId ?? '').trim();
+      const recMbid = typeof (tr as any).recMbid === 'string' && (tr as any).recMbid.trim()
+        ? (tr as any).recMbid.trim()
+        : null;
+      const rgMbid = typeof (tr as any).rgMbid === 'string' && (tr as any).rgMbid.trim()
+        ? (tr as any).rgMbid.trim()
+        : null;
       const liked = !!(tr as any).liked;
 
       const dur = Number.isFinite(durationSec as any) ? (durationSec as number) : 0;
@@ -235,6 +241,8 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
             yGoneAt: null,
             ymAlbumId: /^\d+$/.test(ymAlbumIdStr) ? ymAlbumIdStr : null,
             ymArtistId: /^\d+$/.test(ymArtistIdStr) ? ymArtistIdStr : null,
+            recMbid,
+            rgMbid,
             genresJson: trackGenresJson,
           },
           update: {
@@ -249,6 +257,8 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
             yGoneAt: null,
             ymAlbumId: /^\d+$/.test(ymAlbumIdStr) ? ymAlbumIdStr : null,
             ymArtistId: /^\d+$/.test(ymArtistIdStr) ? ymArtistIdStr : null,
+            recMbid,
+            rgMbid,
             ...(trackGenresJson ? { genresJson: trackGenresJson } : {}),
           },
         });
@@ -289,6 +299,8 @@ export async function runYandexPull(tokenOverride?: string, reuseRunId?: number)
               present: true,
               ...( /^\d+$/.test(ymAlbumIdStr) ? { ymAlbumId: ymAlbumIdStr } : {} ),
               ...( /^\d+$/.test(ymArtistIdStr) ? { ymArtistId: ymArtistIdStr } : {} ),
+              recMbid,
+              rgMbid,
               ...(trackGenresJson ? { genresJson: trackGenresJson } : {}),
             };
 

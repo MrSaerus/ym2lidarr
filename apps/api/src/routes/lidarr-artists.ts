@@ -257,4 +257,34 @@ r.post('/search-artists', async (req, res) => {
     }
 });
 
+
+r.post('/search-yandex-artists', async (req, res) => {
+    const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
+
+    try {
+        await ensureNotBusyOrThrow(['lidarr.'], ['lidarrPull'] as any);
+
+        const modeRaw = String(req.body?.mode || 'normal').toLowerCase();
+        const mode: LidarrSearchMode = (['fast', 'normal', 'slow'].includes(modeRaw) ? modeRaw : 'normal') as LidarrSearchMode;
+        const delayMs = SEARCH_DELAYS[mode];
+
+        lg.info('search yandex-linked artists requested', 'lidarr.search.yandex.artists.start', { mode, delayMs });
+
+        const run = await startRun('lidarr.search.yandex.artists', {
+            phase: 'search', scope: 'yandexLinked', total: 0, done: 0, ok: 0, failed: 0,
+        });
+
+        runLidarrSearchArtists(run.id, { delayMs, scope: 'yandexLinked' }).catch((e) => {
+            lg.error('worker crash (search yandex-linked artists)', 'lidarr.search.yandex.artists.worker.fail', { runId: run.id, err: e?.message });
+        });
+
+        res.json({ started: true, runId: run.id, mode, delayMs, scope: 'yandexLinked' });
+    } catch (e: any) {
+        const status = e?.status === 409 ? 409 : 500;
+        if (status === 409) lg.warn('search yandex-linked artists rejected: busy', 'lidarr.search.yandex.artists.busy', { err: e?.message });
+        else lg.error('search yandex-linked artists failed', 'lidarr.search.yandex.artists.fail', { err: e?.message });
+        res.status(status).json({ ok: false, error: e?.message || String(e) });
+    }
+});
+
 export default r;

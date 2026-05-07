@@ -16,6 +16,7 @@ import {
   runLidarrPullEx,
 } from '../workers';
 import { createLogger } from '../lib/logger';
+import { assertMusicBrainzContactEmailConfigured } from '../services/mb';
 
 const r = Router();
 const log = createLogger({ scope: 'route.sync' });
@@ -58,7 +59,7 @@ r.post('/yandex/pull', async (req, res) => {
     lg.error('yandex pull request failed', 'sync.yandex.pull.fail', {
       err: e?.message,
     });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -133,7 +134,7 @@ r.post('/lidarr/pull', async (req, res) => {
     lg.error('lidarr pull request failed', 'sync.lidarr.pull.fail', {
       err: e?.message,
     });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -146,6 +147,8 @@ r.post('/match', async (req, res) => {
   try {
     const targetRaw = (req.body?.target || req.query.target) as any; // 'artists' | 'albums' | 'both'
     const target = ['artists', 'albums', 'both'].includes(targetRaw) ? targetRaw : 'both';
+    await assertMusicBrainzContactEmailConfigured();
+
     const settings = await prisma.setting.findFirst();
     const force = !!(settings as any)?.mbMatchForce;
 
@@ -169,7 +172,7 @@ r.post('/match', async (req, res) => {
     res.json({ started: true, runId: run.id, force, target });
   } catch (e: any) {
     lg.error('mb match request failed', 'sync.match.fail', { err: e?.message });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -204,7 +207,7 @@ r.post('/lidarr', async (req, res) => {
     lg.error('lidarr push request failed', 'sync.lidarr.push.fail', {
       err: e?.message,
     });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -258,7 +261,7 @@ r.post('/runs/:id/stop', async (req, res) => {
     lg.error('stop run failed', 'sync.runs.stop.fail', {
       err: e?.message,
     });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -270,6 +273,8 @@ r.post('/custom/match', async (req, res) => {
 
   try {
     // force только из БД
+    await assertMusicBrainzContactEmailConfigured();
+
     const settings = await prisma.setting.findFirst();
     const force = !!(settings as any)?.customMatchForce;
 
@@ -283,7 +288,7 @@ r.post('/custom/match', async (req, res) => {
     res.json({ started: true, runId: run.id, force });
   } catch (e: any) {
     lg.error('custom match-all request failed', 'sync.custom.matchAll.fail', { err: e?.message });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -321,7 +326,7 @@ r.post('/custom/push', async (req, res) => {
       'sync.custom.pushAll.fail',
       { err: e?.message },
     );
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -356,7 +361,7 @@ r.post('/yandex/pull-all', async (req, res) => {
       'sync.yandex.pullAll.fail',
       { err: e?.message },
     );
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -369,6 +374,8 @@ r.post('/yandex/match', async (req, res) => {
   try {
     const target = (req.body?.target || req.query.target || 'both') as 'artists'|'albums'|'both';
     const kind   = target==='artists'?'yandex.match.artists':target==='albums'?'yandex.match.albums':'yandex.match.all';
+
+    await assertMusicBrainzContactEmailConfigured();
 
     const settings = await prisma.setting.findFirst();
     const force = !!(settings as any)?.yandexMatchForce;
@@ -392,7 +399,7 @@ r.post('/yandex/match', async (req, res) => {
     res.json({ started: true, runId: run.id, target, force });
   } catch (e: any) {
     lg.error('yandex match request failed', 'sync.yandex.match.fail', { err: e?.message });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -439,7 +446,7 @@ r.post('/yandex/push', async (req, res) => {
     lg.error('yandex push request failed', 'sync.yandex.push.fail', {
       err: e?.message,
     });
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -475,7 +482,7 @@ r.get('/runs', async (req, res) => {
       'sync.runs.list.fail',
       { err: e?.message },
     );
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -502,7 +509,7 @@ r.get('/runs/:id', async (req, res) => {
       'sync.runs.item.fail',
       { err: e?.message },
     );
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -542,7 +549,7 @@ r.get('/runs/:id/logs', async (req, res) => {
       'sync.runs.logs.fail',
       { err: e?.message },
     );
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    res.status(e?.status === 400 ? 400 : 500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 

@@ -11,6 +11,7 @@ type Settings = {
   yandexDriver: 'pyproxy' | 'native';
   yandexToken?: string | null;
   pyproxyUrl?: string | null;
+  musicBrainzEmail?: string | null;
 
   // Расписания + таргеты + enable
   cronYandexPull?: string | null;
@@ -34,6 +35,8 @@ type Settings = {
   likesPolicySourcePriority?: 'yandex' | 'navidrome';
   cronNavidromePush?: string | null;
   enableCronNavidromePush?: boolean | null;
+  cronNavidromeBackfill?: string | null;
+  enableCronNavidromeBackfill?: boolean | null;
   navidromePassConfigured?: boolean;
 
   // Lidarr
@@ -118,6 +121,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     yandexDriver: (s.yandexDriver as any) || 'pyproxy',
     yandexToken: s.yandexToken ?? '',
     pyproxyUrl: s.pyproxyUrl ?? 'http://pyproxy:8080',
+    musicBrainzEmail: s.musicBrainzEmail ?? '',
 
     cronYandexPull: s.cronYandexPull ?? '0 */6 * * *',
     enableCronYandexPull: s.enableCronYandexPull ?? false,
@@ -141,6 +145,8 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     likesPolicySourcePriority: (s.likesPolicySourcePriority as any) || 'yandex',
     cronNavidromePush: s.cronNavidromePush ?? '15 */6 * * *',
     enableCronNavidromePush: s.enableCronNavidromePush ?? false,
+    cronNavidromeBackfill: s.cronNavidromeBackfill ?? '30 */6 * * *',
+    enableCronNavidromeBackfill: s.enableCronNavidromeBackfill ?? false,
     navidromePassConfigured: !!s.navidromePassConfigured,
 
     // Lidarr
@@ -313,6 +319,86 @@ export default function SettingsPage() {
     }
   }
 
+
+
+
+  async function forceSearchYandexLinkedArtists() {
+    setMsg('Запускаю ArtistSearch в Lidarr только для артистов, связанных из Yandex…');
+    setRunning(true);
+    try {
+      const r = await api<StartRunRes>('/api/lidarr/search-yandex-artists', {
+        method: 'POST',
+        body: { mode: 'normal' },
+      });
+      const started = r?.started ?? r?.ok ?? false;
+      const runId = r?.runId ?? null;
+
+      if (started) {
+        setLastRun(runId);
+        setMsg(
+          runId
+            ? `Стартовал ArtistSearch для Lidarr-артистов из Yandex-связей (runId=${runId}).`
+            : 'Стартовал ArtistSearch для Lidarr-артистов из Yandex-связей.',
+        );
+      } else {
+        setMsg(
+          `Не удалось стартовать: ${r?.error || 'неизвестная ошибка'}`,
+        );
+      }
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      setMsg(
+        /409|Busy/i.test(m)
+          ? 'Сейчас занято: уже идёт другой запуск.'
+          : `Ошибка: ${m}`,
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
+
+  async function forceSearchYandexMbNotDownloaded() {
+    setMsg('Запускаю поиск по торрентам для Yandex-альбомов с MusicBrainz без скачивания…');
+    setRunning(true);
+    try {
+      const r = await api<StartRunRes>('/api/pipeline/run-yandex-mb-not-downloaded', {
+        method: 'POST',
+        body: {
+          limit: 5000,
+          minSeeders: 1,
+          limitPerIndexer: 20,
+          autoStart: true,
+          parallelSearches: 10,
+        },
+      });
+      const started = r?.started ?? r?.ok ?? false;
+      const runId = r?.runId ?? null;
+
+      if (started) {
+        setLastRun(runId);
+        setMsg(
+          runId
+            ? `Стартовал поиск Yandex-альбомов с MusicBrainz без скачивания (runId=${runId}).`
+            : 'Стартовал поиск Yandex-альбомов с MusicBrainz без скачивания.',
+        );
+      } else {
+        setMsg(
+          `Не удалось стартовать: ${r?.error || 'неизвестная ошибка'}`,
+        );
+      }
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      setMsg(
+        /409|Busy/i.test(m)
+          ? 'Сейчас занято: уже идёт другой запуск.'
+          : `Ошибка: ${m}`,
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -346,6 +432,14 @@ export default function SettingsPage() {
   }, [load]);
 
   async function save() {
+    const mbEmail = String(settings.musicBrainzEmail || '').trim();
+    if (!mbEmail) {
+      const m = 'MusicBrainz contact email is required. Open Settings → Yandex and set your personal email.';
+      setMsg(m);
+      toastErr(m);
+      return;
+    }
+
     setMsg('Saving…');
     try {
       await api('/api/settings', {
@@ -766,6 +860,32 @@ export default function SettingsPage() {
                 </FormRow>
 
                 <FormRow
+                  label="MusicBrainz contact email"
+                  help="Обязательный личный email для User-Agent/From при запросах к MusicBrainz.org. Если поле пустое, MusicBrainz-задачи будут падать до HTTP-запроса."
+                >
+                  <div className="space-y-1">
+                    <input
+                      className="input"
+                      type="email"
+                      required
+                      value={settings.musicBrainzEmail || ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          musicBrainzEmail: e.target.value,
+                        })
+                      }
+                      placeholder="you@example.com"
+                    />
+                    {!String(settings.musicBrainzEmail || '').trim() ? (
+                      <div className="text-xs text-amber-300">
+                        Без этого email работа с MusicBrainz.org заблокирована.
+                      </div>
+                    ) : null}
+                  </div>
+                </FormRow>
+
+                <FormRow
                   label="Yandex pull cron"
                   help={
                     <>
@@ -1152,6 +1272,43 @@ export default function SettingsPage() {
                     </label>
                   </div>
                 </FormRow>
+
+                <FormRow
+                  label="Navidrome backfill links cron"
+                  help={
+                    <>
+                      Заполняет <code>YandexAlbum.ndId</code> и <code>YandexArtist.ndId</code>
+                      {' '}по уже синхронизированным трекам. <code>30 */6 * * *</code> — каждые 6 часов.
+                    </>
+                  }
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <input
+                      className="input md:col-span-2"
+                      value={settings.cronNavidromeBackfill || ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          cronNavidromeBackfill: e.target.value,
+                        })
+                      }
+                      placeholder="30 */6 * * *"
+                    />
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={!!settings.enableCronNavidromeBackfill}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            enableCronNavidromeBackfill: e.target.checked,
+                          })
+                        }
+                      />
+                      Enabled
+                    </label>
+                  </div>
+                </FormRow>
                 <div className="toolbar">
                   <button
                     className="btn btn-outline"
@@ -1244,16 +1401,38 @@ export default function SettingsPage() {
             {activeTab === 'lidarr' && (
               <section className="panel p-4 space-y-3">
                 <div className="section-title">Lidarr</div>
-                <button
-                  className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
-                  onClick={forceSearchAllArtists}
-                  disabled={running}
-                  title="Запустить ArtistSearch для всех артистов в Lidarr"
-                >
-                  {running
-                    ? 'Запускаю…'
-                    : 'Искать по торрентам — все артисты'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
+                    onClick={forceSearchAllArtists}
+                    disabled={running}
+                    title="Запустить ArtistSearch для всех артистов в Lidarr"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — все артисты'}
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded bg-sky-700 text-white disabled:opacity-50"
+                    onClick={forceSearchYandexLinkedArtists}
+                    disabled={running}
+                    title="Запустить ArtistSearch только для Lidarr-артистов, которые связаны с Yandex через artist MBID или album release-group MBID"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — Lidarr из Yandex'}
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded bg-amber-600 text-white disabled:opacity-50"
+                    onClick={forceSearchYandexMbNotDownloaded}
+                    disabled={running}
+                    title="Найти Yandex-альбомы с MusicBrainz, которых ещё нет в локальной библиотеке, и запустить поиск через Jackett/qBittorrent"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — Yandex MB без скачивания'}
+                  </button>
+                </div>
 
                 <div className="mt-3 text-sm text-gray-700">
                   {msg}

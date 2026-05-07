@@ -6,6 +6,7 @@ export { runLidarrPush } from './workers/lidarrPush.js';
 export { runLidarrSearchArtists } from './workers/lidarrSearchArtists.js';
 export { runNavidromePlan } from './workers/runNavidromePlan.js';
 export { runNavidromeApply } from './workers/runNavidromeApply.js';
+export { runNavidromeBackfill } from './workers/runNavidromeBackfill.js';
 
 export {
   runCustomMatchAll,
