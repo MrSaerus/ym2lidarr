@@ -316,16 +316,70 @@ r.get('/tracks', async (req, res) => {
             );
         }
 
+        const normMbid = (v: unknown) =>
+          String(v || '')
+            .replace(/^mbid:/i, '')
+            .trim()
+            .toLowerCase();
+
+        const chunked = <T,>(xs: T[], size = 500): T[][] => {
+            const out: T[][] = [];
+            for (let i = 0; i < xs.length; i += size) {
+                out.push(xs.slice(i, i + size));
+            }
+            return out;
+        };
+
+        /*
+         * yandexTrack.rgMbid может быть пустым.
+         * Поэтому для MusicBrainz/Lidarr статуса трека используем album fallback:
+         * yandexTrack.ymAlbumId -> yandexAlbum.rgMbid.
+         */
+        const trackYmAlbumIds = Array.from(new Set(
+            rows
+              .map((r) => String(r.ymAlbumId || '').trim())
+              .filter(Boolean),
+        ));
+
+        const yandexAlbumRgByYmAlbumId = new Map<string, string>();
+
+        if (trackYmAlbumIds.length) {
+            for (const idsChunk of chunked(trackYmAlbumIds, 500)) {
+                const yandexAlbumsForTracks = await prisma.yandexAlbum.findMany({
+                    where: {
+                        present: true,
+                        ymId: { in: idsChunk },
+                        rgMbid: { not: null },
+                    },
+                    select: {
+                        ymId: true,
+                        rgMbid: true,
+                    },
+                });
+
+                for (const a of yandexAlbumsForTracks) {
+                    const ymAlbumId = String(a.ymId || '').trim();
+                    const rgMbid = normMbid(a.rgMbid);
+                    if (ymAlbumId && rgMbid) {
+                        yandexAlbumRgByYmAlbumId.set(ymAlbumId, rgMbid);
+                    }
+                }
+            }
+        }
+
+        const getAlbumRgMbid = (r: { ymAlbumId?: string | null }) => {
+            const ymAlbumId = String(r.ymAlbumId || '').trim();
+            return ymAlbumId ? yandexAlbumRgByYmAlbumId.get(ymAlbumId) || '' : '';
+        };
+
+        const rowHasMusicBrainz = (r: { recMbid?: string | null; rgMbid?: string | null; ymAlbumId?: string | null }) => {
+            return !!normMbid(r.recMbid) || !!normMbid(r.rgMbid) || !!getAlbumRgMbid(r);
+        };
+
         if (mbFilter === 'missing') {
-            rows = rows.filter((r) =>
-              (!r.recMbid || r.recMbid.trim() === '') &&
-              (!r.rgMbid || r.rgMbid.trim() === ''),
-            );
+            rows = rows.filter((r) => !rowHasMusicBrainz(r));
         } else if (mbFilter === 'with') {
-            rows = rows.filter((r) =>
-              (!!r.recMbid && r.recMbid.trim() !== '') ||
-              (!!r.rgMbid && r.rgMbid.trim() !== ''),
-            );
+            rows = rows.filter((r) => rowHasMusicBrainz(r));
         }
 
         const completedStatuses = [
@@ -338,10 +392,7 @@ r.get('/tracks', async (req, res) => {
             where: {
                 status: { in: completedStatuses },
                 OR: [
-                    // Direct track task: mark only that exact track.
                     { ymTrackId: { not: null } },
-                    // Album task: mark every cached Yandex track from that album.
-                    // Important: track tasks may also have ymAlbumId, so keep this scoped to album tasks.
                     { scope: 'album', ymAlbumId: { not: null } },
                 ],
             },
@@ -358,11 +409,95 @@ r.get('/tracks', async (req, res) => {
             if (t.scope === 'album' && ymAlbumId) downloadedAlbumIds.add(ymAlbumId);
         }
 
-        const isDownloaded = (r: { ymId: string | number; ymAlbumId?: string | null }) => {
+        const candidateRgMbids = Array.from(new Set([
+            ...rows
+              .map((r) => normMbid(r.rgMbid))
+              .filter(Boolean),
+            ...rows
+              .map((r) => getAlbumRgMbid(r))
+              .filter(Boolean),
+        ]));
+
+        const lidarrDownloadedAlbumMbids = new Set<string>();
+
+        if (candidateRgMbids.length) {
+            for (const mbidsChunk of chunked(candidateRgMbids, 500)) {
+                const lidarrDownloadedAlbums = await prisma.lidarrAlbum.findMany({
+                    where: {
+                        removed: false,
+                        mbid: { in: mbidsChunk },
+                        sizeOnDisk: { gt: 0 },
+                    },
+                    select: { mbid: true },
+                });
+
+                for (const a of lidarrDownloadedAlbums) {
+                    const mbid = normMbid(a.mbid);
+                    if (mbid) lidarrDownloadedAlbumMbids.add(mbid);
+                }
+            }
+        }
+
+        const isDownloadedByService = (r: { ymId: string | number; ymAlbumId?: string | null }) => {
             const ymTrackId = String(r.ymId || '').trim();
             const ymAlbumId = String(r.ymAlbumId || '').trim();
             return downloadedTrackIds.has(ymTrackId) || (!!ymAlbumId && downloadedAlbumIds.has(ymAlbumId));
         };
+
+        const navidromeDownloadedTrackIds = new Set<string>();
+
+        const trackYmIds = Array.from(new Set(
+            rows
+              .map((r) => String(r.ymId || '').trim())
+              .filter(Boolean),
+        ));
+
+        if (trackYmIds.length) {
+            for (const idsChunk of chunked(trackYmIds, 500)) {
+                const likeRows = await prisma.yandexLikeSync.findMany({
+                    where: {
+                        kind: 'track',
+                        ymId: { in: idsChunk },
+                        OR: [
+                            { status: 'synced' },
+                            { starConfirmedAt: { not: null } },
+                        ],
+                    },
+                    select: {
+                        ymId: true,
+                    },
+                });
+
+                for (const row of likeRows) {
+                    const ymId = String(row.ymId || '').trim();
+                    if (ymId) navidromeDownloadedTrackIds.add(ymId);
+                }
+            }
+        }
+
+        const isDownloadedByNavidrome = (r: { ymId: string | number }) => {
+            const ymTrackId = String(r.ymId || '').trim();
+            return !!ymTrackId && navidromeDownloadedTrackIds.has(ymTrackId);
+        };
+
+        const isDownloadedByLidarr = (r: { ymAlbumId?: string | null; rgMbid?: string | null }) => {
+            const trackRgMbid = normMbid(r.rgMbid);
+            if (trackRgMbid && lidarrDownloadedAlbumMbids.has(trackRgMbid)) return true;
+
+            const albumRgMbid = getAlbumRgMbid(r);
+            return !!albumRgMbid && lidarrDownloadedAlbumMbids.has(albumRgMbid);
+        };
+
+        const getDownloadedSources = (r: { ymId: string | number; ymAlbumId?: string | null; rgMbid?: string | null }) => {
+            const sources: Array<'ym2lidarr' | 'lidarr' | 'navidrome'> = [];
+            if (isDownloadedByService(r)) sources.push('ym2lidarr');
+            if (isDownloadedByLidarr(r)) sources.push('lidarr');
+            if (isDownloadedByNavidrome(r)) sources.push('navidrome');
+            return sources;
+        };
+
+        const isDownloaded = (r: { ymId: string | number; ymAlbumId?: string | null; rgMbid?: string | null }) =>
+          getDownloadedSources(r).length > 0;
 
         if (downloadedFilter === 'downloaded') {
             rows = rows.filter((r) => isDownloaded(r));
@@ -404,7 +539,10 @@ r.get('/tracks', async (req, res) => {
             const idNum = Number(x.ymId) || 0;
             const ymAlbumId = x.ymAlbumId && /^\d+$/.test(String(x.ymAlbumId)) ? String(x.ymAlbumId) : null;
             const recMbid = x.recMbid || null;
-            const rgMbid = x.rgMbid || null;
+
+            // Prefer track.rgMbid, but fall back to album.rgMbid.
+            const rgMbid = x.rgMbid || getAlbumRgMbid(x) || null;
+
             return {
                 id: idNum,
                 yandexTrackId: idNum,
@@ -422,6 +560,9 @@ r.get('/tracks', async (req, res) => {
                   ? `https://musicbrainz.org/recording/${recMbid}`
                   : (rgMbid ? `https://musicbrainz.org/release-group/${rgMbid}` : undefined),
                 downloaded: isDownloaded(x),
+                downloadedBy: getDownloadedSources(x),
+                lidarrDownloaded: isDownloadedByLidarr(x),
+                navidromeDownloaded: isDownloadedByNavidrome(x),
             };
         });
 

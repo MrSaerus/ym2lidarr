@@ -43,6 +43,8 @@ type YTrackRow = {
   rgMbid?: string | null;
   mbUrl?: string | null;
   downloaded?: boolean;
+  downloadedBy?: Array<'ym2lidarr' | 'lidarr' | 'navidrome'>;
+  lidarrDownloaded?: boolean;
 };
 
 type ApiResp<T> = { page: number; pageSize: number; total: number; items: T[] };
@@ -92,10 +94,25 @@ function LinksFixedRow({
   );
 }
 
-function DownloadedCheck({ downloaded }: { downloaded?: boolean }) {
+function DownloadedCheck({
+  downloaded,
+  downloadedBy,
+}: {
+  downloaded?: boolean;
+  downloadedBy?: Array<'ym2lidarr' | 'lidarr' | 'navidrome'>;
+}) {
   if (!downloaded) return <span className="text-gray-600">—</span>;
+
+  const labels: Record<'ym2lidarr' | 'lidarr' | 'navidrome', string> = {
+    ym2lidarr: 'YM2LIDARR',
+    lidarr: 'Lidarr',
+    navidrome: 'Navidrome',
+  };
+  const label = (downloadedBy || []).map((x) => labels[x]).filter(Boolean).join(' + ');
+  const title = label ? `Downloaded by ${label}` : 'Downloaded';
+
   return (
-    <span className="inline-flex items-center justify-end text-emerald-400 font-bold" title="Downloaded" aria-label="Downloaded">
+    <span className="inline-flex items-center justify-end text-emerald-400 font-bold" title={title} aria-label={title}>
           ✓
       </span>
   );
@@ -595,7 +612,7 @@ export default function YandexPage() {
                       <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={r.mbUrl || undefined} />
                     </Td>
                     <Td className="text-right pr-4">
-                      <DownloadedCheck downloaded={r.downloaded} />
+                      <DownloadedCheck downloaded={r.downloaded} downloadedBy={r.downloadedBy} />
                     </Td>
                   </tr>
                 );
