@@ -317,6 +317,49 @@ export default function SettingsPage() {
     }
   }
 
+
+
+  async function forceSearchYandexMbNotDownloaded() {
+    setMsg('Запускаю поиск по торрентам для Yandex-альбомов с MusicBrainz без скачивания…');
+    setRunning(true);
+    try {
+      const r = await api<StartRunRes>('/api/pipeline/run-yandex-mb-not-downloaded', {
+        method: 'POST',
+        body: {
+          limit: 5000,
+          minSeeders: 1,
+          limitPerIndexer: 20,
+          autoStart: true,
+          parallelSearches: 10,
+        },
+      });
+      const started = r?.started ?? r?.ok ?? false;
+      const runId = r?.runId ?? null;
+
+      if (started) {
+        setLastRun(runId);
+        setMsg(
+          runId
+            ? `Стартовал поиск Yandex-альбомов с MusicBrainz без скачивания (runId=${runId}).`
+            : 'Стартовал поиск Yandex-альбомов с MusicBrainz без скачивания.',
+        );
+      } else {
+        setMsg(
+          `Не удалось стартовать: ${r?.error || 'неизвестная ошибка'}`,
+        );
+      }
+    } catch (e: any) {
+      const m = String(e?.message || e);
+      setMsg(
+        /409|Busy/i.test(m)
+          ? 'Сейчас занято: уже идёт другой запуск.'
+          : `Ошибка: ${m}`,
+      );
+    } finally {
+      setRunning(false);
+    }
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -1285,16 +1328,28 @@ export default function SettingsPage() {
             {activeTab === 'lidarr' && (
               <section className="panel p-4 space-y-3">
                 <div className="section-title">Lidarr</div>
-                <button
-                  className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
-                  onClick={forceSearchAllArtists}
-                  disabled={running}
-                  title="Запустить ArtistSearch для всех артистов в Lidarr"
-                >
-                  {running
-                    ? 'Запускаю…'
-                    : 'Искать по торрентам — все артисты'}
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-50"
+                    onClick={forceSearchAllArtists}
+                    disabled={running}
+                    title="Запустить ArtistSearch для всех артистов в Lidarr"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — все артисты'}
+                  </button>
+                  <button
+                    className="px-4 py-2 rounded bg-amber-600 text-white disabled:opacity-50"
+                    onClick={forceSearchYandexMbNotDownloaded}
+                    disabled={running}
+                    title="Найти Yandex-альбомы с MusicBrainz, которых ещё нет в локальной библиотеке, и запустить поиск через Jackett/qBittorrent"
+                  >
+                    {running
+                      ? 'Запускаю…'
+                      : 'Искать по торрентам — Yandex MB без скачивания'}
+                  </button>
+                </div>
 
                 <div className="mt-3 text-sm text-gray-700">
                   {msg}
