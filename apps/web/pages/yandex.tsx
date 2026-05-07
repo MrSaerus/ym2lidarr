@@ -28,6 +28,10 @@ type YAlbumRow = {
   rgMbid?: string | null;
   rgUrl?: string | null;
   year?: number | null;
+  downloaded?: boolean;
+  downloadedBy?: Array<'ym2lidarr' | 'lidarr' | 'navidrome'>;
+  lidarrDownloaded?: boolean;
+  navidromeDownloaded?: boolean;
 };
 
 type YTrackRow = {
@@ -212,7 +216,7 @@ export default function YandexPage() {
           mb: mbFilter,
         } as Record<string, string>);
 
-        if (target === 'tracks' && downloadedFilter !== 'all') params.set('downloaded', downloadedFilter);
+        if ((target === 'tracks' || target === 'albums') && downloadedFilter !== 'all') params.set('downloaded', downloadedFilter);
 
         const path = `/api/yandex/${target}?${params.toString()}`;
 
@@ -350,7 +354,7 @@ export default function YandexPage() {
         ? 'Search title or artist…'
         : 'Search title, artist or album…';
 
-  const emptyColSpan = target === 'artists' ? 3 : target === 'albums' ? 4 : 6;
+  const emptyColSpan = target === 'artists' ? 3 : target === 'albums' ? 5 : 6;
 
   return (
     <>
@@ -404,13 +408,13 @@ export default function YandexPage() {
             </button>
           </div>
 
-          {target === 'tracks' ? (
+          {target === 'tracks' || target === 'albums' ? (
             <div className="ml-3 inline-flex rounded-md overflow-hidden ring-1 ring-slate-800">
               <button
                 className={`btn ${downloadedFilter === 'all' ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setDownloadedFilterAndUrl('all')}
               >
-                All tracks
+                {target === 'albums' ? 'All albums' : 'All tracks'}
               </button>
               <button
                 className={`btn ${downloadedFilter === 'downloaded' ? 'btn-primary' : 'btn-outline'}`}
@@ -520,6 +524,7 @@ export default function YandexPage() {
                       Artist {headerArrow(sortByAlbums === 'artist', sortDirAlbums)}
                     </button>
                   </Th>
+                  <Th className="text-center w-24">Status</Th>
                   <Th className={`text-center ${LINKS_COL_WIDTH}`}>Links</Th>
                 </>
               ) : (
@@ -593,6 +598,9 @@ export default function YandexPage() {
                       </div>
                     </Td>
                     <Td>{r.artistName || '—'}</Td>
+                    <Td className="text-center">
+                      <DownloadedCheck downloaded={r.downloaded} downloadedBy={r.downloadedBy} />
+                    </Td>
                     <Td className="text-center">
                       <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined} />
                     </Td>
