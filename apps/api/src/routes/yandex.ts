@@ -14,6 +14,7 @@ import {
 } from '../workers';
 
 import { createLogger } from '../lib/logger';
+import { assertMusicBrainzContactEmailConfigured } from '../services/mb';
 
 const r = Router();
 const log = createLogger({ scope: 'route.yandex' });
@@ -104,7 +105,7 @@ r.post('/pull-all', async (req, res) => {
         lg.info('yandex pull-all started', 'yandex.pullAll.done', { runId: result?.runId ?? null });
         res.json({ ok: true, runId: result?.runId ?? null });
     } catch (e: any) {
-        const status = e?.status === 409 ? 409 : 500;
+        const status = e?.status === 400 ? 400 : (e?.status === 409 ? 409 : 500);
         if (status === 409) lg.warn('yandex pull-all rejected: busy', 'yandex.pullAll.busy', { err: e?.message });
         else lg.error('yandex pull-all failed', 'yandex.pullAll.fail', { err: e?.message });
         res.status(status).json({ ok: false, error: e?.message || String(e) });
@@ -116,6 +117,7 @@ r.post('/match', async (req, res) => {
     const lg = log.child({ ctx: { reqId: (req as any)?.reqId } });
     try {
         await ensureNotBusyOrThrow(Y_PREFIXES, Y_JOB_KEYS as any);
+        await assertMusicBrainzContactEmailConfigured();
         const targetRaw = String(req.body?.target ?? 'both');
         const target: 'artists' | 'albums' | 'both' =
           targetRaw === 'artists' || targetRaw === 'albums' ? (targetRaw as any) : 'both';
@@ -127,7 +129,7 @@ r.post('/match', async (req, res) => {
         lg.info('yandex match started', 'yandex.match.done', { runId: result?.runId ?? null });
         res.json({ ok: true, runId: result?.runId ?? null });
     } catch (e: any) {
-        const status = e?.status === 409 ? 409 : 500;
+        const status = e?.status === 400 ? 400 : (e?.status === 409 ? 409 : 500);
         if (status === 409) log.warn('yandex match rejected: busy', 'yandex.match.busy', { err: e?.message });
         else log.error('yandex match failed', 'yandex.match.fail', { err: e?.message });
         res.status(status).json({ ok: false, error: e?.message || String(e) });
@@ -149,7 +151,7 @@ r.post('/push', async (req, res) => {
         lg.info('yandex push started', 'yandex.push.done', { runId: result?.runId ?? null });
         res.json({ ok: true, runId: result?.runId ?? null });
     } catch (e: any) {
-        const status = e?.status === 409 ? 409 : 500;
+        const status = e?.status === 400 ? 400 : (e?.status === 409 ? 409 : 500);
         if (status === 409) lg.warn('yandex push rejected: busy', 'yandex.push.busy', { err: e?.message });
         else lg.error('yandex push failed', 'yandex.push.fail', { err: e?.message });
         res.status(status).json({ ok: false, error: e?.message || String(e) });

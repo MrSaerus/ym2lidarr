@@ -40,6 +40,7 @@ const ALLOWED_FIELDS = new Set([
   'yandexToken',
   'yandexDriver',
   'pyproxyUrl',
+  'musicBrainzEmail',
 
   // cron
   'cronYandexPull',
@@ -176,6 +177,9 @@ function pickSettings(input: any) {
   if ('yandexDriver' in out) {
     const v = String(out.yandexDriver || '').toLowerCase();
     out.yandexDriver = v === 'native' ? 'native' : 'pyproxy';
+  }
+  if ('musicBrainzEmail' in out) {
+    out.musicBrainzEmail = trimToNull(out.musicBrainzEmail);
   }
   if ('pushTarget' in out) {
     const v = String(out.pushTarget || '').toLowerCase();

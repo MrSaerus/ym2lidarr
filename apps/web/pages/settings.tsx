@@ -11,6 +11,7 @@ type Settings = {
   yandexDriver: 'pyproxy' | 'native';
   yandexToken?: string | null;
   pyproxyUrl?: string | null;
+  musicBrainzEmail?: string | null;
 
   // Расписания + таргеты + enable
   cronYandexPull?: string | null;
@@ -120,6 +121,7 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     yandexDriver: (s.yandexDriver as any) || 'pyproxy',
     yandexToken: s.yandexToken ?? '',
     pyproxyUrl: s.pyproxyUrl ?? 'http://pyproxy:8080',
+    musicBrainzEmail: s.musicBrainzEmail ?? '',
 
     cronYandexPull: s.cronYandexPull ?? '0 */6 * * *',
     enableCronYandexPull: s.enableCronYandexPull ?? false,
@@ -430,6 +432,14 @@ export default function SettingsPage() {
   }, [load]);
 
   async function save() {
+    const mbEmail = String(settings.musicBrainzEmail || '').trim();
+    if (!mbEmail) {
+      const m = 'MusicBrainz contact email is required. Open Settings → Yandex and set your personal email.';
+      setMsg(m);
+      toastErr(m);
+      return;
+    }
+
     setMsg('Saving…');
     try {
       await api('/api/settings', {
@@ -847,6 +857,32 @@ export default function SettingsPage() {
                     }
                     placeholder="http://pyproxy:8080"
                   />
+                </FormRow>
+
+                <FormRow
+                  label="MusicBrainz contact email"
+                  help="Обязательный личный email для User-Agent/From при запросах к MusicBrainz.org. Если поле пустое, MusicBrainz-задачи будут падать до HTTP-запроса."
+                >
+                  <div className="space-y-1">
+                    <input
+                      className="input"
+                      type="email"
+                      required
+                      value={settings.musicBrainzEmail || ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          musicBrainzEmail: e.target.value,
+                        })
+                      }
+                      placeholder="you@example.com"
+                    />
+                    {!String(settings.musicBrainzEmail || '').trim() ? (
+                      <div className="text-xs text-amber-300">
+                        Без этого email работа с MusicBrainz.org заблокирована.
+                      </div>
+                    ) : null}
+                  </div>
                 </FormRow>
 
                 <FormRow

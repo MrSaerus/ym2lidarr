@@ -1,5 +1,5 @@
 // apps/api/src/workers/mbMatch.ts
-import { mbFindArtist, mbFindReleaseGroup, mbGetArtistAlbumsCount } from '../services/mb';
+import { assertMusicBrainzContactEmailConfigured, mbFindArtist, mbFindReleaseGroup, mbGetArtistAlbumsCount } from '../services/mb';
 import {
   prisma, startRunWithKind, patchRunStats, endRun, dblog,
   evStart, evFinish, evError, now, elapsedMs, bailIfCancelled, getRunWithRetry,
@@ -22,6 +22,8 @@ export async function runMbMatch(reuseRunId?: number, opts?: { force?: boolean; 
   await evStart(runId, { kind: 'mb.match', target, force });
 
   try {
+    await assertMusicBrainzContactEmailConfigured();
+
     if (target === 'artists' || target === 'both') {
       const base = await prisma.yandexArtist.findMany({
         where: force ? { present: true } : { present: true, mbid: null },
@@ -279,6 +281,8 @@ export async function runCustomArtistsMatch(reuseRunId?: number, opts?: { onlyId
   const t0 = now();
   await evStart(runId, { kind: 'custom.match', onlyId: opts?.onlyId ?? null, force });
   try {
+    await assertMusicBrainzContactEmailConfigured();
+
     let items: { id: number; name: string; mbid: string | null }[] = [];
 
     if (opts?.onlyId) {

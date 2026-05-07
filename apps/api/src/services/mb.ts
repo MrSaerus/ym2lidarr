@@ -2,6 +2,7 @@
 import Bottleneck from 'bottleneck';
 import { request } from 'undici';
 import { createLogger } from '../lib/logger';
+import { prisma } from '../prisma';
 
 const log = createLogger({ scope: 'service.mb' });
 
@@ -11,7 +12,7 @@ const limiter = new Bottleneck({
 });
 
 const BASE = 'https://musicbrainz.org/ws/2';
-const UA = 'ym-to-lidarr/1.2 (+contact: you@example.com)';
+const APP_UA = 'YM2LIDARR/1.2.0';
 
 export type ArtistCandidateMB = {
   externalId: string;
@@ -42,6 +43,51 @@ export type ReleaseGroupCandidateMB = {
 };
 
 type MbOpts = { signal?: AbortSignal };
+
+type MusicBrainzSetting = { musicBrainzEmail?: string | null } | null;
+
+export const MUSICBRAINZ_EMAIL_MISSING_ERROR =
+  'MusicBrainz contact email is not configured. Set Settings → Yandex → MusicBrainz contact email.';
+
+function isValidContactEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function makeMusicBrainzEmailMissingError(): Error {
+  const err = new Error(MUSICBRAINZ_EMAIL_MISSING_ERROR);
+  (err as any).status = 400;
+  (err as any).code = 'MB_CONTACT_EMAIL_MISSING';
+  return err;
+}
+
+export function isMusicBrainzContactEmailMissingError(err: unknown): boolean {
+  const e = err as any;
+  return e?.code === 'MB_CONTACT_EMAIL_MISSING' || String(e?.message || e) === MUSICBRAINZ_EMAIL_MISSING_ERROR;
+}
+
+async function getMusicBrainzContactEmail(): Promise<string> {
+  const setting = await prisma.setting.findFirst({
+    where: { id: 1 },
+    select: { musicBrainzEmail: true },
+  }) as MusicBrainzSetting;
+
+  const email = String(setting?.musicBrainzEmail || '').trim();
+
+  if (!email || !isValidContactEmail(email)) {
+    log.error('MusicBrainz contact email is not configured', 'mb.contact_email.missing');
+    throw makeMusicBrainzEmailMissingError();
+  }
+
+  return email;
+}
+
+function makeUserAgent(contactEmail: string): string {
+  return `${APP_UA} (personal music library sync; contact: ${contactEmail})`;
+}
+
+export async function assertMusicBrainzContactEmailConfigured(): Promise<string> {
+  return getMusicBrainzContactEmail();
+}
 
 let tlsFailStreak = 0;
 let circuitUntilTs = 0;
@@ -142,6 +188,8 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
   const circuitMinMs = 60_000;
   const circuitMaxMs = 180_000;
 
+  const contactEmail = await getMusicBrainzContactEmail();
+
   await maybeWaitCircuit(url, opts?.signal);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -161,7 +209,11 @@ async function getJSON<T = unknown>(url: string, opts?: MbOpts): Promise<T> {
 
     try {
       const res = await request(url, {
-        headers: { 'User-Agent': UA },
+        headers: {
+          'User-Agent': makeUserAgent(contactEmail),
+          'Accept': 'application/json',
+          'From': contactEmail,
+        },
         signal: ac.signal,
       });
 
