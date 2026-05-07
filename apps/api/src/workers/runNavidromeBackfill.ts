@@ -53,6 +53,349 @@ function buildAuth(setting: any): { auth: NdAuth; authPass?: string } {
   throw new Error('Navidrome auth is empty: need pass OR token+salt');
 }
 
+function evidenceNorm(s: unknown): string {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[’‘`´]/g, "'")
+    .replace(/[«»"“”]/g, '')
+    .replace(/[‐‑‒–—―]/g, '-')
+    .replace(/&/g, ' and ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function titleEvidenceNorm(s: unknown): string {
+  return evidenceNorm(s)
+    .replace(/[()[\]{}]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function artistEvidenceNorm(s: unknown): string {
+  return evidenceNorm(s)
+    .replace(/[^a-zа-я0-9]+/gi, '')
+    .trim();
+}
+
+function isGoodSongEvidence(song: any, yArtist: string, yTitle: string): boolean {
+  const songTitle = titleEvidenceNorm(song?.title);
+  const wantTitle = titleEvidenceNorm(yTitle);
+
+  if (!songTitle || !wantTitle || songTitle !== wantTitle) return false;
+
+  const songArtist = artistEvidenceNorm(song?.artist);
+  const wantArtist = artistEvidenceNorm(yArtist);
+
+  if (!songArtist || !wantArtist) return false;
+
+  return songArtist === wantArtist || songArtist.includes(wantArtist) || wantArtist.includes(songArtist);
+}
+
+
+async function backfillNavidromeAlbumsFromSongEvidence(opts: {
+  runId: number;
+  client: NavidromeClient;
+  dryRun: boolean;
+  limit: number;
+}) {
+  const { runId, client, dryRun, limit } = opts;
+
+  const completedStatuses = [
+    TorrentStatus.downloaded,
+    TorrentStatus.moving,
+    TorrentStatus.moved,
+  ];
+
+  const missingAlbums = await prisma.yandexAlbum.findMany({
+    where: {
+      present: true,
+      OR: [{ ndId: null }, { ndId: '' }],
+    },
+    select: {
+      ymId: true,
+      title: true,
+      artist: true,
+      rgMbid: true,
+      yandexArtistId: true,
+    },
+  });
+
+  const serviceAlbumTasks = await prisma.torrentTask.findMany({
+    where: {
+      status: { in: completedStatuses },
+      scope: 'album' as any,
+      ymAlbumId: { not: null },
+    },
+    select: { ymAlbumId: true },
+  });
+
+  const serviceDownloadedAlbumIds = new Set<string>();
+  for (const task of serviceAlbumTasks) {
+    const ymAlbumId = String(task.ymAlbumId || '').trim();
+    if (ymAlbumId) serviceDownloadedAlbumIds.add(ymAlbumId);
+  }
+
+  const candidateRgMbids = Array.from(new Set(
+    missingAlbums.map((a: any) => normMbid(a.rgMbid)).filter(Boolean),
+  ));
+
+  const lidarrDownloadedMbids = new Set<string>();
+  for (const mbidsChunk of chunked(candidateRgMbids, 500)) {
+    const lidarrAlbums = await prisma.lidarrAlbum.findMany({
+      where: {
+        removed: false,
+        mbid: { in: mbidsChunk },
+        sizeOnDisk: { gt: 0 },
+      },
+      select: { mbid: true },
+    });
+
+    for (const album of lidarrAlbums) {
+      const mbid = normMbid(album.mbid);
+      if (mbid) lidarrDownloadedMbids.add(mbid);
+    }
+  }
+
+  const downloadedMissingAlbums = missingAlbums
+    .filter((a: any) => {
+      const ymAlbumId = String(a.ymId || '').trim();
+      if (!ymAlbumId) return false;
+
+      const byService = serviceDownloadedAlbumIds.has(ymAlbumId);
+      const byLidarr = lidarrDownloadedMbids.has(normMbid(a.rgMbid));
+
+      return byService || byLidarr;
+    })
+    .slice(0, limit);
+
+  const downloadedMissingAlbumIds = downloadedMissingAlbums
+    .map((a: any) => String(a.ymId || '').trim())
+    .filter(Boolean);
+
+  const albumByYmId = new Map<string, any>();
+  for (const album of downloadedMissingAlbums as any[]) {
+    const ymAlbumId = String(album.ymId || '').trim();
+    if (ymAlbumId) albumByYmId.set(ymAlbumId, album);
+  }
+
+  const candidateTracks: any[] = [];
+  for (const idsChunk of chunked(downloadedMissingAlbumIds, 500)) {
+    const tracks = await prisma.yandexTrack.findMany({
+      where: {
+        present: true,
+        ymAlbumId: { in: idsChunk },
+      },
+      select: {
+        ymId: true,
+        title: true,
+        artist: true,
+        album: true,
+        ymAlbumId: true,
+        ymArtistId: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    candidateTracks.push(...tracks);
+  }
+
+  const tracksByAlbum = new Map<string, any[]>();
+  for (const track of candidateTracks) {
+    const ymAlbumId = String(track.ymAlbumId || '').trim();
+    if (!ymAlbumId) continue;
+
+    const tracks = tracksByAlbum.get(ymAlbumId) || [];
+    tracks.push(track);
+    tracksByAlbum.set(ymAlbumId, tracks);
+  }
+
+  const albumEntries = Array.from(tracksByAlbum.entries()).slice(0, limit);
+
+  let songEvidenceAlbums = 0;
+  let songEvidenceResolved = 0;
+  let songEvidenceAlbumUpdated = 0;
+  let songEvidenceTrackLinked = 0;
+  let songEvidenceArtistUpdated = 0;
+  let songEvidenceNotFound = 0;
+  let songEvidenceErrors = 0;
+
+  await dblog(runId, 'info', 'Navidrome song-evidence fallback start', {
+    downloadedMissingAlbums: downloadedMissingAlbums.length,
+    candidateAlbums: albumEntries.length,
+    candidateTracks: candidateTracks.length,
+    dryRun,
+  });
+
+  for (const [ymAlbumId, tracks] of albumEntries) {
+    songEvidenceAlbums++;
+
+    const album = albumByYmId.get(ymAlbumId);
+    const probes = tracks
+      .filter((track) => String(track.artist || '').trim() && String(track.title || '').trim())
+      .slice(0, 8);
+
+    let resolved: {
+      ndSongId: string;
+      ndAlbumId: string;
+      ndArtistId?: string;
+      ymTrackId: string;
+      ymArtistId?: string | null;
+      artist?: string | null;
+      album?: string | null;
+      title?: string | null;
+      ndArtist?: string | null;
+      ndAlbum?: string | null;
+      ndTitle?: string | null;
+    } | null = null;
+
+    for (const track of probes) {
+      const artist = String(track.artist || '').trim();
+      const title = String(track.title || '').trim();
+      if (!artist || !title) continue;
+
+      try {
+        const found = await client.search2(`${artist} ${title}`, 25);
+        const songs = Array.isArray((found as any)?.songs) ? (found as any).songs : [];
+
+        const song = songs.find((candidate: any) => isGoodSongEvidence(candidate, artist, title));
+        const ndAlbumId = pickAlbumId(song);
+        if (!song || !ndAlbumId) continue;
+
+        resolved = {
+          ndSongId: String(song.id || '').trim(),
+          ndAlbumId,
+          ndArtistId: pickArtistId(song) || undefined,
+          ymTrackId: String(track.ymId || '').trim(),
+          ymArtistId: track.ymArtistId || album?.yandexArtistId || null,
+          artist: track.artist,
+          album: track.album,
+          title: track.title,
+          ndArtist: song.artist,
+          ndAlbum: song.album,
+          ndTitle: song.title,
+        };
+
+        break;
+      } catch (e: any) {
+        songEvidenceErrors++;
+        await dblog(runId, 'warn', 'Navidrome song-evidence search failed', {
+          ymAlbumId,
+          ymTrackId: track.ymId,
+          artist,
+          title,
+          error: e?.message || String(e),
+        });
+      }
+    }
+
+    if (!resolved?.ndAlbumId) {
+      songEvidenceNotFound++;
+
+      if (songEvidenceNotFound <= 30) {
+        await dblog(runId, 'debug', 'Navidrome song-evidence fallback not found', {
+          ymAlbumId,
+          artist: album?.artist || null,
+          album: album?.title || null,
+          probes: probes.map((track) => ({
+            ymTrackId: track.ymId,
+            artist: track.artist,
+            album: track.album,
+            title: track.title,
+          })),
+        });
+      }
+
+      continue;
+    }
+
+    songEvidenceResolved++;
+
+    if (!dryRun) {
+      const albumRes = await prisma.yandexAlbum.updateMany({
+        where: {
+          ymId: ymAlbumId,
+          present: true,
+          OR: [{ ndId: null }, { ndId: '' }],
+        },
+        data: { ndId: resolved.ndAlbumId },
+      });
+
+      songEvidenceAlbumUpdated += albumRes.count;
+
+      if (resolved.ndSongId && resolved.ymTrackId) {
+        const existing = await prisma.yandexLikeSync.findFirst({
+          where: { kind: 'track', ymId: resolved.ymTrackId },
+          select: { id: true },
+        });
+
+        if (existing?.id) {
+          await prisma.yandexLikeSync.update({
+            where: { id: existing.id },
+            data: {
+              ndId: resolved.ndSongId,
+              lastSeenAt: new Date(),
+            },
+          });
+        } else {
+          await prisma.yandexLikeSync.create({
+            data: {
+              kind: 'track',
+              ymId: resolved.ymTrackId,
+              ndId: resolved.ndSongId,
+              status: 'pending',
+              lastSeenAt: new Date(),
+            },
+          });
+        }
+
+        songEvidenceTrackLinked++;
+      }
+
+      if (resolved.ymArtistId && resolved.ndArtistId) {
+        const artistRes = await prisma.yandexArtist.updateMany({
+          where: {
+            ymId: resolved.ymArtistId,
+            present: true,
+            OR: [{ ndId: null }, { ndId: '' }],
+          },
+          data: { ndId: resolved.ndArtistId },
+        });
+
+        songEvidenceArtistUpdated += artistRes.count;
+      }
+    }
+
+    await dblog(runId, 'info', 'Navidrome song-evidence fallback resolved', {
+      ymAlbumId,
+      ndAlbumId: resolved.ndAlbumId,
+      ymTrackId: resolved.ymTrackId,
+      ndSongId: resolved.ndSongId,
+      yandex: {
+        artist: resolved.artist,
+        album: resolved.album,
+        title: resolved.title,
+      },
+      navidrome: {
+        artist: resolved.ndArtist,
+        album: resolved.ndAlbum,
+        title: resolved.ndTitle,
+      },
+      dryRun,
+    });
+  }
+
+  return {
+    songEvidenceAlbums,
+    songEvidenceResolved,
+    songEvidenceAlbumUpdated,
+    songEvidenceTrackLinked,
+    songEvidenceArtistUpdated,
+    songEvidenceNotFound,
+    songEvidenceErrors,
+  };
+}
+
 export async function runNavidromeBackfill(opts: BackfillOpts = {}) {
   const dryRun = !!opts.dryRun;
   const limit = Math.max(1, Math.min(10000, Number(opts.limit || 1000)));
@@ -73,6 +416,13 @@ export async function runNavidromeBackfill(opts: BackfillOpts = {}) {
       artistUpdated: 0,
       fallbackDownloadedAlbums: 0,
       fallbackResolvedAlbums: 0,
+      songEvidenceAlbums: 0,
+      songEvidenceResolved: 0,
+      songEvidenceAlbumUpdated: 0,
+      songEvidenceTrackLinked: 0,
+      songEvidenceArtistUpdated: 0,
+      songEvidenceNotFound: 0,
+      songEvidenceErrors: 0,
       errors: 0,
     });
     if (!run?.id) return { ok: false, error: 'failed to start run' };
@@ -415,6 +765,13 @@ export async function runNavidromeBackfill(opts: BackfillOpts = {}) {
       }
     }
 
+    const songEvidenceFallback = await backfillNavidromeAlbumsFromSongEvidence({
+      runId,
+      client,
+      dryRun,
+      limit,
+    });
+
     const result = {
       ok: true,
       runId,
@@ -430,13 +787,14 @@ export async function runNavidromeBackfill(opts: BackfillOpts = {}) {
       noArtistId,
       fallbackDownloadedAlbums,
       fallbackResolvedAlbums,
-      errors,
+      ...songEvidenceFallback,
+      errors: errors + songEvidenceFallback.songEvidenceErrors,
     };
 
     await patchRunStats(runId, {
       phase: 'done',
-      total: synced.length + fallbackDownloadedAlbums,
-      done: synced.length + fallbackDownloadedAlbums,
+      total: synced.length + fallbackDownloadedAlbums + songEvidenceFallback.songEvidenceAlbums,
+      done: synced.length + fallbackDownloadedAlbums + songEvidenceFallback.songEvidenceAlbums,
       ...result,
     });
 

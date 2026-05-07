@@ -636,7 +636,6 @@ r.get('/tracks', async (req, res) => {
                     where: {
                         present: true,
                         ymId: { in: idsChunk },
-                        rgMbid: { not: null },
                     },
                     select: {
                         ymId: true,
