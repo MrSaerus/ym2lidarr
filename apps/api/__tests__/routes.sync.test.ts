@@ -1,6 +1,10 @@
 jest.mock('../src/prisma', () => require('../__mocks__/prisma'));
+jest.mock('../src/scheduler', () => require('../__mocks__/src/scheduler'));
 jest.mock('../src/workers.ts', () => require('../__mocks__/src/workers.ts'));
 
+jest.mock('../src/services/mb', () => ({
+  assertMusicBrainzContactEmailConfigured: jest.fn(async () => 'test@example.com'),
+}));
 import request from 'supertest';
 import { makeApp } from '../__mocks__/helpers';
 import syncRouter from '../src/routes/sync';
