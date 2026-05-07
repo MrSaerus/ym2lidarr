@@ -450,7 +450,10 @@ r.get('/albums', async (req, res) => {
             return !!rgMbid && lidarrDownloadedAlbumMbids.has(rgMbid);
         };
 
-        const isDownloadedByNavidrome = (r: { ymId: string | number }) => {
+        const isDownloadedByNavidrome = (r: { ymId: string | number; ndId?: string | null }) => {
+            const directNdId = String(r.ndId || '').trim();
+            if (directNdId) return true;
+
             const ymAlbumId = String(r.ymId || '').trim();
             return !!ymAlbumId && navidromeDownloadedAlbumIds.has(ymAlbumId);
         };
@@ -806,9 +809,12 @@ r.get('/tracks', async (req, res) => {
             }
         }
 
-        const isDownloadedByNavidrome = (r: { ymId: string | number }) => {
+        const isDownloadedByNavidrome = (r: { ymId: string | number; ymAlbumId?: string | null }) => {
             const ymTrackId = String(r.ymId || '').trim();
-            return !!ymTrackId && navidromeDownloadedTrackIds.has(ymTrackId);
+            if (ymTrackId && navidromeDownloadedTrackIds.has(ymTrackId)) return true;
+
+            const ymAlbumId = String(r.ymAlbumId || '').trim();
+            return !!ymAlbumId && !!yandexAlbumNdByYmAlbumId.get(ymAlbumId);
         };
 
         const isDownloadedByLidarr = (r: { ymAlbumId?: string | null; rgMbid?: string | null }) => {
