@@ -17,6 +17,8 @@ type YArtistRow = {
   yandexUrl: string;
   mbid?: string | null;
   mbUrl?: string | null;
+  lidarrUrl?: string | null;
+  navidromeUrl?: string | null;
 };
 
 type YAlbumRow = {
@@ -32,6 +34,8 @@ type YAlbumRow = {
   downloadedBy?: Array<'ym2lidarr' | 'lidarr' | 'navidrome'>;
   lidarrDownloaded?: boolean;
   navidromeDownloaded?: boolean;
+  lidarrUrl?: string | null;
+  navidromeUrl?: string | null;
 };
 
 type YTrackRow = {
@@ -46,6 +50,9 @@ type YTrackRow = {
   recMbid?: string | null;
   rgMbid?: string | null;
   mbUrl?: string | null;
+  lidarrUrl?: string | null;
+  navidromeUrl?: string | null;
+  navidromeDownloaded?: boolean;
   downloaded?: boolean;
   downloadedBy?: Array<'ym2lidarr' | 'lidarr' | 'navidrome'>;
   lidarrDownloaded?: boolean;
@@ -58,7 +65,7 @@ type SortFieldAlbums = 'title' | 'artist' | 'id';
 type SortFieldTracks = 'title' | 'artist' | 'album' | 'id';
 
 /* ==== Fixed link slots (Yandex | MusicBrainz) ==== */
-const LINKS_COL_WIDTH = 'w-[14rem]';
+const LINKS_COL_WIDTH = 'w-[30rem]';
 
 function LinkSlot({
                     href,
@@ -66,7 +73,7 @@ function LinkSlot({
                     className,
                   }: {
   href?: string | null;
-  label: 'Yandex' | 'MusicBrainz';
+  label: 'Yandex' | 'MusicBrainz' | 'Lidarr' | 'Navidrome';
   className: string;
 }) {
   if (!href) {
@@ -84,16 +91,22 @@ function LinkSlot({
 }
 
 function LinksFixedRow({
-                         yandexUrl,
-                         mbUrl,
-                       }: {
+  yandexUrl,
+  mbUrl,
+  lidarrUrl,
+  navidromeUrl,
+}: {
   yandexUrl?: string | null;
   mbUrl?: string | null;
+  lidarrUrl?: string | null;
+  navidromeUrl?: string | null;
 }) {
   return (
-    <div className={`grid grid-cols-2 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
+    <div className={`grid grid-cols-4 gap-2 justify-items-center ${LINKS_COL_WIDTH}`}>
       <LinkSlot href={yandexUrl} label="Yandex" className="link-chip--ym" />
       <LinkSlot href={mbUrl} label="MusicBrainz" className="link-chip--mb" />
+      <LinkSlot href={lidarrUrl} label="Lidarr" className="link-chip--lidarr" />
+      <LinkSlot href={navidromeUrl} label="Navidrome" className="link-chip--navidrome" />
     </div>
   );
 }
@@ -581,7 +594,10 @@ export default function YandexPage() {
                       </div>
                     </Td>
                     <Td className="text-center">
-                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.mbid ? r.mbUrl : undefined) || undefined} />
+                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.mbid ? r.mbUrl : undefined) || undefined} 
+                        lidarrUrl={(r as any).lidarrUrl || undefined}
+                        navidromeUrl={(r as any).navidromeUrl || undefined}
+                      />
                     </Td>
                   </tr>
                 );
@@ -602,7 +618,10 @@ export default function YandexPage() {
                       <DownloadedCheck downloaded={r.downloaded} downloadedBy={r.downloadedBy} />
                     </Td>
                     <Td className="text-center">
-                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined} />
+                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={(r.rgMbid ? r.rgUrl : undefined) || undefined} 
+                        lidarrUrl={(r as any).lidarrUrl || undefined}
+                        navidromeUrl={(r as any).navidromeUrl || undefined}
+                      />
                     </Td>
                   </tr>
                 );
@@ -617,7 +636,10 @@ export default function YandexPage() {
                     <Td>{r.artistName || '—'}</Td>
                     <Td>{r.albumTitle || '—'}</Td>
                     <Td className="text-center">
-                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={r.mbUrl || undefined} />
+                      <LinksFixedRow yandexUrl={r.yandexUrl} mbUrl={r.mbUrl || undefined} 
+                        lidarrUrl={(r as any).lidarrUrl || undefined}
+                        navidromeUrl={(r as any).navidromeUrl || undefined}
+                      />
                     </Td>
                     <Td className="text-right pr-4">
                       <DownloadedCheck downloaded={r.downloaded} downloadedBy={r.downloadedBy} />

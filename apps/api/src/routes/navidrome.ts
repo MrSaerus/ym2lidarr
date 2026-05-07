@@ -5,6 +5,7 @@ import { prisma } from '../prisma';
 import { createLogger } from '../lib/logger';
 import { runNavidromePlan } from '../workers/runNavidromePlan';
 import { runNavidromeApply } from '../workers/runNavidromeApply';
+import { runNavidromeBackfill } from '../workers/runNavidromeBackfill';
 import { startRun, patchRunStats } from '../log';
 import { NavidromeClient } from '../services/navidrome';
 
@@ -150,6 +151,50 @@ navidromeRouter.post('/apply', async (req, res, next) => {
     res.json({ ok: true, runId });
   } catch (e: any) {
     log.error('apply route failed', 'route.nav.apply.fail', { err: e?.message || String(e) });
+    next(e);
+  }
+});
+
+
+/* ========== BACKFILL ENTITY LINKS ========== */
+navidromeRouter.post('/backfill-links', async (req, res, next) => {
+  try {
+    const dryRun = !!req.body?.dryRun;
+    const rawLimit = Number(req.body?.limit || 1000);
+    const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(10000, rawLimit)) : 1000;
+
+    log.info('navidrome backfill links requested', 'route.nav.backfill.start', { dryRun, limit });
+
+    const run = await startRun('navidrome.backfill.links', {
+      phase: 'queued',
+      total: 0,
+      done: 0,
+      dryRun,
+      limit,
+    });
+    const runId = run?.id;
+    if (!runId) {
+      res.status(500).json({ ok: false, error: 'failed to start run' });
+      return;
+    }
+
+    await patchRunStats(runId, { phase: 'queued', dryRun, limit });
+
+    setImmediate(() => {
+      runNavidromeBackfill({
+        reuseRunId: runId,
+        dryRun,
+        limit,
+      }).catch((e) => {
+        log.error('backfill worker unhandled', 'route.nav.backfill.spawn.fail', {
+          err: e?.message || String(e),
+        });
+      });
+    });
+
+    res.json({ ok: true, runId });
+  } catch (e: any) {
+    log.error('backfill route failed', 'route.nav.backfill.fail', { err: e?.message || String(e) });
     next(e);
   }
 });

@@ -13,6 +13,7 @@ import {
   runYandexPush,
   runLidarrPullEx,
   runNavidromeApply,
+  runNavidromeBackfill,
   runTorrentsUnmatched,
   runTorrentsPoll,
   runTorrentsCopyDownloaded,
@@ -69,6 +70,7 @@ let jobs: {
 
   backup?: cron.ScheduledTask;
   navidromePush?: cron.ScheduledTask;
+  navidromeBackfill?: cron.ScheduledTask;
 
   torrentsUnmatched?: cron.ScheduledTask;
   torrentsPoll?: cron.ScheduledTask;
@@ -84,6 +86,7 @@ type JobKey =
   | 'customPush'
   | 'backup'
   | 'navidromePush'
+  | 'navidromeBackfill'
   | 'torrentsUnmatched'
   | 'torrentsPoll'
   | 'torrentsCopy';
@@ -358,6 +361,27 @@ export async function reloadJobs() {
     }
   }
 
+
+  // ========== NAVIDROME BACKFILL ENTITY LINKS ==========
+  if ((s as any)?.enableCronNavidromeBackfill && (s as any)?.cronNavidromeBackfill) {
+    const expr = String((s as any).cronNavidromeBackfill);
+    if (cron.validate(expr)) {
+      jobs.navidromeBackfill = cron.schedule(
+        expr,
+        wrap(
+          'navidromeBackfill',
+          ['navidrome.backfill.', 'nav.backfill.'],
+          async () => {
+            await runNavidromeBackfill({ dryRun: false });
+          },
+        ),
+      );
+      log.debug('scheduled navidrome.backfill', 'cron.plan', { key: 'navidromeBackfill', cron: expr });
+    } else {
+      log.warn('invalid cron for navidromeBackfill', 'cron.nav.backfill.invalid', { expr });
+    }
+  }
+
   /* ---------- TORRENTS: run unmatched ---------- */
   if (s.enableCronTorrentRunUnmatched && s.cronTorrentRunUnmatched && cron.validate(s.cronTorrentRunUnmatched)) {
     jobs.torrentsUnmatched = cron.schedule(
@@ -456,6 +480,12 @@ const JOB_META: Record<
     settingCron: 'cronNavidromePush',
     enabledFlag: 'enableCronNavidromePush',
     prefixes: ['nav.apply.', 'navidrome.'],
+  },
+  navidromeBackfill: {
+    title: 'Navidrome: Backfill links',
+    settingCron: 'cronNavidromeBackfill',
+    enabledFlag: 'enableCronNavidromeBackfill',
+    prefixes: ['navidrome.backfill.', 'nav.backfill.'],
   },
   torrentsUnmatched: {
     title: 'Torrents: Run unmatched',

@@ -58,6 +58,38 @@ function parseDownloadedFilter(req: any): DownloadedFilter {
 const Y_PREFIXES = ['yandex.'];
 const Y_JOB_KEYS = ['yandexPull', 'yandexMatch', 'yandexPush'] as const;
 
+function stripTrailingSlashesForExternalLinks(s?: string | null): string {
+    return String(s ?? '').replace(/\/+$/, '');
+}
+
+function normMbidForExternalLinks(v: unknown): string {
+    return String(v || '')
+      .replace(/^mbid:/i, '')
+      .trim()
+      .toLowerCase();
+}
+
+function makeLidarrEntityUrl(
+    base: string,
+    kind: 'artist' | 'album',
+    mbid?: string | null,
+): string | undefined {
+    const b = stripTrailingSlashesForExternalLinks(base);
+    const id = normMbidForExternalLinks(mbid);
+    return b && id ? `${b}/${kind}/${encodeURIComponent(id)}` : undefined;
+}
+
+function makeNavidromeEntityUrl(
+    base: string,
+    kind: 'artist' | 'album',
+    ndId?: string | null,
+): string | undefined {
+    const b = stripTrailingSlashesForExternalLinks(base);
+    const id = String(ndId || '').trim();
+    return b && id ? `${b}/app/#/${kind}/${encodeURIComponent(id)}/show` : undefined;
+}
+
+
 /* ------------------------------------------------------------- */
 /* РУЧНЫЕ ЗАПУСКИ (manual endpoints с взаимной блокировкой)      */
 /* ------------------------------------------------------------- */
@@ -138,7 +170,7 @@ r.get('/artists', async (req, res) => {
     try {
         let rows = await prisma.yandexArtist.findMany({
             where: { present: true },
-            select: { ymId: true, name: true, mbid: true },
+            select: { ymId: true, name: true, mbid: true, ndId: true },
         });
         rows = rows.filter((a) => /^\d+$/.test(String(a.ymId || '')));
 
@@ -175,9 +207,35 @@ r.get('/artists', async (req, res) => {
         const end = Math.min(start + pageSize, total);
         const pageItems = rows.slice(start, end);
 
+        const externalSettingsForArtists = await prisma.setting.findFirst({
+            where: { id: 1 },
+            select: { lidarrUrl: true, navidromeUrl: true },
+        });
+        const lidarrBaseForArtists = stripTrailingSlashesForExternalLinks(externalSettingsForArtists?.lidarrUrl);
+        const navidromeBaseForArtists = stripTrailingSlashesForExternalLinks(externalSettingsForArtists?.navidromeUrl);
+
+        const artistMbidsForLinks = Array.from(new Set(
+            pageItems.map((x) => normMbidForExternalLinks(x.mbid)).filter(Boolean),
+        ));
+        const lidarrArtistMbidsForLinks = new Set<string>();
+
+        if (artistMbidsForLinks.length) {
+            const lidarrArtistsForLinks = await prisma.lidarrArtist.findMany({
+                where: { removed: false, mbid: { in: artistMbidsForLinks } },
+                select: { mbid: true },
+            });
+
+            for (const artist of lidarrArtistsForLinks) {
+                const mbid = normMbidForExternalLinks(artist.mbid);
+                if (mbid) lidarrArtistMbidsForLinks.add(mbid);
+            }
+        }
+
         const items = pageItems.map((x) => {
             const idNum = Number(x.ymId) || 0;
             const mbid = x.mbid || null;
+            const cleanMbid = normMbidForExternalLinks(mbid);
+
             return {
                 id: idNum,
                 name: x.name,
@@ -185,6 +243,10 @@ r.get('/artists', async (req, res) => {
                 yandexUrl: `https://music.yandex.ru/artist/${idNum}`,
                 mbid,
                 mbUrl: mbid ? `https://musicbrainz.org/artist/${mbid}` : undefined,
+                lidarrUrl: cleanMbid && lidarrArtistMbidsForLinks.has(cleanMbid)
+                  ? makeLidarrEntityUrl(lidarrBaseForArtists, 'artist', cleanMbid)
+                  : undefined,
+                navidromeUrl: makeNavidromeEntityUrl(navidromeBaseForArtists, 'artist', x.ndId),
             };
         });
 
@@ -222,6 +284,7 @@ r.get('/albums', async (req, res) => {
                 artist: true,
                 year: true,
                 rgMbid: true,
+                ndId: true,
             },
         });
 
@@ -437,9 +500,36 @@ r.get('/albums', async (req, res) => {
         const end = Math.min(start + pageSize, total);
         const pageItems = rows.slice(start, end);
 
+        const externalSettingsForAlbums = await prisma.setting.findFirst({
+            where: { id: 1 },
+            select: { lidarrUrl: true, navidromeUrl: true },
+        });
+        const lidarrBaseForAlbums = stripTrailingSlashesForExternalLinks(externalSettingsForAlbums?.lidarrUrl);
+        const navidromeBaseForAlbums = stripTrailingSlashesForExternalLinks(externalSettingsForAlbums?.navidromeUrl);
+
+        const albumRgMbidsForLinks = Array.from(new Set(
+            pageItems.map((x) => normMbid(x.rgMbid)).filter(Boolean),
+        ));
+        const lidarrAlbumMbidsForLinks = new Set<string>();
+
+        if (albumRgMbidsForLinks.length) {
+            for (const mbidsChunk of chunked(albumRgMbidsForLinks, 500)) {
+                const lidarrAlbumsForLinks = await prisma.lidarrAlbum.findMany({
+                    where: { removed: false, mbid: { in: mbidsChunk } },
+                    select: { mbid: true },
+                });
+
+                for (const album of lidarrAlbumsForLinks) {
+                    const mbid = normMbid(album.mbid);
+                    if (mbid) lidarrAlbumMbidsForLinks.add(mbid);
+                }
+            }
+        }
+
         const items = pageItems.map((x) => {
             const idNum = Number(x.ymId) || 0;
             const rgMbid = x.rgMbid || null;
+            const cleanRgMbid = normMbid(rgMbid);
 
             return {
                 id: idNum,
@@ -450,6 +540,10 @@ r.get('/albums', async (req, res) => {
                 yandexUrl: `https://music.yandex.ru/album/${idNum}`,
                 rgMbid,
                 rgUrl: rgMbid ? `https://musicbrainz.org/release-group/${rgMbid}` : undefined,
+                lidarrUrl: cleanRgMbid && lidarrAlbumMbidsForLinks.has(cleanRgMbid)
+                  ? makeLidarrEntityUrl(lidarrBaseForAlbums, 'album', cleanRgMbid)
+                  : undefined,
+                navidromeUrl: makeNavidromeEntityUrl(navidromeBaseForAlbums, 'album', x.ndId),
                 downloaded: isDownloaded(x),
                 downloadedBy: getDownloadedSources(x),
                 lidarrDownloaded: isDownloadedByLidarr(x),
@@ -531,6 +625,7 @@ r.get('/tracks', async (req, res) => {
         ));
 
         const yandexAlbumRgByYmAlbumId = new Map<string, string>();
+        const yandexAlbumNdByYmAlbumId = new Map<string, string>();
 
         if (trackYmAlbumIds.length) {
             for (const idsChunk of chunked(trackYmAlbumIds, 500)) {
@@ -543,6 +638,7 @@ r.get('/tracks', async (req, res) => {
                     select: {
                         ymId: true,
                         rgMbid: true,
+                        ndId: true,
                     },
                 });
 
@@ -551,6 +647,11 @@ r.get('/tracks', async (req, res) => {
                     const rgMbid = normMbid(a.rgMbid);
                     if (ymAlbumId && rgMbid) {
                         yandexAlbumRgByYmAlbumId.set(ymAlbumId, rgMbid);
+                    }
+
+                    const ndId = String(a.ndId || '').trim();
+                    if (ymAlbumId && ndId) {
+                        yandexAlbumNdByYmAlbumId.set(ymAlbumId, ndId);
                     }
                 }
             }
@@ -626,6 +727,47 @@ r.get('/tracks', async (req, res) => {
                 }
             }
         }
+
+        const externalSettingsForTracks = await prisma.setting.findFirst({
+            where: { id: 1 },
+            select: { lidarrUrl: true, navidromeUrl: true },
+        });
+        const lidarrBaseForTracks = stripTrailingSlashesForExternalLinks(externalSettingsForTracks?.lidarrUrl);
+        const navidromeBaseForTracks = stripTrailingSlashesForExternalLinks(externalSettingsForTracks?.navidromeUrl);
+
+        const lidarrAlbumMbidsForTrackLinks = new Set<string>();
+
+        if (candidateRgMbids.length) {
+            for (const mbidsChunk of chunked(candidateRgMbids, 500)) {
+                const lidarrAlbumsForTrackLinks = await prisma.lidarrAlbum.findMany({
+                    where: { removed: false, mbid: { in: mbidsChunk } },
+                    select: { mbid: true },
+                });
+
+                for (const album of lidarrAlbumsForTrackLinks) {
+                    const mbid = normMbid(album.mbid);
+                    if (mbid) lidarrAlbumMbidsForTrackLinks.add(mbid);
+                }
+            }
+        }
+
+        const getExternalTrackAlbumLidarrUrl = (r: { ymAlbumId?: string | null; rgMbid?: string | null }) => {
+            const trackRgMbid = normMbid(r.rgMbid);
+            const albumRgMbid = getAlbumRgMbid(r);
+            const mbid = trackRgMbid && lidarrAlbumMbidsForTrackLinks.has(trackRgMbid)
+              ? trackRgMbid
+              : albumRgMbid;
+
+            return mbid && lidarrAlbumMbidsForTrackLinks.has(mbid)
+              ? makeLidarrEntityUrl(lidarrBaseForTracks, 'album', mbid)
+              : undefined;
+        };
+
+        const getExternalTrackAlbumNavidromeUrl = (r: { ymAlbumId?: string | null }) => {
+            const ymAlbumId = String(r.ymAlbumId || '').trim();
+            const ndId = ymAlbumId ? yandexAlbumNdByYmAlbumId.get(ymAlbumId) : undefined;
+            return makeNavidromeEntityUrl(navidromeBaseForTracks, 'album', ndId);
+        };
 
         const isDownloadedByService = (r: { ymId: string | number; ymAlbumId?: string | null }) => {
             const ymTrackId = String(r.ymId || '').trim();
@@ -748,6 +890,8 @@ r.get('/tracks', async (req, res) => {
                 mbUrl: recMbid
                   ? `https://musicbrainz.org/recording/${recMbid}`
                   : (rgMbid ? `https://musicbrainz.org/release-group/${rgMbid}` : undefined),
+                lidarrUrl: getExternalTrackAlbumLidarrUrl(x),
+                navidromeUrl: getExternalTrackAlbumNavidromeUrl(x),
                 downloaded: isDownloaded(x),
                 downloadedBy: getDownloadedSources(x),
                 lidarrDownloaded: isDownloadedByLidarr(x),

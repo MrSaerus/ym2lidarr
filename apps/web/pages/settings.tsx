@@ -34,6 +34,8 @@ type Settings = {
   likesPolicySourcePriority?: 'yandex' | 'navidrome';
   cronNavidromePush?: string | null;
   enableCronNavidromePush?: boolean | null;
+  cronNavidromeBackfill?: string | null;
+  enableCronNavidromeBackfill?: boolean | null;
   navidromePassConfigured?: boolean;
 
   // Lidarr
@@ -141,6 +143,8 @@ function withDefaults(x: Partial<Settings> | null | undefined): Settings {
     likesPolicySourcePriority: (s.likesPolicySourcePriority as any) || 'yandex',
     cronNavidromePush: s.cronNavidromePush ?? '15 */6 * * *',
     enableCronNavidromePush: s.enableCronNavidromePush ?? false,
+    cronNavidromeBackfill: s.cronNavidromeBackfill ?? '30 */6 * * *',
+    enableCronNavidromeBackfill: s.enableCronNavidromeBackfill ?? false,
     navidromePassConfigured: !!s.navidromePassConfigured,
 
     // Lidarr
@@ -1145,6 +1149,43 @@ export default function SettingsPage() {
                             ...settings,
                             enableCronNavidromePush:
                             e.target.checked,
+                          })
+                        }
+                      />
+                      Enabled
+                    </label>
+                  </div>
+                </FormRow>
+
+                <FormRow
+                  label="Navidrome backfill links cron"
+                  help={
+                    <>
+                      Заполняет <code>YandexAlbum.ndId</code> и <code>YandexArtist.ndId</code>
+                      {' '}по уже синхронизированным трекам. <code>30 */6 * * *</code> — каждые 6 часов.
+                    </>
+                  }
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <input
+                      className="input md:col-span-2"
+                      value={settings.cronNavidromeBackfill || ''}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          cronNavidromeBackfill: e.target.value,
+                        })
+                      }
+                      placeholder="30 */6 * * *"
+                    />
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                      <input
+                        type="checkbox"
+                        checked={!!settings.enableCronNavidromeBackfill}
+                        onChange={(e) =>
+                          setSettings({
+                            ...settings,
+                            enableCronNavidromeBackfill: e.target.checked,
                           })
                         }
                       />

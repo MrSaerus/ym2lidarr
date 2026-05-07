@@ -8,6 +8,7 @@ import { yandexVerifyToken, setPyproxyUrl } from '../services/yandex';
 import { getRootFolders, getQualityProfiles, getMetadataProfiles } from '../services/lidarr';
 import { createLogger } from '../lib/logger';
 import { runTorrentsUnmatched, runTorrentsPoll, runTorrentsCopyDownloaded } from '../workers/torrents';
+import { runNavidromeBackfill } from '../workers';
 
 const r = Router();
 const log = createLogger({ scope: 'route.settings' });
@@ -122,6 +123,8 @@ const ALLOWED_FIELDS = new Set([
   'likesPolicySourcePriority',      // 'yandex' | 'navidrome'
   'cronNavidromePush',
   'enableCronNavidromePush',
+  'cronNavidromeBackfill',
+  'enableCronNavidromeBackfill',
 
   // match force flags
   'yandexMatchForce',
@@ -439,6 +442,15 @@ r.post('/scheduler/:key/run', async (req, res) => {
       await runTorrentsCopyDownloaded();
       lg.info('manual scheduler run completed', 'settings.scheduler.run.torrentsCopy.done');
       return res.json({ ok: true });
+    }
+
+
+    if (key === 'navidromeBackfill') {
+      await ensureNotBusyOrThrow(['navidrome.backfill.', 'nav.backfill.'], ['navidromeBackfill'] as any);
+      lg.info('manual scheduler run requested', 'settings.scheduler.run.navidromeBackfill.start');
+      const result = await runNavidromeBackfill({ dryRun: false });
+      lg.info('manual scheduler run completed', 'settings.scheduler.run.navidromeBackfill.done', result);
+      return res.json(result);
     }
 
     lg.warn('unknown scheduler key for manual run', 'settings.scheduler.run.unknown', { key });
