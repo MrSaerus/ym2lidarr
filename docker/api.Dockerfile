@@ -1,5 +1,5 @@
 # ---------- builder ----------
-FROM node:25-bookworm-slim@sha256:e49fd70491eb042270f974167c874d6245287263ffc16422fcf93b3c150409d8 AS builder
+FROM node:26-bookworm-slim@sha256:26e5b97944df46993723cd5dc48e837b290a0e0137f305405cd342d75c404398 AS builder
 WORKDIR /app
 
 RUN apt-get update \
@@ -21,7 +21,7 @@ RUN npx prisma generate --config prisma.config.ts
 RUN npm --workspace apps/api run build
 
 # ---------- runner ----------
-FROM node:25-bookworm-slim@sha256:e49fd70491eb042270f974167c874d6245287263ffc16422fcf93b3c150409d8 AS api
+FROM node:26-bookworm-slim@sha256:26e5b97944df46993723cd5dc48e837b290a0e0137f305405cd342d75c404398 AS api
 WORKDIR /app
 
 ENV NODE_ENV=production \
