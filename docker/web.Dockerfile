@@ -19,7 +19,7 @@ COPY apps/web ./apps/web
 RUN npm --workspace apps/web run build
 
 # ---------- runner ----------
-FROM --platform=$TARGETPLATFORM nginx:1.29.8-alpine-slim@sha256:c9366b8c560169b101ca0e5422ed063b20779e6454c2326b9c9704225c9b0c08 AS web
+FROM --platform=$TARGETPLATFORM nginx:1.31.1-alpine-slim@sha256:3fe7a344f234ac4b84817896c9294ffae74eae03fc1ad0ff502457fef5cebef8 AS web
 WORKDIR /var/www/html
 ENV NODE_ENV=production
 ENV PORT=3000
