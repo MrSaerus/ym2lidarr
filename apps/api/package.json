@@ -19,12 +19,12 @@
     "cron-parser": "^5.3.0",
     "dotenv": "^17.4.2",
     "express": "^4.22.1",
-    "express-rate-limit": "^8.4.1",
+    "express-rate-limit": "^8.5.2",
     "iconv-lite": "^0.7.2",
     "morgan": "^1.10.1",
     "node-cron": "^3.0.3",
     "streamroller": "^3.1.5",
-    "undici": "^8.2.0",
+    "undici": "^8.3.0",
     "undici-proxy": "^0.3.0",
     "zod": "^4.4.2"
   },
@@ -34,7 +34,7 @@
     "@types/express": "^4.17.21",
     "@types/jest": "^30.0.0",
     "@types/morgan": "^1.9.10",
-    "@types/node": "^25.6.1",
+    "@types/node": "^25.9.1",
     "@types/node-cron": "^3.0.11",
     "@types/supertest": "^7.2.0",
     "fast-check": "^4.2.0",
@@ -45,7 +45,7 @@
     "ts-jest": "^29.4.1",
     "ts-node": "^10.9.2",
     "tslib": "^2.6.2",
-    "tsx": "^4.16.2",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   }
 }
